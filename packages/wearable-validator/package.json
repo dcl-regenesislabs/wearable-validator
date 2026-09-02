@@ -1,0 +1,38 @@
+{
+  "name": "@dcl-regenesislabs/wearable-validator",
+  "version": "0.1.0",
+  "description": "The Decentraland wearable & emote rule book as code — every check runnable separately, in node and the browser.",
+  "type": "module",
+  "engines": { "node": ">=22.19" },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
+  },
+  "bin": { "wearable-validator": "dist/cli.js" },
+  "files": ["dist", "README.md"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@dcl/hashing": "^3.0.4",
+    "@dcl/schemas": "^16.11.1",
+    "@gltf-transform/core": "^4.2.1",
+    "@gltf-transform/extensions": "^4.2.1",
+    "commander": "^12.1.0",
+    "fast-png": "^6.3.0",
+    "image-size": "^2.0.2",
+    "jpeg-js": "^0.4.4",
+    "jsqr": "^1.4.0",
+    "jszip": "^3.10.1",
+    "music-metadata": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  }
+}

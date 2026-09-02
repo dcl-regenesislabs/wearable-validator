@@ -1,0 +1,12 @@
+{
+  "name": "wearable-validator-monorepo",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.19" },
+  "workspaces": ["packages/*", "tools"],
+  "scripts": {
+    "build": "npm run build -w @dcl-regenesislabs/wearable-validator",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present"
+  }
+}
