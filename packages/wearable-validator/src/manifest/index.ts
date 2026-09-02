@@ -12,6 +12,8 @@ export interface Manifest {
     smartWearableVideoBytes: number; audioBytes: number; maxInputBytes: number;
   };
   boundingBox: { width: number; height: number; depth: number };
+  /** ADR-60 auto-hide set — the categories a skin is expected to hide. */
+  skinAutoHideSet: string[];
   text: { nameMax: number; descriptionMax: number; forbiddenChars: string[]; tagsMax: number };
   skeleton: {
     armatureName: string; propArmatureName: string; maxInfluences: number; weightSumEpsilon: number;

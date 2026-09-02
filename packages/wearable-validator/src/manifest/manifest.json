@@ -26,6 +26,7 @@
     "maxInputBytes": 272629760
   },
   "boundingBox": { "width": 2.42, "height": 2.42, "depth": 1.4 },
+  "skinAutoHideSet": ["head", "hair", "facial_hair", "mouth", "eyebrows", "eyes", "upper_body", "lower_body", "feet", "hands_wear"],
   "text": { "nameMax": 32, "descriptionMax": 64, "forbiddenChars": [":"], "tagsMax": 20 },
   "skeleton": {
     "armatureName": "Armature",
