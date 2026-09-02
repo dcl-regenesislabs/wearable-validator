@@ -1,0 +1,11 @@
+{
+  "name": "wearable-validator-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "catalyst": "tsx src/catalyst-run.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}
