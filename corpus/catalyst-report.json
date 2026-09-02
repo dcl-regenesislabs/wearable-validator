@@ -1,0 +1,997 @@
+[
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x5099f977fae88c2100afd3071c065a146ebb495f:0",
+    "name": "MRBP Live From NYC  We So Back",
+    "type": "wearable",
+    "category": "upper_body",
+    "errors": 2,
+    "warnings": 2,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail has no alpha channel — the background should be transparent. Export as RGBA PNG.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/01-NFTNYC-TALLTEE_M.glb\" › combi-2026_c is 2048×2048; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/01-NFTNYC-TALLTEE_M.glb\" › combi-2026_c"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/02-NFTNYC-TALLTEE_F.glb\" › combi-2026_c is 2048×2048; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/02-NFTNYC-TALLTEE_F.glb\" › combi-2026_c"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x479b656ea58fce1eb01196abc909652424af2d28:0",
+    "name": "Born to be Free",
+    "type": "wearable",
+    "category": "upper_body",
+    "errors": 5,
+    "warnings": 2,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail has no alpha channel — the background should be transparent. Export as RGBA PNG.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/usa_male#.glb\" › borntobefree.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/usa_male#.glb\" › borntobefree.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/usa_male#.glb\" › Avatar_MaleSkinBase.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/usa_male#.glb\" › Avatar_MaleSkinBase.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/usa_female#.glb\" › borntobefree.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/usa_female#.glb\" › borntobefree.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/usa_female#.glb\" › Avatar_FemaleSkinBase.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/usa_female#.glb\" › Avatar_FemaleSkinBase.jpg"
+      },
+      {
+        "check": "hides-replaces",
+        "severity": "error",
+        "message": "hides includes the item's own category \"upper_body\" — a wearable can't hide its own slot (it would hide itself). Remove \"upper_body\" from hides."
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x3c17ed856ca12d6ac8d623482f0551b47bb1fa62:0",
+    "name": "Lights of Liberty",
+    "type": "wearable",
+    "category": "hands_wear",
+    "errors": 8,
+    "warnings": 4,
+    "checked": 25,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail has no alpha channel — the background should be transparent. Export as RGBA PNG.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-count",
+        "severity": "error",
+        "message": "\"male/liberty#.glb\" references 3 texture images; the limit is 2. Merge the images into a texture atlas so the model uses at most 2.",
+        "where": "male/liberty#.glb"
+      },
+      {
+        "check": "texture-count",
+        "severity": "error",
+        "message": "\"female/liberty#.glb\" references 3 texture images; the limit is 2. Merge the images into a texture atlas so the model uses at most 2.",
+        "where": "female/liberty#.glb"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/liberty#.glb\" › torch_EMI.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/liberty#.glb\" › torch_EMI.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/liberty#.glb\" › torch.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/liberty#.glb\" › torch.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/liberty#.glb\" › liberty_2D_View.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/liberty#.glb\" › liberty_2D_View.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/liberty#.glb\" › torch_EMI.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/liberty#.glb\" › torch_EMI.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/liberty#.glb\" › torch.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/liberty#.glb\" › torch.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/liberty#.glb\" › liberty_2D_View.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/liberty#.glb\" › liberty_2D_View.jpg"
+      },
+      {
+        "check": "hands-geometry",
+        "severity": "warning",
+        "message": "\"male/liberty#.glb\" looks like a held prop, not a hands wearable — only 15% of its skin weight is on hand bones (minimum 50%). Skin the item to Avatar_LeftHand / Avatar_RightHand and their finger bones.",
+        "where": "male/liberty#.glb"
+      },
+      {
+        "check": "hands-geometry",
+        "severity": "warning",
+        "message": "\"female/liberty#.glb\" looks like a held prop, not a hands wearable — only 15% of its skin weight is on hand bones (minimum 50%). Skin the item to Avatar_LeftHand / Avatar_RightHand and their finger bones.",
+        "where": "female/liberty#.glb"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0xf3db9b37b791890443a15cd16423f4e35c82d513:0",
+    "name": "Pride Bucket Hat",
+    "type": "wearable",
+    "category": "hat",
+    "errors": 2,
+    "warnings": 2,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail has no alpha channel — the background should be transparent. Export as RGBA PNG.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/pride-bucket-hat.glb\" › obj_fishy_hair02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/pride-bucket-hat.glb\" › obj_fishy_hair02"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/pride-bucket-hat.glb\" › obj_fishy_hair02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/pride-bucket-hat.glb\" › obj_fishy_hair02"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x367c97b1ccd4d18e05e58419f21a3599fd5653b3:5",
+    "name": "Fisherman Vest",
+    "type": "wearable",
+    "category": "upper_body",
+    "errors": 6,
+    "warnings": 2,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail has no alpha channel — the background should be transparent. Export as RGBA PNG.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/obj_fishy_ubody_f.glb\" › obj_fishy_ubody02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/obj_fishy_ubody_f.glb\" › obj_fishy_ubody02"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/obj_fishy_ubody_f.glb\" › obj_fishy_ubody01 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/obj_fishy_ubody_f.glb\" › obj_fishy_ubody01"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/obj_fishy_ubody_m.glb\" › obj_fishy_ubody02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/obj_fishy_ubody_m.glb\" › obj_fishy_ubody02"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/obj_fishy_ubody_m.glb\" › obj_fishy_ubody01 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/obj_fishy_ubody_m.glb\" › obj_fishy_ubody01"
+      },
+      {
+        "check": "material-count",
+        "severity": "error",
+        "message": "\"female/obj_fishy_ubody_f.glb\" uses 3 materials; the limit is 2 (AvatarSkin_MAT excluded). Merge meshes so they share at most 2 materials.",
+        "where": "female/obj_fishy_ubody_f.glb"
+      },
+      {
+        "check": "material-count",
+        "severity": "error",
+        "message": "\"male/obj_fishy_ubody_m.glb\" uses 3 materials; the limit is 2 (AvatarSkin_MAT excluded). Merge meshes so they share at most 2 materials.",
+        "where": "male/obj_fishy_ubody_m.glb"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x367c97b1ccd4d18e05e58419f21a3599fd5653b3:4",
+    "name": "Fisherman Bennie",
+    "type": "wearable",
+    "category": "hat",
+    "errors": 4,
+    "warnings": 2,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail has no alpha channel — the background should be transparent. Export as RGBA PNG.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/obj_fishy_hat02_both.glb\" › obj_fishy_hat02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/obj_fishy_hat02_both.glb\" › obj_fishy_hat02"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/obj_fishy_hat02_both.glb\" › obj_fishy_hair02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/obj_fishy_hat02_both.glb\" › obj_fishy_hair02"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/obj_fishy_hat02_both.glb\" › obj_fishy_hat02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/obj_fishy_hat02_both.glb\" › obj_fishy_hat02"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/obj_fishy_hat02_both.glb\" › obj_fishy_hair02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/obj_fishy_hat02_both.glb\" › obj_fishy_hair02"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x367c97b1ccd4d18e05e58419f21a3599fd5653b3:3",
+    "name": "Gone Fishing Bucket Hat",
+    "type": "wearable",
+    "category": "hat",
+    "errors": 4,
+    "warnings": 2,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail has no alpha channel — the background should be transparent. Export as RGBA PNG.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/obj_fishy_hat01_both.glb\" › obj_fishy_hat01 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/obj_fishy_hat01_both.glb\" › obj_fishy_hat01"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/obj_fishy_hat01_both.glb\" › obj_fishy_hair02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/obj_fishy_hat01_both.glb\" › obj_fishy_hair02"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/obj_fishy_hat01_both.glb\" › obj_fishy_hat01 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/obj_fishy_hat01_both.glb\" › obj_fishy_hat01"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/obj_fishy_hat01_both.glb\" › obj_fishy_hair02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/obj_fishy_hat01_both.glb\" › obj_fishy_hair02"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x367c97b1ccd4d18e05e58419f21a3599fd5653b3:2",
+    "name": "Fish Gear Handwear",
+    "type": "wearable",
+    "category": "hands_wear",
+    "errors": 2,
+    "warnings": 2,
+    "checked": 25,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail has no alpha channel — the background should be transparent. Export as RGBA PNG.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/obj_fishy_handwear_both.glb\" › obj_fishy_handwear is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/obj_fishy_handwear_both.glb\" › obj_fishy_handwear"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/obj_fishy_handwear_both.glb\" › obj_fishy_handwear is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/obj_fishy_handwear_both.glb\" › obj_fishy_handwear"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x367c97b1ccd4d18e05e58419f21a3599fd5653b3:1",
+    "name": "Hair Fishnet ",
+    "type": "wearable",
+    "category": "hair",
+    "errors": 2,
+    "warnings": 2,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail has no alpha channel — the background should be transparent. Export as RGBA PNG.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/obj_fishy_hair_both.glb\" › obj_fishy_hair01 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/obj_fishy_hair_both.glb\" › obj_fishy_hair01"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/obj_fishy_hair_both.glb\" › obj_fishy_hair01 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/obj_fishy_hair_both.glb\" › obj_fishy_hair01"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x367c97b1ccd4d18e05e58419f21a3599fd5653b3:0",
+    "name": "Camouflage Sunglasses",
+    "type": "wearable",
+    "category": "eyewear",
+    "errors": 2,
+    "warnings": 2,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail has no alpha channel — the background should be transparent. Export as RGBA PNG.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/obj_fishy_eyewear_both.glb\" › obj_fishy_eyewear is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/obj_fishy_eyewear_both.glb\" › obj_fishy_eyewear"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/obj_fishy_eyewear_both.glb\" › obj_fishy_eyewear is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/obj_fishy_eyewear_both.glb\" › obj_fishy_eyewear"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0xbdf24869d59f36e3c1b312181b08f7f623d79441:0",
+    "name": "DCL Kickoff Jersey",
+    "type": "wearable",
+    "category": "upper_body",
+    "errors": 8,
+    "warnings": 1,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-count",
+        "severity": "error",
+        "message": "\"female/trikot_final_female_fix1#.glb\" references 3 texture images; the limit is 2. Merge the images into a texture atlas so the model uses at most 2.",
+        "where": "female/trikot_final_female_fix1#.glb"
+      },
+      {
+        "check": "texture-count",
+        "severity": "error",
+        "message": "\"male/trikot_final_male#.glb\" references 3 texture images; the limit is 2. Merge the images into a texture atlas so the model uses at most 2.",
+        "where": "male/trikot_final_male#.glb"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/trikot_final_female_fix1#.glb\" › Avatar_FemaleSkinBase.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/trikot_final_female_fix1#.glb\" › Avatar_FemaleSkinBase.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/trikot_final_female_fix1#.glb\" › trikot_emission_1k.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/trikot_final_female_fix1#.glb\" › trikot_emission_1k.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/trikot_final_female_fix1#.glb\" › trikot_diffuse_1k.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/trikot_final_female_fix1#.glb\" › trikot_diffuse_1k.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/trikot_final_male#.glb\" › Avatar_MaleSkinBase.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/trikot_final_male#.glb\" › Avatar_MaleSkinBase.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/trikot_final_male#.glb\" › trikot_emission_1k.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/trikot_final_male#.glb\" › trikot_emission_1k.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/trikot_final_male#.glb\" › trikot_diffuse_1k.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/trikot_final_male#.glb\" › trikot_diffuse_1k.jpg"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x108dc1b00906142647c218dabff4fa6eeaf1a3a5:0",
+    "name": "CBD Year 4 Pants",
+    "type": "wearable",
+    "category": "lower_body",
+    "errors": 0,
+    "warnings": 1,
+    "checked": 24,
+    "passed": true,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0xa337b5aa1dc2ef579046f3bc151cb22f7814143e:0",
+    "name": "METATIGER Fireballs",
+    "type": "wearable",
+    "category": "hands_wear",
+    "errors": 5,
+    "warnings": 1,
+    "checked": 25,
+    "passed": false,
+    "findings": [
+      {
+        "check": "file-size",
+        "severity": "error",
+        "message": "The item totals 3.5 MB; the limit for a wearable is 3 MB — the thumbnail and rarity image count toward it (ADR-246). Reduce textures or geometry."
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/pompom_fire (2).glb\" › pompom_fire3_EMI.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/pompom_fire (2).glb\" › pompom_fire3_EMI.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/pompom_fire (2).glb\" › pompom_fire3a_DIF.png is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/pompom_fire (2).glb\" › pompom_fire3a_DIF.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/pompom_fire (2).glb\" › pompom_fire3_EMI.jpg is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/pompom_fire (2).glb\" › pompom_fire3_EMI.jpg"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/pompom_fire (2).glb\" › pompom_fire3a_DIF.png is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/pompom_fire (2).glb\" › pompom_fire3a_DIF.png"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0xf4de4caf22f23338843b68ac29cc451486f69746:0",
+    "name": "The Celestial Abaddon Crown",
+    "type": "wearable",
+    "category": "tiara",
+    "errors": 4,
+    "warnings": 1,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/HORN 5 (Working) .glb\" › Cube Base Color is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/HORN 5 (Working) .glb\" › Cube Base Color"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/HORN 5 (Working) .glb\" › Cube Base Color is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/HORN 5 (Working) .glb\" › Cube Base Color"
+      },
+      {
+        "check": "triangle-count",
+        "severity": "error",
+        "message": "\"male/HORN 5 (Working) .glb\" has 510 triangles — the limit is 500 for tiara. Remove geometry, or hide more slots to pool their budgets.",
+        "where": "male/HORN 5 (Working) .glb"
+      },
+      {
+        "check": "triangle-count",
+        "severity": "error",
+        "message": "\"female/HORN 5 (Working) .glb\" has 510 triangles — the limit is 500 for tiara. Remove geometry, or hide more slots to pool their budgets.",
+        "where": "female/HORN 5 (Working) .glb"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x4fb4baf05e349a0e095071f945bbf4391f582ab3:0",
+    "name": "Cyber Bomber",
+    "type": "wearable",
+    "category": "upper_body",
+    "errors": 9,
+    "warnings": 1,
+    "checked": 24,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/White_Bomber_Jacket_A09.glb\" › White_Jacket_Small_A05 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/White_Bomber_Jacket_A09.glb\" › White_Jacket_Small_A05"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"female/White_Bomber_Jacket_A09.glb\" › Army_Dark_comp_A02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"female/White_Bomber_Jacket_A09.glb\" › Army_Dark_comp_A02"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/Black_Bomber_Jacket_A02.glb\" › Black_Jacket_Small_A01 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/Black_Bomber_Jacket_A02.glb\" › Black_Jacket_Small_A01"
+      },
+      {
+        "check": "texture-size",
+        "severity": "error",
+        "message": "\"male/Black_Bomber_Jacket_A02.glb\" › Army_Dark_A02 is 1024×1024; the maximum texture size is 512×512. Resize it to 512×512 or smaller.",
+        "where": "\"male/Black_Bomber_Jacket_A02.glb\" › Army_Dark_A02"
+      },
+      {
+        "check": "material-count",
+        "severity": "error",
+        "message": "\"female/White_Bomber_Jacket_A09.glb\" uses 3 materials; the limit is 2 (AvatarSkin_MAT excluded). Merge meshes so they share at most 2 materials.",
+        "where": "female/White_Bomber_Jacket_A09.glb"
+      },
+      {
+        "check": "material-count",
+        "severity": "error",
+        "message": "\"male/Black_Bomber_Jacket_A02.glb\" uses 3 materials; the limit is 2 (AvatarSkin_MAT excluded). Merge meshes so they share at most 2 materials.",
+        "where": "male/Black_Bomber_Jacket_A02.glb"
+      },
+      {
+        "check": "triangle-count",
+        "severity": "error",
+        "message": "\"female/White_Bomber_Jacket_A09.glb\" has 3214 triangles — the limit is 3000 (base budget for upper_body plus the hidden slots: hands, upper_body). Remove geometry, or hide more slots to pool their budgets.",
+        "where": "female/White_Bomber_Jacket_A09.glb"
+      },
+      {
+        "check": "triangle-count",
+        "severity": "error",
+        "message": "\"male/Black_Bomber_Jacket_A02.glb\" has 3218 triangles — the limit is 3000 (base budget for upper_body plus the hidden slots: hands, upper_body). Remove geometry, or hide more slots to pool their budgets.",
+        "where": "male/Black_Bomber_Jacket_A02.glb"
+      },
+      {
+        "check": "hides-replaces",
+        "severity": "error",
+        "message": "hides includes the item's own category \"upper_body\" — a wearable can't hide its own slot (it would hide itself). Remove \"upper_body\" from hides."
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x1625a9508505cb1fd3e1f03bcb9bc5a45b782945:0",
+    "name": "Maybe yes, Maybe No...",
+    "type": "emote",
+    "category": "poses",
+    "errors": 3,
+    "warnings": 1,
+    "checked": 19,
+    "passed": false,
+    "findings": [
+      {
+        "check": "file-size",
+        "severity": "error",
+        "message": "The item totals 4.72 MB; the limit for an emote is 3 MB — the thumbnail and rarity image count toward it (ADR-246). Reduce textures or geometry."
+      },
+      {
+        "check": "file-size",
+        "severity": "error",
+        "message": "The model \"female/LuciasNO.glb\" alone is 2.1 MB; it must stay under 2 MB to leave room for the thumbnail and rarity image.",
+        "where": "female/LuciasNO.glb"
+      },
+      {
+        "check": "file-size",
+        "severity": "error",
+        "message": "The model \"male/LuciasNO.glb\" alone is 2.1 MB; it must stay under 2 MB to leave room for the thumbnail and rarity image.",
+        "where": "male/LuciasNO.glb"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x2474233885cfdc0ae538cf6f25d66e11bbc5981c:0",
+    "name": "Miss Blizzard",
+    "type": "emote",
+    "category": "fun",
+    "errors": 1,
+    "warnings": 1,
+    "checked": 19,
+    "passed": false,
+    "findings": [
+      {
+        "check": "file-size",
+        "severity": "error",
+        "message": "The item totals 4.4 MB; the limit for an emote is 3 MB — the thumbnail and rarity image count toward it (ADR-246). Reduce textures or geometry."
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x10abf8ff402301355ac7ac81296f7788e1dd98b2:0",
+    "name": "Wearable Blaster",
+    "type": "emote",
+    "category": "fun",
+    "errors": 7,
+    "warnings": 3,
+    "checked": 19,
+    "passed": false,
+    "findings": [
+      {
+        "check": "file-size",
+        "severity": "error",
+        "message": "The item totals 5.35 MB; the limit for an emote is 3 MB — the thumbnail and rarity image count toward it (ADR-246). Reduce textures or geometry."
+      },
+      {
+        "check": "file-size",
+        "severity": "error",
+        "message": "The model \"female/emoteFinal#.glb\" alone is 2.24 MB; it must stay under 2 MB to leave room for the thumbnail and rarity image.",
+        "where": "female/emoteFinal#.glb"
+      },
+      {
+        "check": "file-size",
+        "severity": "error",
+        "message": "The model \"male/emoteFinal#.glb\" alone is 2.24 MB; it must stay under 2 MB to leave room for the thumbnail and rarity image.",
+        "where": "male/emoteFinal#.glb"
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "loop-seam",
+        "severity": "warning",
+        "message": "This looping emote ends in a different pose than it starts — the loop will visibly snap on Beam_00, Beam_01, Beam_02, Beam_03, Beam_04 (+55 more). Match the first and last keyframes of those bones.",
+        "where": "male/emoteFinal#.glb"
+      },
+      {
+        "check": "loop-seam",
+        "severity": "warning",
+        "message": "This looping emote ends in a different pose than it starts — the loop will visibly snap on Beam_00, Beam_01, Beam_02, Beam_03, Beam_04 (+55 more). Match the first and last keyframes of those bones.",
+        "where": "female/emoteFinal#.glb"
+      },
+      {
+        "check": "props",
+        "severity": "error",
+        "message": "The prop uses 3 materials — props are limited to 2. Merge the prop's materials.",
+        "where": "male/emoteFinal#.glb › Armature_Prop"
+      },
+      {
+        "check": "props",
+        "severity": "error",
+        "message": "The prop uses 3 textures — props are limited to 2. Combine the prop's textures into an atlas.",
+        "where": "male/emoteFinal#.glb › Armature_Prop"
+      },
+      {
+        "check": "props",
+        "severity": "error",
+        "message": "The prop uses 3 materials — props are limited to 2. Merge the prop's materials.",
+        "where": "female/emoteFinal#.glb › Armature_Prop"
+      },
+      {
+        "check": "props",
+        "severity": "error",
+        "message": "The prop uses 3 textures — props are limited to 2. Combine the prop's textures into an atlas.",
+        "where": "female/emoteFinal#.glb › Armature_Prop"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x83abf049009fdbfd093c17a0f0e8ea48740757a8:2",
+    "name": "Raveballoon Glitter RGB",
+    "type": "emote",
+    "category": "dance",
+    "errors": 0,
+    "warnings": 1,
+    "checked": 19,
+    "passed": true,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x83abf049009fdbfd093c17a0f0e8ea48740757a8:1",
+    "name": "Raveballoon DCL",
+    "type": "emote",
+    "category": "dance",
+    "errors": 0,
+    "warnings": 1,
+    "checked": 19,
+    "passed": true,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0x83abf049009fdbfd093c17a0f0e8ea48740757a8:0",
+    "name": "Raveballoon",
+    "type": "emote",
+    "category": "dance",
+    "errors": 0,
+    "warnings": 1,
+    "checked": 19,
+    "passed": true,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0xb8b3e2e263d75ddeb98ba77244ea1d83b6ec8849:0",
+    "name": "Firehorse",
+    "type": "emote",
+    "category": "poses",
+    "errors": 3,
+    "warnings": 1,
+    "checked": 19,
+    "passed": false,
+    "findings": [
+      {
+        "check": "file-size",
+        "severity": "error",
+        "message": "The item totals 4.26 MB; the limit for an emote is 3 MB — the thumbnail and rarity image count toward it (ADR-246). Reduce textures or geometry."
+      },
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "root-motion",
+        "severity": "error",
+        "message": "The hips travel 1.082 m horizontally — emotes must stay within a 1 m radius of the start position. Reduce the root motion.",
+        "where": "male/Firehorse.glb"
+      },
+      {
+        "check": "root-motion",
+        "severity": "error",
+        "message": "The hips travel 1.082 m horizontally — emotes must stay within a 1 m radius of the start position. Reduce the root motion.",
+        "where": "female/Firehorse.glb"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0xc58006d255e374aab7873766b733f7656e01ddc7:5",
+    "name": "Duck Race",
+    "type": "emote",
+    "category": "fun",
+    "errors": 1,
+    "warnings": 1,
+    "checked": 19,
+    "passed": false,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      },
+      {
+        "check": "name-description",
+        "severity": "error",
+        "message": "The item has 23 tags; the maximum is 20. Remove some tags.",
+        "where": "tags"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0xc58006d255e374aab7873766b733f7656e01ddc7:4",
+    "name": "Der Ententanz (The Duck Dance)",
+    "type": "emote",
+    "category": "dance",
+    "errors": 0,
+    "warnings": 1,
+    "checked": 18,
+    "passed": true,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      }
+    ]
+  },
+  {
+    "urn": "urn:decentraland:matic:collections-v2:0xa2080031ba1201ea05a2a43b66c9ea6d22d7028e:0",
+    "name": "Direct Your Life 💫",
+    "type": "emote",
+    "category": "fun",
+    "errors": 0,
+    "warnings": 1,
+    "checked": 19,
+    "passed": true,
+    "findings": [
+      {
+        "check": "thumbnail",
+        "severity": "warning",
+        "message": "Thumbnail is 1024×1024 — a square 256×256 PNG is recommended.",
+        "where": "thumbnail.png"
+      }
+    ]
+  }
+]

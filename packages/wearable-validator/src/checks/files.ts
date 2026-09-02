@@ -1,7 +1,7 @@
 import { RequiredPermission, WearableCategory } from "@dcl/schemas";
 import dclHashing from "@dcl/hashing";
 import { decode as decodePng } from "fast-png";
-import { isGlb } from "../gltf.js";
+import { isGlb, readGlbJsonChunk } from "../gltf.js";
 import { docsUrl, type CheckContext, type CheckDefinition, type Finding, type Severity } from "../types.js";
 
 const GLB_MAGIC = 0x46546c67; // "glTF"
@@ -626,8 +626,20 @@ const gltfHygiene: CheckDefinition = {
   run: (ctx) => {
     const findings: Finding[] = [];
     const allowlist = new Set(ctx.manifest.gltf.extensionAllowlist);
-    for (const model of ctx.models) {
-      const where = model.mainFile;
+    // Read raw GLB JSON chunks independently of gltf-transform: a GLB with an
+    // unsupported required extension refuses to parse — exactly when this check matters.
+    const inspected: { where: string; json: Record<string, unknown>; rotationSource?: (typeof ctx.models)[number] }[] = [];
+    const parsedByFile = new Map(ctx.models.map((m) => [m.mainFile, m]));
+    for (const [path, bytes] of ctx.files) {
+      if (!path.endsWith(".glb") || !isGlb(bytes)) continue;
+      try {
+        inspected.push({ where: path, json: readGlbJsonChunk(bytes), rotationSource: parsedByFile.get(path) });
+      } catch {
+        // gltf-valid (S-02) reports unreadable containers
+      }
+    }
+    for (const model of inspected) {
+      const where = model.where;
       const json = model.json;
       const cameras = json.cameras;
       if (Array.isArray(cameras) && cameras.length > 0) {
@@ -666,9 +678,12 @@ const gltfHygiene: CheckDefinition = {
         );
       }
 
+      // Off by default: fired on virtually every committee-approved catalyst item (see manifest discrepancies).
+      const zUpEnabled = (ctx.manifest.gltf as { zUpHeuristic?: boolean }).zUpHeuristic === true;
       const tolDeg = ctx.manifest.epsilons.zUpRotationToleranceDegrees;
-      const scene = model.doc.getRoot().getDefaultScene() ?? model.doc.getRoot().listScenes()[0];
-      for (const node of scene ? scene.listChildren() : []) {
+      const parsed = model.rotationSource;
+      const scene = parsed ? parsed.doc.getRoot().getDefaultScene() ?? parsed.doc.getRoot().listScenes()[0] : undefined;
+      for (const node of zUpEnabled && scene ? scene.listChildren() : []) {
         if (isZUpRotation(node.getRotation(), tolDeg)) {
           findings.push(
             finding(
