@@ -4,6 +4,7 @@ import { basename } from "node:path";
 import { Command } from "commander";
 import { validate } from "./validate.js";
 import { registry } from "./registry.js";
+import { explanations } from "./explanations.js";
 import type { Finding, Group, Result } from "./types.js";
 
 const program = new Command();
@@ -45,6 +46,7 @@ program
   .action(() => {
     for (const check of registry) {
       console.log(`${check.name.padEnd(20)} ${check.group.padEnd(9)} ${check.rule.padEnd(6)} ${check.describe}`);
+      console.log(`${" ".repeat(37)}${explanations[check.name] ?? ""}\n`);
     }
   });
 
