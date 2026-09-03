@@ -1,84 +1,84 @@
 /**
- * Plain-language explanations, one per check — written for creators and
- * non-technical users. The docs site, the webview chips and the CLI all
- * read from here; a test asserts every registry check has one.
+ * Plain-language explanations, one per check — written in the creator docs'
+ * register: direct and factual. The docs site, the webview chips and the CLI
+ * all read from here; a test asserts every registry check has one.
  */
 export const explanations: Record<string, string> = {
   // files
   "file-format":
-    "Your item has to arrive in the right kind of files. 3D models must be .glb files (one self-contained 3D file); eyebrows, eyes and mouth items are PNG images with a see-through background.",
+    "Wearables must be exported as a single .glb file. Eyebrows, eyes and mouth items are PNG images with a transparent background instead of a 3D model.",
   "gltf-valid":
-    "Checks the 3D file isn't broken — like checking a zip isn't corrupted. If the file is damaged or half-exported, nothing else can read it.",
+    "The 3D file must be valid and readable. Corrupt or incomplete exports can't be loaded by the engine.",
   "metadata":
-    "Every item comes with a little ID card: its name, category, rarity and so on. This checks the card is filled in correctly.",
+    "The item's information — name, category, rarity — must be complete and valid.",
   "representations":
-    "Avatars come in two body shapes. This checks your item says which shapes it supports, and that the model file for each shape is actually inside the package.",
+    "The item must include a model for the body shapes it supports, and every listed file must be present in the upload.",
   "file-size":
-    "The whole item must stay under a size limit (3 MB, 9 MB for skins) so it downloads fast for everyone. The preview picture counts toward it too.",
+    "The full item — model, thumbnail and rarity image included — must stay under 3 MB (9 MB for skins) so it loads fast in-world.",
   "thumbnail":
-    "The little preview picture shown in the marketplace and the backpack. It must be a square PNG with a see-through background.",
+    "The thumbnail is the preview image shown in the marketplace and backpack: a square PNG with a transparent background.",
   "name-description":
-    "The name and description have length limits and can't contain the ':' character, because it breaks the systems that read them.",
+    "Names are limited to 32 characters and descriptions to 64, and neither may contain the ':' character.",
   "category":
-    "Every wearable needs a valid slot — hat, upper body, shoes… This checks the slot exists and is one you're allowed to publish.",
+    "The item must declare a valid category (hat, upper body, feet…). Base body shapes can't be published as wearables.",
   "content-integrity":
-    "Every file comes with a fingerprint. This re-computes all the fingerprints and checks they match — proof nothing was swapped or corrupted on the way.",
+    "Each uploaded file's hash must match its content, proving nothing was altered or corrupted after export.",
   "gltf-hygiene":
-    "3D files can carry extra baggage: cameras, lights, exotic features other tools added. Avatars don't use any of that, so it has to come out.",
+    "The model must not include cameras, lights or unsupported extensions — the engine ignores them, they only add weight.",
   "smart-wearable":
-    "Smart wearables carry a mini-program. This checks the program's files are all there, that it only asks for allowed permissions, and that its video isn't oversized.",
+    "Smart wearables must include a complete scene bundle, request only allowed permissions, and keep the preview video under 250 MB.",
 
   // model
   "triangle-count":
-    "3D models are built from tiny triangles — more triangles means more work for every player's computer. Each clothing slot has a triangle budget; hiding other slots lets you borrow their budget.",
+    "Each category has a triangle budget (for example 1,500 for upper body, 500 for eyewear). Hiding other categories adds their budget to yours.",
   "texture-count":
-    "Textures are the images painted onto the model. Only 2 are allowed (5 for skins) so items stay light.",
+    "Models may use at most 2 textures (5 for skins).",
   "texture-size":
-    "Each texture image has a maximum resolution and must be square. Bigger images look barely better on an avatar but cost everyone memory.",
+    "Textures must be square and at most 512×512 pixels (256×256 for facial features).",
   "texture-format":
-    "Texture images must be ordinary PNG or JPEG, 8-bit — the formats every device can display.",
+    "Textures must be standard 8-bit PNG or JPEG images.",
   "texture-maps":
-    "Models may only use basic color, glow and transparency images. Fancy material effects (normal or roughness maps) aren't supported by the avatar renderer, so they'd just be dead weight.",
+    "Only base color, emission and alpha textures are supported. Normal and roughness maps are ignored by the avatar renderer.",
   "material-count":
-    "Materials are like different kinds of paint on the model. At most 2 (5 for skins) — every extra one slows rendering down.",
+    "Models may use at most 2 materials (5 for skins), not counting AvatarSkin_MAT.",
   "material-names":
-    "A few names are special: the material for visible skin must be called AvatarSkin_MAT so the game can tint it to each player's skin color.",
+    "The material that shows skin must be named AvatarSkin_MAT so the engine can tint it to the player's skin color.",
   "bounding-box":
-    "The item must fit inside an invisible box around the avatar (about 2.4 m tall and wide). Any bigger and it pokes into the world around you.",
+    "The model must fit within the avatar's bounds: 2.42 m high, 2.42 m wide, 1.4 m deep.",
   "skeleton":
-    "Avatars move using a standard skeleton of 62 named bones. Your model must attach to exactly those bones — renamed or extra bones make the item deform weirdly or break.",
+    "The model must be rigged to the standard avatar skeleton (62 named bones). Renamed, missing or leftover helper bones break the item in-world.",
   "bone-weights":
-    "Every point of the model follows at most 4 bones, and its 'how much do I follow each bone' numbers must add up to 100%. Otherwise the mesh stretches strangely when the avatar moves.",
+    "Each vertex may be influenced by at most 4 bones, and its weights must add up to 1. Anything else deforms badly during animation.",
   "hands-geometry":
-    "Hand accessories are worn ON the hand — gloves, rings — attached to the hand bones. They can't be held objects like swords or shields.",
+    "Hand accessories must be skinned to the hand bones — worn items like gloves, not held items like swords.",
   "hides-replaces":
-    "A wearable can hide other slots (a helmet hides hair). This checks the hide list makes sense — for example, an item can't hide its own slot.",
+    "The hides and replaces lists must be consistent — an item can't hide its own category, and skins hide the standard set of slots.",
   "static-mesh":
-    "Wearables must hold still — movement belongs to emotes. This checks no animations or shape-changing tricks were left inside the file.",
+    "Wearable models must not contain animations or shape keys — animation belongs to emotes.",
   "spring-bones":
-    "Spring bones make parts bounce and sway — tails, earrings, ponytails. At most 12, with movement settings inside allowed ranges so nothing flails wildly.",
+    "Spring bones (bouncing hair, tails, earrings) are limited to 12 per item, with their physics values inside the allowed ranges.",
 
   // emote
   "duration":
-    "Emotes can last at most 10 seconds.",
+    "Emotes are limited to 10 seconds (300 frames at 30 fps).",
   "animation-clips":
-    "An emote is one animation (plus one more for its prop, if it has one), named the standard way so the game knows which is which.",
+    "An emote has one avatar animation — plus one prop animation of the same length if it uses a prop — named with the _Avatar/_Prop convention.",
   "bone-targets":
-    "The animation may only move the avatar's real bones (or its prop). Moving anything else does nothing in-game — or breaks the emote.",
+    "Animation tracks may only target the avatar's bones (or the prop's). Tracks pointing anywhere else won't play in-world.",
   "loop-seam":
-    "Looping emotes should end in the same pose they started in — otherwise the avatar visibly snaps every time the loop restarts.",
+    "Looping emotes must start and end on the same pose, or the loop visibly snaps on every repeat.",
   "root-motion":
-    "The avatar can't wander off: an emote may move it about 1 meter sideways at most, and must keep it near the ground.",
+    "The animation must keep the avatar within 1 m of its starting position and near the ground.",
   "clip-names":
-    "Animation names follow a simple convention (Capital_Letters_With_Underscores) so tools can read them reliably.",
+    "Animation names use Capitalized_Words_With_Underscores — no spaces or special characters.",
   "props":
-    "If the emote uses an object — a guitar, a balloon — the object has its own small budgets: triangles, materials, textures and bones.",
+    "Emote props are limited to 3,000 triangles, 2 materials, 2 textures and 62 bones.",
   "audio":
-    "Emote sound must be an .mp3 or .ogg file, small enough, and roughly as long as the animation itself.",
+    "Emote audio must be .mp3 or .ogg, within the size limit, and roughly the same length as the animation.",
   "social-outcomes":
-    "Some emotes are for two players (a high five!). This checks the possible outcomes are set up right — at most 3, each pointing at a real animation.",
+    "Social emotes may define up to 3 outcomes, each pointing to an animation that exists in the file.",
 
   // content
   "qr-code":
-    "No scannable QR codes hidden in textures or the thumbnail — they can smuggle links to scams past review."
+    "Scannable QR codes are rejected — their target can change after review."
 };
