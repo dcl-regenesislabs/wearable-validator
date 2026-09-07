@@ -1,4 +1,5 @@
 import type { Document } from "@gltf-transform/core";
+import { DOCS_LINKS } from "./docs-links.js";
 import type { Manifest } from "./manifest/index.js";
 
 export type Group = "files" | "model" | "emote" | "rendering" | "content";
@@ -125,4 +126,5 @@ export interface CheckDefinition {
 }
 
 export const DOCS_BASE = "https://dcl-regenesislabs.github.io/wearable-validator/checks";
-export const docsUrl = (check: string): string => `${DOCS_BASE}/${check}`;
+/** Live creator-docs page per check until the generated per-check site deploys. */
+export const docsUrl = (check: string): string => DOCS_LINKS[check] ?? `${DOCS_BASE}/${check}`;

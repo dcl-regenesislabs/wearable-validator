@@ -33,16 +33,20 @@ export function App() {
   const [result, setResult] = useState<Result | null>(null);
   const [running, setRunning] = useState(false);
   const [category, setCategory] = useState<string>("");
+  const [typeOverride, setTypeOverride] = useState<"" | "wearable" | "emote">("");
   const [crash, setCrash] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const runSeq = useRef(0);
 
-  const run = useCallback(async (file: Loaded, cat: string) => {
+  const run = useCallback(async (file: Loaded, cat: string, type: "" | "wearable" | "emote") => {
     const id = ++runSeq.current;
     setRunning(true);
     setCrash(null);
     try {
-      const res = await validate(file.bytes, cat ? { category: cat } : {});
+      const res = await validate(file.bytes, {
+        ...(cat ? { category: cat } : {}),
+        ...(type ? { itemType: type } : {})
+      });
       if (id !== runSeq.current) return; // a newer drop superseded this run
       setResult(res);
     } catch (err) {
@@ -62,7 +66,8 @@ export function App() {
       setLoaded(next);
       setResult(null);
       setCategory("");
-      await run(next, "");
+      setTypeOverride("");
+      await run(next, "", "");
     },
     [run]
   );
@@ -149,10 +154,26 @@ export function App() {
                 {loaded.isBareGlb && (
                   <select
                     className="category"
+                    value={typeOverride}
+                    onChange={(e) => {
+                      const t = e.target.value as "" | "wearable" | "emote";
+                      setTypeOverride(t);
+                      void run(loaded, category, t);
+                    }}
+                    aria-label="item type"
+                  >
+                    <option value="">type: auto ({kind} — inferred from animation clips)</option>
+                    <option value="wearable">type: wearable</option>
+                    <option value="emote">type: emote</option>
+                  </select>
+                )}
+                {loaded.isBareGlb && (
+                  <select
+                    className="category"
                     value={category}
                     onChange={(e) => {
                       setCategory(e.target.value);
-                      void run(loaded, e.target.value);
+                      void run(loaded, e.target.value, typeOverride);
                     }}
                     aria-label="category hint"
                   >
@@ -178,12 +199,13 @@ export function App() {
               const rows = result.checks.filter((c) => c.group === group);
               if (rows.length === 0) return null;
               const passed = rows.filter((r) => r.status === "passed").length;
+              const notApplicable = registry.filter((c) => c.group === group).length - rows.length;
               return (
                 <section className="group" key={group} style={{ animationDelay: `${gi * 0.05}s` }}>
                   <div className="group-head">
                     <h2>{GROUP_LABELS[group]}</h2>
                     <span className="tally">
-                      {passed}/{rows.length} clean
+                      {passed}/{rows.length} clean{notApplicable > 0 && <> · {notApplicable} n/a</>}
                     </span>
                   </div>
                   <div className="group-list">
@@ -244,8 +266,9 @@ export function App() {
               );
             })}
             <footer className="foot">
-              Deterministic checks only — rendering &amp; AI checks arrive with the renderer. Nothing leaves this page: files are
-              read and validated locally.
+              Checks that don't apply to this item (wrong item type, or metadata a bare .glb can't carry) aren't shown — that's
+              why fewer than {registry.length} appear. Rendering &amp; AI checks arrive with the renderer. Nothing leaves this
+              page: files are read and validated locally.
             </footer>
           </main>
         </div>
@@ -293,7 +316,7 @@ function Verdict({ result, bare }: { result: Result; bare: boolean }) {
           <span className={`n${warnings ? " wrn" : ""}`}>{warnings}</span> warnings
         </div>
         <div>
-          <span className="n">{checked}</span> checks ran
+          <span className="n">{checked}</span> of {registry.length} checks apply
           {result.summary.skipped > 0 && <> · {result.summary.skipped} skipped</>}
         </div>
       </div>
