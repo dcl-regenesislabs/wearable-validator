@@ -3,6 +3,7 @@ import {
   validate,
   checks as checkRegistry,
   explanations,
+  fixes,
   manifest,
   registry,
   type Finding,
@@ -267,6 +268,12 @@ export function App() {
                             <p className="explain">{explanations[row.check]}</p>
                             {row.status === "skipped" && <p className="skip-note">skipped — {row.skipReason}</p>}
                             {row.status === "errored" && <p className="skip-note">check crashed — {row.skipReason}</p>}
+                            {(row.status === "failed" || row.status === "warning") && fixes[row.check] && (
+                              <p className="fix-hint">
+                                <span className="fix-label">How to fix</span>
+                                {fixes[row.check]}
+                              </p>
+                            )}
                             {findings.map((f, fi) => (
                               <div className={`finding ${f.severity}`} key={fi}>
                                 <p className="msg">{f.message}</p>
@@ -283,7 +290,7 @@ export function App() {
                                     </span>
                                   )}
                                   <a href={f.docs} target="_blank" rel="noreferrer">
-                                    how to fix ↗
+                                    docs ↗
                                   </a>
                                 </div>
                               </div>
