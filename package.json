@@ -7,8 +7,7 @@
   },
   "workspaces": [
     "packages/*",
-    "tools",
-    "apps/*"
+    "tools"
   ],
   "scripts": {
     "build": "npm run build -w @dcl-regenesislabs/wearable-validator",

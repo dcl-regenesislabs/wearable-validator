@@ -14,7 +14,7 @@ import type { Finding, Result } from "../../packages/wearable-validator/src/inde
 
 const SUBGRAPH = "https://subgraph.decentraland.org/collections-matic-mainnet";
 const PEER = "https://peer.decentraland.org";
-const CACHE = join(import.meta.dirname, "..", "..", "corpus", "blobs");
+const CACHE = join(import.meta.dirname, "..", "corpus", "blobs");
 const CONCURRENCY = 6;
 
 interface SubgraphItem { urn: string; itemType: string; searchWearableCategory?: string; searchEmoteCategory?: string }
