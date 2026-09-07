@@ -28,6 +28,14 @@ interface Loaded {
   isBareGlb: boolean;
 }
 
+interface Sample {
+  key: string;
+  label: string;
+  name: string;
+  file: string;
+  kind: "wearable" | "emote";
+}
+
 export function App() {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [result, setResult] = useState<Result | null>(null);
@@ -37,6 +45,14 @@ export function App() {
   const [crash, setCrash] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const runSeq = useRef(0);
+  const [samples, setSamples] = useState<Sample[]>([]);
+
+  useEffect(() => {
+    fetch("samples/index.json")
+      .then((r) => (r.ok ? (r.json() as Promise<Sample[]>) : []))
+      .then(setSamples)
+      .catch(() => setSamples([]));
+  }, []);
 
   const run = useCallback(async (file: Loaded, cat: string, type: "" | "wearable" | "emote") => {
     const id = ++runSeq.current;
@@ -57,6 +73,21 @@ export function App() {
       if (id === runSeq.current) setRunning(false);
     }
   }, []);
+
+  const onSample = useCallback(
+    async (sample: Sample) => {
+      const res = await fetch(`samples/${sample.file}`);
+      if (!res.ok) return;
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      const next: Loaded = { name: `${sample.name} (${sample.label} sample)`, bytes, isBareGlb: false };
+      setLoaded(next);
+      setResult(null);
+      setCategory("");
+      setTypeOverride("");
+      await run(next, "", "");
+    },
+    [run]
+  );
 
   const onFile = useCallback(
     async (file: File) => {
@@ -122,7 +153,7 @@ export function App() {
         </div>
       </header>
 
-      {!loaded && <Dropzone dragging={dragging} onFile={onFile} />}
+      {!loaded && <Dropzone dragging={dragging} onFile={onFile} samples={samples} onSample={onSample} />}
       {loaded && running && !result && <div className="spin" role="status" aria-label="validating" />}
       {crash && (
         <div className="card crash" role="alert">
@@ -277,8 +308,19 @@ export function App() {
   );
 }
 
-function Dropzone({ dragging, onFile }: { dragging: boolean; onFile: (f: File) => void }) {
+function Dropzone({
+  dragging,
+  onFile,
+  samples,
+  onSample
+}: {
+  dragging: boolean;
+  onFile: (f: File) => void;
+  samples: Sample[];
+  onSample: (s: Sample) => void;
+}) {
   return (
+    <>
     <label className={`dropzone${dragging ? " drag" : ""}`}>
       <input
         type="file"
@@ -297,6 +339,19 @@ function Dropzone({ dragging, onFile }: { dragging: boolean; onFile: (f: File) =
       </div>
       <p className="privacy">runs 100% in your browser — nothing is uploaded</p>
     </label>
+    {samples.length > 0 && (
+      <div className="samples">
+        <span className="samples-label">or try a published item</span>
+        <div className="samples-row">
+          {samples.map((s) => (
+            <button key={s.key} className="sample-chip" title={s.name} onClick={() => onSample(s)}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

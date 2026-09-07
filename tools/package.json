@@ -3,9 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "catalyst": "tsx src/catalyst-run.ts"
+    "catalyst": "tsx src/catalyst-run.ts",
+    "samples": "tsx src/make-samples.ts"
   },
   "devDependencies": {
     "tsx": "^4.20.0"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
   }
 }
