@@ -25,6 +25,7 @@ type State = "loading" | "ready" | "failed";
 
 export function Preview({ file, kind, category }: PreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const itemRef = useRef<Record<string, unknown> | null>(null);
   const requestId = useRef(0);
   const [state, setState] = useState<State>("loading");
@@ -99,10 +100,21 @@ export function Preview({ file, kind, category }: PreviewProps) {
   }, [file, kind, category]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="card">
+    <div className="card preview-card" ref={cardRef}>
       <div className="card-head">
         <span className="eui-overline">preview</span>
         <span className="head-spacer" />
+        <button
+          className="shape-btn"
+          aria-label="toggle fullscreen"
+          title="fullscreen"
+          onClick={() => {
+            if (document.fullscreenElement) void document.exitFullscreen();
+            else void cardRef.current?.requestFullscreen();
+          }}
+        >
+          ⛶
+        </button>
         <div className="preview-shapes" role="group" aria-label="body shape">
           {(["male", "female"] as const).map((shape) => (
             <button
