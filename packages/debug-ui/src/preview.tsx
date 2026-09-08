@@ -36,7 +36,7 @@ export function Preview({ file, kind, category }: PreviewProps) {
       const item = itemRef.current;
       const iframe = iframeRef.current;
       if (!item || !iframe?.contentWindow) return;
-      const options: Record<string, unknown> = { blob: item, bodyShape: shape === "male" ? MALE : FEMALE };
+      const options: Record<string, unknown> = { blob: item, profile: "default", bodyShape: shape === "male" ? MALE : FEMALE };
       if (kind === "wearable") options.emote = emote;
       iframe.contentWindow.postMessage({ type: "update", payload: { options } }, "*");
     },
