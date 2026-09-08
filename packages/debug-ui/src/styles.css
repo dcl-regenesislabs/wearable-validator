@@ -293,6 +293,18 @@ select.category:focus { border-color: var(--primary-border); box-shadow: inset 0
 .skip-note { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); }
 
 /* ── preview panel ──────────────────────────────────── */
+.head-spacer { flex: 1; }
+.preview-shapes, .emote-buttons { display: flex; gap: var(--space-1); }
+.shape-btn {
+  height: 22px; padding: 0 10px; border-radius: var(--r-xs);
+  background: transparent; border: 1px solid var(--divider-soft); color: var(--text-3);
+  font-family: var(--font-mono); font-size: var(--fs-2xs); cursor: pointer;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.shape-btn:hover { color: var(--text); background: var(--hover); }
+.shape-btn.active { color: var(--primary); background: var(--primary-selected); border-color: var(--primary-border); }
+.preview-controls { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--divider); }
+.preview-emote { margin-top: 0; }
 .preview-frame { display: block; width: 100%; aspect-ratio: 1 / 1.05; border: 0; background: var(--input); }
 .preview-note { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); margin: 0; padding: var(--space-2) var(--space-4) var(--space-3); }
 

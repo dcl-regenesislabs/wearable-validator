@@ -1,14 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 
 /**
  * Official wearable-preview iframe, fed the local file via postMessage blobs —
- * the exact pixels the checks judged, never an upload. Best-effort: if the
- * hosted previewer can't load the item, the panel says so and the checks
- * remain the source of truth.
+ * the exact pixels the checks judged, never an upload. Marketplace-style
+ * controls: pick an avatar animation for wearables, play/pause for emote
+ * items, switch body shape. Best-effort: if the hosted previewer can't load
+ * the item, the panel says so and the checks remain the source of truth.
  */
 const PREVIEW_URL = "https://wearable-preview.decentraland.org/?disableBackground=1";
-const BODY_SHAPES = ["urn:decentraland:off-chain:base-avatars:BaseMale", "urn:decentraland:off-chain:base-avatars:BaseFemale"];
+const MALE = "urn:decentraland:off-chain:base-avatars:BaseMale";
+const FEMALE = "urn:decentraland:off-chain:base-avatars:BaseFemale";
+/** Built-in avatar animations the previewer ships (PreviewEmote in @dcl/schemas). */
+const AVATAR_EMOTES = ["idle", "walk", "run", "jump", "clap", "dance", "dab", "fashion", "fist-pump", "head-explode", "kiss", "money", "disco"];
 
 interface PreviewProps {
   file: { name: string; bytes?: Uint8Array; isBareGlb: boolean; files?: Map<string, Uint8Array>; metadata?: unknown };
@@ -20,14 +24,38 @@ type State = "loading" | "ready" | "failed";
 
 export function Preview({ file, kind, category }: PreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const itemRef = useRef<Record<string, unknown> | null>(null);
+  const requestId = useRef(0);
   const [state, setState] = useState<State>("loading");
+  const [bodyShape, setBodyShape] = useState<"male" | "female">("male");
+  const [avatarEmote, setAvatarEmote] = useState("idle");
+  const [playing, setPlaying] = useState(true);
+
+  const sendUpdate = useCallback(
+    (shape: "male" | "female", emote: string) => {
+      const item = itemRef.current;
+      const iframe = iframeRef.current;
+      if (!item || !iframe?.contentWindow) return;
+      const options: Record<string, unknown> = { blob: item, bodyShape: shape === "male" ? MALE : FEMALE };
+      if (kind === "wearable") options.emote = emote;
+      iframe.contentWindow.postMessage({ type: "update", payload: { options } }, "*");
+    },
+    [kind]
+  );
+
+  const sendEmoteCommand = useCallback((method: "play" | "pause" | "goTo", params: unknown[] = []) => {
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: "controller_request", payload: { id: ++requestId.current, namespace: "emote", method, params } },
+      "*"
+    );
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     const iframe = iframeRef.current;
     if (!iframe) return;
 
-    const timeout = setTimeout(() => setState((s) => (s === "loading" ? "failed" : s)), 12000);
+    const timeout = setTimeout(() => setState((s) => (s === "loading" ? "failed" : s)), 15000);
 
     async function send() {
       let item: Record<string, unknown>;
@@ -38,21 +66,25 @@ export function Preview({ file, kind, category }: PreviewProps) {
         return undefined;
       }
       if (cancelled) return undefined;
+      itemRef.current = item;
       const onMessage = (event: MessageEvent) => {
         if (cancelled) return;
         if (event.source !== iframe!.contentWindow) return;
-        const type = (event.data as { type?: string })?.type;
-        if (type === "ready") {
-          iframe!.contentWindow?.postMessage({ type: "update", payload: { options: { blob: item } } }, "*");
-        } else if (type === "load") {
-          if (!cancelled) setState("ready");
-        } else if (type === "error") {
-          if (!cancelled) setState("failed");
+        const data = event.data as { type?: string; payload?: { type?: string } };
+        if (data?.type === "ready") {
+          sendUpdate(bodyShape, avatarEmote);
+        } else if (data?.type === "load") {
+          setState("ready");
+        } else if (data?.type === "error") {
+          setState("failed");
+        } else if (data?.type === "emote_event") {
+          if (data.payload?.type === "animationPlay") setPlaying(true);
+          if (data.payload?.type === "animationPause" || data.payload?.type === "animationEnd") setPlaying(false);
         }
       };
       window.addEventListener("message", onMessage);
       // The iframe may have signalled ready before our listener attached — nudge it.
-      iframe!.contentWindow?.postMessage({ type: "update", payload: { options: { blob: item } } }, "*");
+      sendUpdate(bodyShape, avatarEmote);
       return () => window.removeEventListener("message", onMessage);
     }
 
@@ -62,12 +94,64 @@ export function Preview({ file, kind, category }: PreviewProps) {
       clearTimeout(timeout);
       void cleanup.then((fn) => fn?.(), () => {});
     };
-  }, [file, kind, category]);
+    // shape/animation changes re-send via sendUpdate directly, not a full rebuild
+  }, [file, kind, category]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="card">
-      <div className="card-head"><span className="eui-overline">preview</span></div>
+      <div className="card-head">
+        <span className="eui-overline">preview</span>
+        <span className="head-spacer" />
+        <div className="preview-shapes" role="group" aria-label="body shape">
+          {(["male", "female"] as const).map((shape) => (
+            <button
+              key={shape}
+              className={`shape-btn${bodyShape === shape ? " active" : ""}`}
+              onClick={() => {
+                setBodyShape(shape);
+                sendUpdate(shape, avatarEmote);
+              }}
+            >
+              {shape === "male" ? "M" : "F"}
+            </button>
+          ))}
+        </div>
+      </div>
       <iframe ref={iframeRef} className="preview-frame" src={PREVIEW_URL} title="wearable preview" allow="autoplay" />
+      <div className="preview-controls">
+        {kind === "wearable" ? (
+          <select
+            className="category preview-emote"
+            value={avatarEmote}
+            onChange={(e) => {
+              setAvatarEmote(e.target.value);
+              sendUpdate(bodyShape, e.target.value);
+            }}
+            aria-label="avatar animation"
+          >
+            {AVATAR_EMOTES.map((e) => (
+              <option key={e} value={e}>
+                animation: {e}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div className="emote-buttons" role="group" aria-label="emote playback">
+            <button className="shape-btn" onClick={() => sendEmoteCommand(playing ? "pause" : "play")}>
+              {playing ? "⏸ pause" : "▶ play"}
+            </button>
+            <button
+              className="shape-btn"
+              onClick={() => {
+                sendEmoteCommand("goTo", [0]);
+                sendEmoteCommand("play");
+              }}
+            >
+              ↺ restart
+            </button>
+          </div>
+        )}
+      </div>
       {state === "loading" && <p className="preview-note">loading previewer…</p>}
       {state === "failed" && <p className="preview-note">previewer couldn't load this item — the checks are unaffected</p>}
     </div>
@@ -132,7 +216,7 @@ async function buildItemWithBlobs(
     blob: new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer])
   }));
   const representation = {
-    bodyShapes: BODY_SHAPES,
+    bodyShapes: [MALE, FEMALE],
     mainFile,
     contents,
     overrideHides: [],
