@@ -5,6 +5,7 @@ import {
   details,
   explanations,
   fixes,
+  sourceLinks,
   manifest,
   registry,
   type Finding,
@@ -327,7 +328,10 @@ export function App() {
                             {details[row.check] && (
                               <p className="how">
                                 <span className="fix-label">How it's checked</span>
-                                {details[row.check]}
+                                {details[row.check]}{" "}
+                                <a className="src-link" href={sourceLinks[row.check]} target="_blank" rel="noreferrer">
+                                  source ↗
+                                </a>
                               </p>
                             )}
                             {row.status === "skipped" && <p className="skip-note">skipped — {row.skipReason}</p>}

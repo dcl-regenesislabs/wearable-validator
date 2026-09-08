@@ -1,0 +1,142 @@
+{
+  "duration": {
+    "file": "src/checks/emote.ts",
+    "line": 102
+  },
+  "animation-clips": {
+    "file": "src/checks/emote.ts",
+    "line": 159
+  },
+  "bone-targets": {
+    "file": "src/checks/emote.ts",
+    "line": 226
+  },
+  "loop-seam": {
+    "file": "src/checks/emote.ts",
+    "line": 283
+  },
+  "root-motion": {
+    "file": "src/checks/emote.ts",
+    "line": 335
+  },
+  "clip-names": {
+    "file": "src/checks/emote.ts",
+    "line": 410
+  },
+  "props": {
+    "file": "src/checks/emote.ts",
+    "line": 453
+  },
+  "audio": {
+    "file": "src/checks/emote.ts",
+    "line": 569
+  },
+  "social-outcomes": {
+    "file": "src/checks/emote.ts",
+    "line": 660
+  },
+  "file-format": {
+    "file": "src/checks/files.ts",
+    "line": 100
+  },
+  "gltf-valid": {
+    "file": "src/checks/files.ts",
+    "line": 203
+  },
+  "metadata": {
+    "file": "src/checks/files.ts",
+    "line": 248
+  },
+  "representations": {
+    "file": "src/checks/files.ts",
+    "line": 309
+  },
+  "file-size": {
+    "file": "src/checks/files.ts",
+    "line": 358
+  },
+  "thumbnail": {
+    "file": "src/checks/files.ts",
+    "line": 407
+  },
+  "name-description": {
+    "file": "src/checks/files.ts",
+    "line": 477
+  },
+  "category": {
+    "file": "src/checks/files.ts",
+    "line": 528
+  },
+  "content-integrity": {
+    "file": "src/checks/files.ts",
+    "line": 565
+  },
+  "gltf-hygiene": {
+    "file": "src/checks/files.ts",
+    "line": 620
+  },
+  "smart-wearable": {
+    "file": "src/checks/files.ts",
+    "line": 717
+  },
+  "triangle-count": {
+    "file": "src/checks/model-geometry.ts",
+    "line": 56
+  },
+  "bounding-box": {
+    "file": "src/checks/model-geometry.ts",
+    "line": 93
+  },
+  "skeleton": {
+    "file": "src/checks/model-geometry.ts",
+    "line": 125
+  },
+  "bone-weights": {
+    "file": "src/checks/model-geometry.ts",
+    "line": 222
+  },
+  "hands-geometry": {
+    "file": "src/checks/model-geometry.ts",
+    "line": 299
+  },
+  "hides-replaces": {
+    "file": "src/checks/model-geometry.ts",
+    "line": 332
+  },
+  "static-mesh": {
+    "file": "src/checks/model-geometry.ts",
+    "line": 380
+  },
+  "spring-bones": {
+    "file": "src/checks/model-geometry.ts",
+    "line": 438
+  },
+  "texture-count": {
+    "file": "src/checks/model-materials.ts",
+    "line": 125
+  },
+  "texture-size": {
+    "file": "src/checks/model-materials.ts",
+    "line": 161
+  },
+  "texture-format": {
+    "file": "src/checks/model-materials.ts",
+    "line": 205
+  },
+  "texture-maps": {
+    "file": "src/checks/model-materials.ts",
+    "line": 257
+  },
+  "material-count": {
+    "file": "src/checks/model-materials.ts",
+    "line": 282
+  },
+  "material-names": {
+    "file": "src/checks/model-materials.ts",
+    "line": 307
+  },
+  "qr-code": {
+    "file": "src/checks/qr-code.ts",
+    "line": 66
+  }
+}

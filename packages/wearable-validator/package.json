@@ -1,21 +1,34 @@
 {
   "name": "@dcl-regenesislabs/wearable-validator",
   "version": "0.1.0",
-  "description": "The Decentraland wearable & emote rule book as code — every check runnable separately, in node and the browser.",
+  "description": "The Decentraland wearable & emote rule book as code \u2014 every check runnable separately, in node and the browser.",
   "type": "module",
-  "engines": { "node": ">=22.19" },
+  "engines": {
+    "node": ">=22.19"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
-  "bin": { "wearable-validator": "dist/cli.js" },
-  "files": ["dist", "README.md"],
-  "publishConfig": { "access": "public" },
+  "bin": {
+    "wearable-validator": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "gen:sources": "tsx generate-source-links.ts"
   },
   "dependencies": {
     "@dcl/hashing": "^3.0.4",
