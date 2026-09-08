@@ -12,7 +12,8 @@ const PREVIEW_URL = "https://wearable-preview.decentraland.org/?disableBackgroun
 const MALE = "urn:decentraland:off-chain:base-avatars:BaseMale";
 const FEMALE = "urn:decentraland:off-chain:base-avatars:BaseFemale";
 /** Built-in avatar animations the previewer ships (PreviewEmote in @dcl/schemas). */
-const AVATAR_EMOTES = ["idle", "walk", "run", "jump", "clap", "dance", "dab", "fashion", "fist-pump", "head-explode", "kiss", "money", "disco"];
+// Verified against the previewer CDN (…/wearable-preview/2.19.0/emotes/<name>.glb) — do not add unprobed names.
+const AVATAR_EMOTES = ["idle", "walk", "run", "jump", "clap", "dance", "dab", "fashion", "fashion-2", "fashion-3", "fashion-4", "fist-pump", "head-explode", "money", "love"];
 
 interface PreviewProps {
   file: { name: string; bytes?: Uint8Array; isBareGlb: boolean; files?: Map<string, Uint8Array>; metadata?: unknown };
