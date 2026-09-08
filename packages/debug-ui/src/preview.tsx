@@ -11,7 +11,7 @@ const PREVIEW_URL = "https://wearable-preview.decentraland.org/?disableBackgroun
 const BODY_SHAPES = ["urn:decentraland:off-chain:base-avatars:BaseMale", "urn:decentraland:off-chain:base-avatars:BaseFemale"];
 
 interface PreviewProps {
-  file: { name: string; bytes: Uint8Array; isBareGlb: boolean };
+  file: { name: string; bytes?: Uint8Array; isBareGlb: boolean; files?: Map<string, Uint8Array>; metadata?: unknown };
   kind: "wearable" | "emote";
   category?: string;
 }
@@ -75,7 +75,7 @@ export function Preview({ file, kind, category }: PreviewProps) {
 }
 
 async function buildItemWithBlobs(
-  file: { name: string; bytes: Uint8Array; isBareGlb: boolean },
+  file: { name: string; bytes?: Uint8Array; isBareGlb: boolean; files?: Map<string, Uint8Array>; metadata?: unknown },
   kind: "wearable" | "emote",
   category?: string
 ): Promise<Record<string, unknown>> {
@@ -84,10 +84,24 @@ async function buildItemWithBlobs(
   let itemCategory = category ?? "hat";
   let loop = false;
 
-  if (file.isBareGlb) {
-    files.set("model.glb", file.bytes);
+  if (file.files) {
+    files = file.files;
+    const meta = file.metadata as {
+      data?: { category?: string; representations?: { mainFile?: string }[] };
+      emoteDataADR74?: { loop?: boolean; representations?: { mainFile?: string }[] };
+    };
+    itemCategory = meta?.data?.category ?? itemCategory;
+    loop = meta?.emoteDataADR74?.loop ?? false;
+    const declaredMain = (meta?.data?.representations ?? meta?.emoteDataADR74?.representations)?.[0]?.mainFile;
+    if (declaredMain && files.has(declaredMain)) mainFile = declaredMain;
+    else {
+      const firstGlb = [...files.keys()].find((p) => p.endsWith(".glb"));
+      if (firstGlb) mainFile = firstGlb;
+    }
+  } else if (file.isBareGlb) {
+    files.set("model.glb", file.bytes!);
   } else {
-    const zip = await JSZip.loadAsync(file.bytes);
+    const zip = await JSZip.loadAsync(file.bytes!);
     for (const [path, entry] of Object.entries(zip.files)) {
       if (!entry.dir) files.set(path, await entry.async("uint8array"));
     }

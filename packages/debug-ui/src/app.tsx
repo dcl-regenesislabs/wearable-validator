@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   validate,
   checks as checkRegistry,
+  details,
   explanations,
   fixes,
   manifest,
@@ -11,6 +12,7 @@ import {
   type Result
 } from "@dcl-regenesislabs/wearable-validator";
 import { Preview } from "./preview.js";
+import { fetchItem, parseItemReference } from "./catalyst.js";
 
 const GROUP_LABELS: Record<Group, string> = {
   files: "Files & metadata",
@@ -20,13 +22,24 @@ const GROUP_LABELS: Record<Group, string> = {
   content: "Content"
 };
 const GROUP_ORDER: Group[] = ["files", "model", "emote", "content"];
+const GROUP_INTROS: Record<Group, string> = {
+  files: "The cheapest checks run first: the package's files, sizes, metadata and integrity — everything knowable without opening the 3D model.",
+  model: "The 3D model itself: geometry budgets, textures, materials, skeleton and skinning — parsed from the GLB and measured exactly.",
+  emote: "The animation data: length, clips, bone targets, root motion and sound — measured from the keyframes.",
+  rendering: "Real renders inspected by pixel tests — arrives with the headless renderer.",
+  content: "Deterministic content screening. The AI-based IP and policy checks arrive with the renderer."
+};
 const CATEGORIES = Object.keys(manifest.triangles.perCategory).concat(manifest.facialCategories);
 const GLYPHS: Record<string, string> = { passed: "✓", failed: "✕", warning: "!", skipped: "○", errored: "‼" };
 
 interface Loaded {
   name: string;
-  bytes: Uint8Array;
+  bytes?: Uint8Array;
   isBareGlb: boolean;
+  /** Published-item analysis: entity files + metadata fetched from catalyst. */
+  files?: Map<string, Uint8Array>;
+  metadata?: unknown;
+  content?: { file: string; hash: string }[];
 }
 
 interface Sample {
@@ -47,6 +60,7 @@ export function App() {
   const [dragging, setDragging] = useState(false);
   const runSeq = useRef(0);
   const [samples, setSamples] = useState<Sample[]>([]);
+  const [fetching, setFetching] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("samples/index.json")
@@ -60,10 +74,10 @@ export function App() {
     setRunning(true);
     setCrash(null);
     try {
-      const res = await validate(file.bytes, {
-        ...(cat ? { category: cat } : {}),
-        ...(type ? { itemType: type } : {})
-      });
+      const options = { ...(cat ? { category: cat } : {}), ...(type ? { itemType: type } : {}) };
+      const res = file.files
+        ? await validate({ files: file.files, metadata: file.metadata, content: file.content }, options)
+        : await validate(file.bytes!, options);
       if (id !== runSeq.current) return; // a newer drop superseded this run
       setResult(res);
     } catch (err) {
@@ -74,6 +88,38 @@ export function App() {
       if (id === runSeq.current) setRunning(false);
     }
   }, []);
+
+  const onReference = useCallback(
+    async (raw: string) => {
+      let candidates: string[] | null;
+      try {
+        candidates = parseItemReference(raw);
+      } catch (err) {
+        setCrash(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      if (!candidates) {
+        setCrash("That doesn't look like a wearable URN or a marketplace item URL (expected …marketplace/contracts/0x…/items/N or urn:decentraland:…).");
+        return;
+      }
+      setCrash(null);
+      setFetching("looking up the item…");
+      try {
+        const item = await fetchItem(candidates, setFetching);
+        const next: Loaded = { name: item.name, isBareGlb: false, files: item.files, metadata: item.metadata, content: item.content };
+        setLoaded(next);
+        setResult(null);
+        setCategory("");
+        setTypeOverride("");
+        await run(next, "", "");
+      } catch (err) {
+        setCrash(err instanceof Error ? err.message : String(err));
+      } finally {
+        setFetching(null);
+      }
+    },
+    [run]
+  );
 
   const onSample = useCallback(
     async (sample: Sample) => {
@@ -154,7 +200,13 @@ export function App() {
         </div>
       </header>
 
-      {!loaded && <Dropzone dragging={dragging} onFile={onFile} samples={samples} onSample={onSample} />}
+      {!loaded && !fetching && <Dropzone dragging={dragging} onFile={onFile} samples={samples} onSample={onSample} onReference={onReference} />}
+      {fetching && (
+        <div style={{ textAlign: "center" }}>
+          <div className="spin" role="status" aria-label="fetching" />
+          <p className="preview-note" style={{ padding: 0 }}>{fetching}</p>
+        </div>
+      )}
       {loaded && running && !result && <div className="spin" role="status" aria-label="validating" />}
       {crash && (
         <div className="card crash" role="alert">
@@ -177,9 +229,14 @@ export function App() {
                 <p className="item-name">{loaded.name}</p>
                 <dl className="item-facts">
                   <dt>size</dt>
-                  <dd>{(loaded.bytes.length / 1048576).toFixed(2)} MB</dd>
+                  <dd>
+                    {(
+                      ((loaded.bytes?.length ?? 0) + [...(loaded.files?.values() ?? [])].reduce((n, b) => n + b.length, 0)) / 1048576
+                    ).toFixed(2)}{" "}
+                    MB
+                  </dd>
                   <dt>input</dt>
-                  <dd>{loaded.isBareGlb ? "bare .glb — advisory run" : loaded.name.endsWith(".zip") ? "zip package" : "file"}</dd>
+                  <dd>{loaded.files ? "published item (catalyst)" : loaded.isBareGlb ? "bare .glb — advisory run" : loaded.name.endsWith(".zip") ? "zip package" : "file"}</dd>
                   <dt>type</dt>
                   <dd>{kind}</dd>
                 </dl>
@@ -219,7 +276,7 @@ export function App() {
                 )}
               </div>
             </div>
-            <Preview key={loaded.name + loaded.bytes.length} file={loaded} kind={kind} category={category || undefined} />
+            <Preview key={loaded.name + (loaded.bytes?.length ?? loaded.files?.size ?? 0)} file={loaded} kind={kind} category={category || undefined} />
             <button className="reset-btn" onClick={() => { setLoaded(null); setResult(null); }}>
               Validate another file
             </button>
@@ -240,6 +297,7 @@ export function App() {
                       {passed}/{rows.length} clean{notApplicable > 0 && <> · {notApplicable} n/a</>}
                     </span>
                   </div>
+                  <p className="group-intro">{GROUP_INTROS[group]}</p>
                   <div className="group-list">
                     {rows.map((row) => {
                       const findings = findingsByCheck.get(row.check) ?? [];
@@ -266,6 +324,12 @@ export function App() {
                           </summary>
                           <div className="check-body">
                             <p className="explain">{explanations[row.check]}</p>
+                            {details[row.check] && (
+                              <p className="how">
+                                <span className="fix-label">How it's checked</span>
+                                {details[row.check]}
+                              </p>
+                            )}
                             {row.status === "skipped" && <p className="skip-note">skipped — {row.skipReason}</p>}
                             {row.status === "errored" && <p className="skip-note">check crashed — {row.skipReason}</p>}
                             {(row.status === "failed" || row.status === "warning") && fixes[row.check] && (
@@ -319,13 +383,16 @@ function Dropzone({
   dragging,
   onFile,
   samples,
-  onSample
+  onSample,
+  onReference
 }: {
   dragging: boolean;
   onFile: (f: File) => void;
   samples: Sample[];
   onSample: (s: Sample) => void;
+  onReference: (raw: string) => void;
 }) {
+  const [reference, setReference] = useState("");
   return (
     <>
     <label className={`dropzone${dragging ? " drag" : ""}`}>
@@ -346,6 +413,22 @@ function Dropzone({
       </div>
       <p className="privacy">runs 100% in your browser — nothing is uploaded</p>
     </label>
+    <form
+      className="reference"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (reference.trim()) onReference(reference);
+      }}
+    >
+      <input
+        className="reference-input"
+        placeholder="…or paste a marketplace item URL or URN to analyze a published wearable"
+        value={reference}
+        onChange={(e) => setReference(e.target.value)}
+        aria-label="marketplace URL or URN"
+      />
+      <button className="reference-btn" type="submit">Analyze</button>
+    </form>
     {samples.length > 0 && (
       <div className="samples">
         <span className="samples-label">or try a published item</span>
