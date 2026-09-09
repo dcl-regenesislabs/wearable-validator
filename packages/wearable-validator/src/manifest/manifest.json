@@ -163,6 +163,14 @@
     {
       "topic": "z-up heuristic",
       "note": "Disabled 2026-09-02: fired on ~all committee-approved catalyst items (rotated Armature roots are normal in accepted exports)."
+    },
+    {
+      "topic": "self hide/replace (M-12)",
+      "note": "Downgraded to warning 2026-09-09: committee-approved items (e.g. 0xae473ded\u2026:0) carry self-referencing hides/replaces and work in-world \u2014 the engine ignores them (replaces deprecated by ADR-239)."
+    },
+    {
+      "topic": "animations/shape keys in wearable GLBs (M-13)",
+      "note": "Downgraded to warning 2026-09-09: approved items ship leftover clips (Mixamo 'Take 001') and work in-world \u2014 the engine ignores non-emote animations; docs phrase this as export hygiene."
     }
   ]
 }

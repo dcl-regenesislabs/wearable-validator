@@ -52,9 +52,9 @@ export const fixes: Record<string, string> = {
   "hands-geometry":
     "Skin the accessory to the hand bones (Avatar_RightHand / fingers) so it moves with the hand — held props like swords aren't wearables.",
   "hides-replaces":
-    "Remove the item's own category from its hides list, and double-check the hidden slots make sense for the design.",
+    "Remove the item's own category from hides/replaces (the engine ignores it anyway), and double-check the hidden slots make sense for the design.",
   "static-mesh":
-    "Delete animations and shape keys before exporting a wearable (in Blender: remove actions in the Dope Sheet and shape keys in Object Data) — animation belongs to emotes.",
+    "Delete leftover animations and shape keys before exporting a wearable (in Blender: remove actions in the Dope Sheet and shape keys in Object Data) — they're ignored in-world and only add file size.",
   "spring-bones":
     "Keep at most 12 spring bones (names containing 'springbone') and keep stiffness/gravity/drag inside the allowed ranges.",
 

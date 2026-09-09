@@ -52,9 +52,9 @@ export const explanations: Record<string, string> = {
   "hands-geometry":
     "Hand accessories must be skinned to the hand bones — worn items like gloves, not held items like swords.",
   "hides-replaces":
-    "The hides and replaces lists must be consistent — an item can't hide its own category, and skins hide the standard set of slots.",
+    "The hides and replaces lists must make sense — hiding or replacing your own category is redundant (the engine ignores it), and skins are expected to hide the standard set of slots.",
   "static-mesh":
-    "Wearable models must not contain animations or shape keys — animation belongs to emotes.",
+    "Wearable models shouldn't contain animations or shape keys — the engine ignores them on wearables, so they only add file size.",
   "spring-bones":
     "Spring bones (bouncing hair, tails, earrings) are limited to 12 per item, with their physics values inside the allowed ranges.",
 

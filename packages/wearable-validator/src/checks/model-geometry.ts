@@ -348,15 +348,15 @@ const hidesReplaces: CheckDefinition = {
     const replaces = ctx.item.replaces ?? [];
     if (hides.includes(category)) {
       findings.push(
-        make("hides-replaces", "M-12", "error",
-          `hides includes the item's own category "${category}" — a wearable can't hide its own slot (it would hide itself). Remove "${category}" from hides.`,
+        make("hides-replaces", "M-12", "warning",
+          `hides includes the item's own category "${category}" — the engine ignores a self-hide, so it's harmless but redundant. Remove "${category}" from hides.`,
           { measured: category, data: { category, hides } })
       );
     }
     if (replaces.includes(category)) {
       findings.push(
-        make("hides-replaces", "M-12", "error",
-          `replaces includes the item's own category "${category}" — a wearable can't replace its own slot. Remove "${category}" from replaces.`,
+        make("hides-replaces", "M-12", "warning",
+          `replaces includes the item's own category "${category}" — the engine ignores a self-replace (replaces is deprecated by ADR-239), so it's harmless but redundant. Remove "${category}" from replaces.`,
           { measured: category, data: { category, replaces } })
       );
     }
@@ -389,8 +389,8 @@ const staticMesh: CheckDefinition = {
       const clips = model.doc.getRoot().listAnimations().map((a) => a.getName() || "(unnamed)");
       if (clips.length > 0) {
         findings.push(
-          make("static-mesh", "M-13", "error",
-            `"${model.mainFile}" contains ${clips.length} animation clip${clips.length > 1 ? "s" : ""} (${listSome(clips)}) — wearable models must be static. Remove all animations before export.`,
+          make("static-mesh", "M-13", "warning",
+            `"${model.mainFile}" contains ${clips.length} animation clip${clips.length > 1 ? "s" : ""} (${listSome(clips)}) — the engine ignores animations on wearables, so this is dead weight. Remove them before export to shrink the file.`,
             { where: model.mainFile, measured: clips.length, limit: 0, data: { clips } })
         );
       }
@@ -400,8 +400,8 @@ const staticMesh: CheckDefinition = {
       }
       if (morphMeshes.length > 0) {
         findings.push(
-          make("static-mesh", "M-13", "error",
-            `"${model.mainFile}" contains morph targets (shape keys) on: ${listSome(morphMeshes)} — wearable models must be static. Apply or delete shape keys before export.`,
+          make("static-mesh", "M-13", "warning",
+            `"${model.mainFile}" contains morph targets (shape keys) on: ${listSome(morphMeshes)} — the engine ignores them on wearables, so they only add file size. Apply or delete shape keys before export.`,
             { where: model.mainFile, measured: morphMeshes.length, limit: 0, data: { meshes: morphMeshes } })
         );
       }

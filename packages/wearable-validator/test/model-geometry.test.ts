@@ -208,21 +208,21 @@ describe("hands-geometry (M-11)", () => {
 });
 
 describe("hides-replaces (M-12)", () => {
-  it("errors when hides contains the item's own category", async () => {
+  it("warns when hides contains the item's own category", async () => {
     const zip = await wearableZip({}, { hides: ["hat"] });
     const result = await validate(zip, { checks: ["hides-replaces"] });
     const findings = found(result, "hides-replaces");
     assert.equal(findings.length, 1);
-    assert.equal(findings[0].severity, "error");
+    assert.equal(findings[0].severity, "warning");
     assert.match(findings[0].message, /own category/);
   });
 
-  it("errors when replaces contains the item's own category", async () => {
+  it("warns when replaces contains the item's own category", async () => {
     const zip = await wearableZip({}, { replaces: ["hat"] });
     const result = await validate(zip, { checks: ["hides-replaces"] });
     const findings = found(result, "hides-replaces");
     assert.equal(findings.length, 1);
-    assert.equal(findings[0].severity, "error");
+    assert.equal(findings[0].severity, "warning");
   });
 
   it("warns when a skin doesn't hide the full ADR-60 set", async () => {
@@ -249,21 +249,21 @@ describe("hides-replaces (M-12)", () => {
 });
 
 describe("static-mesh (M-13)", () => {
-  it("errors on animation clips in a wearable GLB", async () => {
+  it("warns on animation clips in a wearable GLB", async () => {
     const zip = await wearableZip({ animation: { name: "Wave", seconds: 1 } });
     const result = await validate(zip, { checks: ["static-mesh"] });
     const findings = found(result, "static-mesh");
     assert.equal(findings.length, 1);
-    assert.equal(findings[0].severity, "error");
+    assert.equal(findings[0].severity, "warning");
     assert.match(findings[0].message, /animation/);
   });
 
-  it("errors on morph targets (shape keys)", async () => {
+  it("warns on morph targets (shape keys)", async () => {
     const zip = await wearableZip({ morphTarget: true });
     const result = await validate(zip, { checks: ["static-mesh"] });
     const findings = found(result, "static-mesh");
     assert.equal(findings.length, 1);
-    assert.equal(findings[0].severity, "error");
+    assert.equal(findings[0].severity, "warning");
     assert.match(findings[0].message, /morph|shape key/i);
   });
 
