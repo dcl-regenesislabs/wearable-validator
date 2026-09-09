@@ -243,7 +243,7 @@ select.category:focus { border-color: var(--primary-border); box-shadow: inset 0
 
 .check { border-radius: var(--r-control); }
 .check summary {
-  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3);
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3);
   min-height: var(--control-h); padding: var(--space-1) var(--space-2); cursor: pointer;
   list-style: none; border-radius: var(--r-control);
   transition: background var(--dur-fast) ease;
@@ -258,6 +258,10 @@ select.category:focus { border-color: var(--primary-border); box-shadow: inset 0
 .glyph.skipped, .glyph.errored { color: var(--text-3); }
 .check-title { font-size: var(--fs-sm); font-weight: 600; }
 .check-title .cname { font-family: var(--font-mono); font-weight: 400; font-size: var(--fs-2xs); color: var(--text-3); margin-left: var(--space-2); }
+.limit-chip {
+  font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); white-space: nowrap;
+}
+@media (max-width: 720px) { .limit-chip { display: none; } }
 .count-chip {
   font-family: var(--font-mono); font-size: var(--fs-2xs); padding: 2px 9px;
   border-radius: var(--r-pill); white-space: nowrap;

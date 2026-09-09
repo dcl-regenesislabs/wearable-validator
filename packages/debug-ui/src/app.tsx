@@ -5,6 +5,7 @@ import {
   details,
   explanations,
   fixes,
+  limitFor,
   sourceLinks,
   manifest,
   registry,
@@ -12,6 +13,7 @@ import {
   type Group,
   type Result
 } from "@dcl-regenesislabs/wearable-validator";
+import JSZip from "jszip";
 import { Preview } from "./preview.js";
 import { fetchItem, parseItemReference } from "./catalyst.js";
 
@@ -41,6 +43,9 @@ interface Loaded {
   files?: Map<string, Uint8Array>;
   metadata?: unknown;
   content?: { file: string; hash: string }[];
+  /** Category read from a zip's embedded manifest (limit display). */
+  zipCategory?: string;
+  zipHides?: string[];
 }
 
 interface Sample {
@@ -142,6 +147,19 @@ export function App() {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const isBareGlb = bytes.length >= 4 && bytes[0] === 0x67 && bytes[1] === 0x6c && bytes[2] === 0x54 && bytes[3] === 0x46;
       const next: Loaded = { name: file.name, bytes, isBareGlb };
+      if (!isBareGlb && file.name.endsWith(".zip")) {
+        try {
+          const zip = await JSZip.loadAsync(bytes);
+          const manifestEntry = zip.file("wearable.json") ?? zip.file("emote.json");
+          if (manifestEntry) {
+            const parsed = JSON.parse(await manifestEntry.async("string")) as { category?: string; data?: { category?: string; hides?: string[] } };
+            next.zipCategory = parsed.data?.category ?? parsed.category;
+            next.zipHides = parsed.data?.hides;
+          }
+        } catch {
+          // metadata check reports unparseable manifests; limit chips just stay generic
+        }
+      }
       setLoaded(next);
       setResult(null);
       setCategory("");
@@ -170,6 +188,15 @@ export function App() {
     }
     return map;
   }, [result]);
+
+  const resolvedCategory = useMemo(() => {
+    const meta = loaded?.metadata as { data?: { category?: string } } | undefined;
+    return meta?.data?.category ?? loaded?.zipCategory ?? (category || undefined);
+  }, [loaded, category]);
+  const hides = useMemo(() => {
+    const meta = loaded?.metadata as { data?: { hides?: string[] } } | undefined;
+    return meta?.data?.hides ?? loaded?.zipHides;
+  }, [loaded]);
 
   const kind: "wearable" | "emote" = useMemo(
     () => (result?.checks.some((c) => c.group === "emote") ? "emote" : "wearable"),
@@ -315,6 +342,7 @@ export function App() {
                                 {row.check} · {def?.rule}
                               </span>
                             </span>
+                            <span className="limit-chip">{limitFor(row.check, resolvedCategory, hides) ?? ""}</span>
                             {errs > 0 ? (
                               <span className="count-chip err">{errs} error{errs > 1 ? "s" : ""}</span>
                             ) : warns > 0 ? (
