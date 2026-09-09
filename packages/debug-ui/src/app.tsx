@@ -96,7 +96,7 @@ export function App() {
   }, []);
 
   const onReference = useCallback(
-    async (raw: string) => {
+    async (raw: string, updateHistory = true) => {
       let candidates: string[] | null;
       try {
         candidates = parseItemReference(raw);
@@ -105,13 +105,14 @@ export function App() {
         return;
       }
       if (!candidates) {
-        setCrash("That doesn't look like a wearable URN or a marketplace item URL (expected …marketplace/contracts/0x…/items/N or urn:decentraland:…).");
+        setCrash("That doesn't look like a shop item URL or a wearable URN (expected decentraland.org/shop/item/0x…/N or urn:decentraland:…).");
         return;
       }
       setCrash(null);
       setFetching("looking up the item…");
       try {
         const item = await fetchItem(candidates, setFetching);
+        if (updateHistory) history.pushState({ urn: item.urn }, "", `?urn=${encodeURIComponent(item.urn)}`);
         const next: Loaded = { name: item.name, isBareGlb: false, files: item.files, metadata: item.metadata, content: item.content };
         setLoaded(next);
         setResult(null);
@@ -146,6 +147,7 @@ export function App() {
     async (file: File) => {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const isBareGlb = bytes.length >= 4 && bytes[0] === 0x67 && bytes[1] === 0x6c && bytes[2] === 0x54 && bytes[3] === 0x46;
+      if (location.search) history.pushState({}, "", location.pathname);
       const next: Loaded = { name: file.name, bytes, isBareGlb };
       if (!isBareGlb && file.name.endsWith(".zip")) {
         try {
@@ -168,6 +170,24 @@ export function App() {
     },
     [run]
   );
+
+  const reset = useCallback(() => {
+    setLoaded(null);
+    setResult(null);
+    setCrash(null);
+  }, []);
+
+  useEffect(() => {
+    const urn = new URLSearchParams(location.search).get("urn");
+    if (urn) void onReference(urn, false);
+    const onPop = () => {
+      const shared = new URLSearchParams(location.search).get("urn");
+      if (shared) void onReference(shared, false);
+      else reset();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const stop = (e: DragEvent) => e.preventDefault();
@@ -241,7 +261,13 @@ export function App() {
           <div className="card-head"><span className="eui-overline">error</span></div>
           <div className="card-body">
             <p style={{ marginTop: 0 }}>{crash}</p>
-            <button className="reset-btn" onClick={() => { setLoaded(null); setResult(null); setCrash(null); }}>
+            <button
+              className="reset-btn"
+              onClick={() => {
+                if (location.search) history.pushState({}, "", location.pathname);
+                reset();
+              }}
+            >
               Validate another file
             </button>
           </div>
@@ -305,7 +331,13 @@ export function App() {
               </div>
             </div>
             <Preview key={loaded.name + (loaded.bytes?.length ?? loaded.files?.size ?? 0)} file={loaded} kind={kind} category={category || undefined} />
-            <button className="reset-btn" onClick={() => { setLoaded(null); setResult(null); }}>
+            <button
+              className="reset-btn"
+              onClick={() => {
+                if (location.search) history.pushState({}, "", location.pathname);
+                reset();
+              }}
+            >
               Validate another file
             </button>
           </aside>
@@ -454,7 +486,7 @@ function Dropzone({
     >
       <input
         className="reference-input"
-        placeholder="…or paste a marketplace item URL or URN to analyze a published wearable"
+        placeholder="…or paste a shop item URL (decentraland.org/shop/item/0x…/N) or URN"
         value={reference}
         onChange={(e) => setReference(e.target.value)}
         aria-label="marketplace URL or URN"

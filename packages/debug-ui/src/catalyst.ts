@@ -15,11 +15,13 @@ export interface CatalystItem {
   content: { file: string; hash: string }[];
 }
 
-/** urn:decentraland:...:collections-v2:0x…:0 · collections-v1 · marketplace /contracts/0x…/items/0 URLs. */
+/** Shop item URLs (decentraland.org/shop/item/0x…/0) and urn:decentraland:… references. */
 export function parseItemReference(raw: string): string[] | null {
   const input = raw.trim();
   if (/^urn:decentraland:[a-z]+:collections-v[12]:/i.test(input)) return [input.toLowerCase()];
-  const url = input.match(/marketplace\/contracts\/(0x[0-9a-fA-F]{40})\/items\/(\d+)/);
+  const url =
+    input.match(/shop\/item\/(0x[0-9a-fA-F]{40})\/(\d+)/) ??
+    input.match(/marketplace\/contracts\/(0x[0-9a-fA-F]{40})\/items\/(\d+)/);
   if (url) {
     const [, contract, item] = url;
     // The URL doesn't say which chain — try matic first (99% of items), then ethereum.
@@ -28,8 +30,8 @@ export function parseItemReference(raw: string): string[] | null {
       `urn:decentraland:ethereum:collections-v2:${contract.toLowerCase()}:${item}`
     ];
   }
-  if (input.includes("marketplace") && input.includes("/tokens/")) {
-    throw new Error("That's an NFT token page — open the item's page instead (the URL should contain /items/<number>).");
+  if (input.includes("/tokens/")) {
+    throw new Error("That's an NFT token page — open the item's shop page instead (decentraland.org/shop/item/0x…/N).");
   }
   return null;
 }
