@@ -10,9 +10,9 @@ export const fixes: Record<string, string> = {
   "gltf-valid":
     "Re-export the model from Blender — the file is corrupt or was cut off mid-export. If it keeps failing, re-import the .glb into a fresh Blender scene to find what breaks.",
   "metadata":
-    "Fill in the missing fields in the Builder's item editor (name, category, rarity). If you edited wearable.json by hand, compare it against a fresh Builder export.",
+    "Correct each reported field in the item metadata supplied by Builder or the server. Use the reported path, current value, and requirement; supply all required item fields and one translation per locale. For Builder ZIPs, fill in name/category and correct any supplied rarity, or re-export the item.",
   "representations":
-    "Make sure every body shape you support has its model file inside the package, and that every file listed in the manifest actually exists — re-export the item from the Builder.",
+    "Use the canonical BaseMale/BaseFemale URNs and make sure every body shape you support has its model file inside the package, and that every file listed in the manifest actually exists — re-export the item from the Builder.",
   "file-size":
     "Shrink textures first (biggest win): resize to 512×512 and re-bake. Then remove unused geometry and merge duplicated meshes. The thumbnail and rarity image count toward the limit too.",
   "thumbnail":
@@ -20,7 +20,7 @@ export const fixes: Record<string, string> = {
   "name-description":
     "Shorten the name (max 32 chars) or description (max 64) and remove any ':' characters.",
   "category":
-    "Pick a valid slot for the item in the Builder (hat, upper body, feet…). Base body shapes can't be published.",
+    "Pick a valid wearable slot (hat, upper body, feet…) or emote category (dance, fun, greetings…) in the Builder. Base body shapes can't be published.",
   "content-integrity":
     "Re-upload the item — a file changed after its hash was computed. Never edit files inside the package after exporting.",
   "gltf-hygiene":

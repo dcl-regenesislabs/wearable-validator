@@ -1,7 +1,7 @@
 {
   "name": "@dcl-regenesislabs/wearable-validator",
   "version": "0.1.0",
-  "description": "The Decentraland wearable & emote rule book as code \u2014 every check runnable separately, in node and the browser.",
+  "description": "The Decentraland wearable & emote rule book as code — every check runnable separately, in node and the browser.",
   "type": "module",
   "engines": {
     "node": ">=22.19"
@@ -31,7 +31,7 @@
     "gen:sources": "tsx generate-source-links.ts"
   },
   "dependencies": {
-    "@dcl/hashing": "^3.0.4",
+    "@dcl/hashing": "3.0.4",
     "@dcl/schemas": "^16.11.1",
     "@gltf-transform/core": "^4.2.1",
     "@gltf-transform/extensions": "^4.2.1",

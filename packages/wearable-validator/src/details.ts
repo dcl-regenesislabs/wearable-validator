@@ -10,9 +10,9 @@ export const details: Record<string, string> = {
   "gltf-valid":
     "Verifies the GLB container byte by byte — magic, version 2, declared length, chunk layout — and surfaces model-parser failures as findings.",
   "metadata":
-    "Checks required fields per mode: full entity metadata when the platform supplies it, or the lighter set a Builder zip can carry. A divergence between supplied metadata and the zip's own manifest is flagged.",
+    "Validates supplied item metadata with the official Wearable.validate or Emote.validate schema, including required fields, nested representations, and unique locale codes. Reports invalid field paths and values. Builder manifests use name/category and supplied-rarity checks. Differences between supplied metadata and the embedded manifest are flagged.",
   "representations":
-    "Set-compares both directions: every file a representation lists must exist in the upload, and its mainFile must be among them. At least one body-shape representation is required.",
+    "Set-compares both directions: every file a representation lists must exist in the upload, and its mainFile must be among them. At least one representation is required, and each body shape must be the canonical BaseMale or BaseFemale URN.",
   "file-size":
     "Sums the actual file bytes — model, thumbnail and rarity image included (ADR-246) — against the per-category ceiling, plus the model-alone headroom rule so nothing passes here and fails at deploy.",
   "thumbnail":
@@ -20,9 +20,9 @@ export const details: Record<string, string> = {
   "name-description":
     "Plain string checks: name ≤32 characters, description ≤64, no ':' anywhere, at most 20 non-empty tags.",
   "category":
-    "The declared category must be one of the platform's wearable slots; base body shapes are rejected.",
+    "The declared category must belong to the platform enum for the item type: wearable slots or emote categories. Base body shapes cannot be submitted as wearables.",
   "content-integrity":
-    "Recomputes each file's CIDv1 hash and compares it against the declared content list, both directions. Runs only when an entity content list is available (platform submissions and published items).",
+    "Recomputes each file's hash using its declared format: legacy Decentraland SHA-256 for Qm… hashes, or UnixFS CIDv1 for baf… hashes and compares it against the declared content list, both directions. Runs only when an entity content list is available (platform submissions and published items).",
   "gltf-hygiene":
     "Reads the raw glTF JSON — even when the model won't parse: cameras and lights are errors; required extensions outside the supported allowlist are errors; unknown used extensions warn.",
   "smart-wearable":
@@ -40,11 +40,11 @@ export const details: Record<string, string> = {
   "texture-maps":
     "Walks every material: normal, metallic-roughness and occlusion maps are errors that name the offending map.",
   "material-count":
-    "Counts the materials used by rendered meshes, excluding the one named AvatarSkin_MAT.",
+    "Counts distinct material objects per representation, excluding colliders and AvatarSkin_MAT. Repeated names do not merge materials. The displayed count is the largest per-representation count.",
   "material-names":
     "Skin items should carry an AvatarSkin_MAT material (the engine's tint target); non-facial mesh names must avoid the reserved facial patterns.",
   "bounding-box":
-    "Computes the rest-pose world-space bounding box from node-transformed vertex positions (colliders excluded), rounded to 2 decimals, against 2.42 × 2.42 × 1.4 m.",
+    "Computes rest-pose world-space bounds from transformed mesh bounds, excluding colliders. Compares dimensions at glTF float32 precision against 2.42 × 2.42 × 1.4 m before formatting them for display.",
   "skeleton":
     "Compares every skin joint against the canonical 62-bone skeleton: unknown non-springbone joints (with a casing hint when it's just casing), leftover _end/_neutral helpers, and missing core bones on skinned meshes all fail.",
   "bone-weights":
@@ -56,7 +56,7 @@ export const details: Record<string, string> = {
   "static-mesh":
     "Wearable GLBs must carry no animation clips and no morph targets — both are errors.",
   "spring-bones":
-    "Counts springbone-named joints (warns above 12) and, when spring-bone metadata is present, validates every physics value against its allowed range.",
+    "Counts springbone-named joints (warns above 12) and, when spring-bone metadata is present, checks numeric physics parameters against their allowed ranges. Reads settings from published items and from flat or data.springBones fields in Builder manifests.",
 
   // emote
   "duration":

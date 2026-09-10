@@ -5,14 +5,19 @@ import {
   details,
   explanations,
   fixes,
+  docsUrl,
   sourceLinks,
   manifest,
   registry,
+  type CheckStatus,
   type Finding,
   type Group,
   type Result
 } from "@dcl-regenesislabs/wearable-validator";
+import JSZip from "jszip";
+import { limitFor } from "./limits.js";
 import { Preview } from "./preview.js";
+import { MetadataValues } from "./metadata-values.js";
 import { fetchItem, parseItemReference } from "./catalyst.js";
 
 const GROUP_LABELS: Record<Group, string> = {
@@ -33,6 +38,16 @@ const GROUP_INTROS: Record<Group, string> = {
 const CATEGORIES = Object.keys(manifest.triangles.perCategory).concat(manifest.facialCategories);
 const GLYPHS: Record<string, string> = { passed: "✓", failed: "✕", warning: "!", skipped: "○", errored: "‼" };
 
+const STATUS_LABELS: Record<CheckStatus, string> = {
+  passed: "Passed", failed: "Needs fixing", warning: "Review", skipped: "Not checked", errored: "Check error"
+};
+const RESULT_FILTERS = [
+  { key: "all", label: "All rules", statuses: ["passed", "failed", "warning", "skipped", "errored"] },
+  { key: "attention", label: "Needs attention", statuses: ["failed", "warning", "errored"] },
+  { key: "passed", label: "Passed", statuses: ["passed"] },
+  { key: "unchecked", label: "Not checked", statuses: ["skipped"] }
+];
+
 interface Loaded {
   name: string;
   bytes?: Uint8Array;
@@ -41,6 +56,11 @@ interface Loaded {
   files?: Map<string, Uint8Array>;
   metadata?: unknown;
   content?: { file: string; hash: string }[];
+  /** Category read from a zip's embedded manifest (limit display). */
+  zipMetadata?: unknown;
+  zipMetadataSource?: string;
+  zipCategory?: string;
+  zipHides?: string[];
 }
 
 interface Sample {
@@ -51,7 +71,22 @@ interface Sample {
   kind: "wearable" | "emote";
 }
 
+async function zipRuleContext(bytes: Uint8Array): Promise<Pick<Loaded, "zipCategory" | "zipHides" | "zipMetadata" | "zipMetadataSource">> {
+  try {
+    const zip = await JSZip.loadAsync(bytes);
+    const entry = zip.file("wearable.json") ?? zip.file("emote.json");
+    if (entry) {
+      const parsed = JSON.parse(await entry.async("string")) as { category?: string; data?: { category?: string; hides?: string[] } };
+      return { zipCategory: parsed.data?.category ?? parsed.category, zipHides: parsed.data?.hides, zipMetadata: parsed, zipMetadataSource: entry.name };
+    }
+  } catch {
+    // Validation reports malformed packages; display hints remain optional.
+  }
+  return {};
+}
+
 export function App() {
+  const [filter, setFilter] = useState("all");
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [running, setRunning] = useState(false);
@@ -73,6 +108,7 @@ export function App() {
   const run = useCallback(async (file: Loaded, cat: string, type: "" | "wearable" | "emote") => {
     const id = ++runSeq.current;
     setRunning(true);
+    setFilter("all");
     setCrash(null);
     try {
       const options = { ...(cat ? { category: cat } : {}), ...(type ? { itemType: type } : {}) };
@@ -91,7 +127,7 @@ export function App() {
   }, []);
 
   const onReference = useCallback(
-    async (raw: string) => {
+    async (raw: string, updateHistory = true) => {
       let candidates: string[] | null;
       try {
         candidates = parseItemReference(raw);
@@ -100,13 +136,14 @@ export function App() {
         return;
       }
       if (!candidates) {
-        setCrash("That doesn't look like a wearable URN or a marketplace item URL (expected …marketplace/contracts/0x…/items/N or urn:decentraland:…).");
+        setCrash("That doesn't look like a shop item URL or a wearable URN (expected decentraland.org/shop/item/0x…/N or urn:decentraland:…).");
         return;
       }
       setCrash(null);
       setFetching("looking up the item…");
       try {
         const item = await fetchItem(candidates, setFetching);
+        if (updateHistory) history.pushState({ urn: item.urn }, "", `?urn=${encodeURIComponent(item.urn)}`);
         const next: Loaded = { name: item.name, isBareGlb: false, files: item.files, metadata: item.metadata, content: item.content };
         setLoaded(next);
         setResult(null);
@@ -127,7 +164,7 @@ export function App() {
       const res = await fetch(`samples/${sample.file}`);
       if (!res.ok) return;
       const bytes = new Uint8Array(await res.arrayBuffer());
-      const next: Loaded = { name: `${sample.name} (${sample.label} sample)`, bytes, isBareGlb: false };
+      const next: Loaded = { name: `${sample.name} (${sample.label} sample)`, bytes, isBareGlb: false, ...await zipRuleContext(bytes) };
       setLoaded(next);
       setResult(null);
       setCategory("");
@@ -141,7 +178,9 @@ export function App() {
     async (file: File) => {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const isBareGlb = bytes.length >= 4 && bytes[0] === 0x67 && bytes[1] === 0x6c && bytes[2] === 0x54 && bytes[3] === 0x46;
+      if (location.search) history.pushState({}, "", location.pathname);
       const next: Loaded = { name: file.name, bytes, isBareGlb };
+      if (!isBareGlb && file.name.endsWith(".zip")) Object.assign(next, await zipRuleContext(bytes));
       setLoaded(next);
       setResult(null);
       setCategory("");
@@ -150,6 +189,24 @@ export function App() {
     },
     [run]
   );
+
+  const reset = useCallback(() => {
+    setLoaded(null);
+    setResult(null);
+    setCrash(null);
+  }, []);
+
+  useEffect(() => {
+    const urn = new URLSearchParams(location.search).get("urn");
+    if (urn) void onReference(urn, false);
+    const onPop = () => {
+      const shared = new URLSearchParams(location.search).get("urn");
+      if (shared) void onReference(shared, false);
+      else reset();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const stop = (e: DragEvent) => e.preventDefault();
@@ -170,6 +227,15 @@ export function App() {
     }
     return map;
   }, [result]);
+
+  const resolvedCategory = useMemo(() => {
+    const meta = loaded?.metadata as { data?: { category?: string } } | undefined;
+    return meta?.data?.category ?? loaded?.zipCategory ?? (category || undefined);
+  }, [loaded, category]);
+  const hides = useMemo(() => {
+    const meta = loaded?.metadata as { data?: { hides?: string[] } } | undefined;
+    return meta?.data?.hides ?? loaded?.zipHides;
+  }, [loaded]);
 
   const kind: "wearable" | "emote" = useMemo(
     () => (result?.checks.some((c) => c.group === "emote") ? "emote" : "wearable"),
@@ -214,7 +280,13 @@ export function App() {
           <div className="card-head"><span className="eui-overline">error</span></div>
           <div className="card-body">
             <p style={{ marginTop: 0 }}>{crash}</p>
-            <button className="reset-btn" onClick={() => { setLoaded(null); setResult(null); setCrash(null); }}>
+            <button
+              className="reset-btn"
+              onClick={() => {
+                if (location.search) history.pushState({}, "", location.pathname);
+                reset();
+              }}
+            >
               Validate another file
             </button>
           </div>
@@ -237,7 +309,7 @@ export function App() {
                     MB
                   </dd>
                   <dt>input</dt>
-                  <dd>{loaded.files ? "published item (catalyst)" : loaded.isBareGlb ? "bare .glb — advisory run" : loaded.name.endsWith(".zip") ? "zip package" : "file"}</dd>
+                  <dd>{loaded.files ? "published example" : loaded.isBareGlb ? "GLB upload" : loaded.name.endsWith(".zip") ? "zip package" : "file"}</dd>
                   <dt>type</dt>
                   <dd>{kind}</dd>
                 </dl>
@@ -278,91 +350,112 @@ export function App() {
               </div>
             </div>
             <Preview key={loaded.name + (loaded.bytes?.length ?? loaded.files?.size ?? 0)} file={loaded} kind={kind} category={category || undefined} />
-            <button className="reset-btn" onClick={() => { setLoaded(null); setResult(null); }}>
+            <button
+              className="reset-btn"
+              onClick={() => {
+                if (location.search) history.pushState({}, "", location.pathname);
+                reset();
+              }}
+            >
               Validate another file
             </button>
           </aside>
 
           <main>
             <Verdict result={result} bare={loaded.isBareGlb} />
+            {loaded.isBareGlb && <p className="glb-scope">Results cover the uploaded GLB. Choose its type and category to check the right limits. Package metadata and publishing checks are not part of this analysis.</p>}
+            <div className="rules-toolbar">
+              <div>
+                <h1>Rule results</h1>
+                <p>Compare your values with the requirements. Open a rule for findings and fix steps.</p>
+              </div>
+              <div className="result-filters" role="group" aria-label="Filter rule results">
+                {RESULT_FILTERS.map((option) => (
+                  <button key={option.key} aria-pressed={filter === option.key} onClick={() => setFilter(option.key)}>
+                    {option.label} <span>{result.checks.filter((row) => option.statuses.includes(row.status)).length}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {!result.checks.some((row) => RESULT_FILTERS.find((option) => option.key === filter)!.statuses.includes(row.status)) && (
+              <p className="empty-results" role="status">No rules in this view. Choose All rules to see every result.</p>
+            )}
             {GROUP_ORDER.map((group, gi) => {
-              const rows = result.checks.filter((c) => c.group === group);
+              const groupRows = result.checks.filter((c) => c.group === group);
+              const rows = groupRows.filter((row) => RESULT_FILTERS.find((option) => option.key === filter)!.statuses.includes(row.status));
               if (rows.length === 0) return null;
-              const passed = rows.filter((r) => r.status === "passed").length;
-              const notApplicable = registry.filter((c) => c.group === group).length - rows.length;
+              const passed = groupRows.filter((r) => r.status === "passed").length;
+              const notApplicable = registry.filter((c) => c.group === group).length - groupRows.length;
               return (
                 <section className="group" key={group} style={{ animationDelay: `${gi * 0.05}s` }}>
-                  <div className="group-head">
+                  <div className="group-head" title={GROUP_INTROS[group]}>
                     <h2>{GROUP_LABELS[group]}</h2>
                     <span className="tally">
-                      {passed}/{rows.length} clean{notApplicable > 0 && <> · {notApplicable} n/a</>}
+                      {passed}/{groupRows.length} passed{notApplicable > 0 && <> · {notApplicable} n/a</>}
                     </span>
                   </div>
-                  <p className="group-intro">{GROUP_INTROS[group]}</p>
+                  <div className="rule-columns" aria-hidden="true">
+                    <span>Rule</span><span>Your value</span><span>Requirement</span><span>Status</span><span />
+                  </div>
                   <div className="group-list">
                     {rows.map((row) => {
                       const findings = findingsByCheck.get(row.check) ?? [];
-                      const errs = findings.filter((f) => f.severity === "error").length;
-                      const warns = findings.filter((f) => f.severity === "warning").length;
                       const def = checkRegistry[row.check];
+                      const requirement = limitFor(row.check, resolvedCategory, hides);
+                      const unavailable = row.status === "skipped" || row.status === "errored";
                       return (
-                        <details className="check" key={row.check} open={row.status === "failed" || row.status === "errored"}>
+                        <details className={`check ${row.status}`} key={row.check}>
                           <summary>
-                            <span className={`glyph ${row.status}`}>{GLYPHS[row.status]}</span>
-                            <span className="check-title">
-                              {def?.title ?? row.check}
-                              <span className="cname">
-                                {row.check} · {def?.rule}
-                              </span>
+                            <span className="check-title">{def?.title ?? row.check}</span>
+                            <span className={`rule-value${row.measured === undefined ? " unavailable" : ""}`}>
+                              <span className="mobile-label">Your value</span>
+                              {row.measured ?? (unavailable ? "Not measured" : "No measurement reported")}
                             </span>
-                            {errs > 0 ? (
-                              <span className="count-chip err">{errs} error{errs > 1 ? "s" : ""}</span>
-                            ) : warns > 0 ? (
-                              <span className="count-chip wrn">{warns} warning{warns > 1 ? "s" : ""}</span>
-                            ) : (
-                              <span className="count-chip ok">{row.status === "passed" ? "ok" : row.status}</span>
-                            )}
+                            <span className="rule-requirement">
+                              <span className="mobile-label">Requirement</span>
+                              {requirement ?? def?.describe ?? "—"}
+                            </span>
+                            <span className={`rule-status ${row.status}`}>
+                              <span aria-hidden="true">{GLYPHS[row.status]}</span> {STATUS_LABELS[row.status]}
+                            </span>
+                            <span className="rule-chevron" aria-hidden="true">›</span>
                           </summary>
                           <div className="check-body">
-                            <p className="explain">{explanations[row.check]}</p>
-                            {details[row.check] && (
-                              <p className="how">
-                                <span className="fix-label">How it's checked</span>
-                                {details[row.check]}{" "}
-                                <a className="src-link" href={sourceLinks[row.check]} target="_blank" rel="noreferrer">
-                                  source ↗
-                                </a>
-                              </p>
-                            )}
                             {row.status === "skipped" && <p className="skip-note">skipped — {row.skipReason}</p>}
                             {row.status === "errored" && <p className="skip-note">check crashed — {row.skipReason}</p>}
+                            {findings.map((f, fi) => (
+                              <div className={`finding ${f.severity}`} key={fi}>
+                                <p className="msg">{f.message}</p>
+                                {(f.where || f.measured !== undefined) && (
+                                  <div className="meta">
+                                    {f.where && <span>{f.where}</span>}
+                                    {f.measured !== undefined && (
+                                      <span>
+                                        measured <span className="ml">{String(f.measured)}</span>
+                                        {f.limit !== undefined && (
+                                          <>
+                                            {" "}/ limit <span className="ml">{String(f.limit)}</span>
+                                          </>
+                                        )}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
                             {(row.status === "failed" || row.status === "warning") && fixes[row.check] && (
                               <p className="fix-hint">
                                 <span className="fix-label">How to fix</span>
                                 {fixes[row.check]}
                               </p>
                             )}
-                            {findings.map((f, fi) => (
-                              <div className={`finding ${f.severity}`} key={fi}>
-                                <p className="msg">{f.message}</p>
-                                <div className="meta">
-                                  {f.where && <span>{f.where}</span>}
-                                  {f.measured !== undefined && (
-                                    <span>
-                                      measured <span className="ml">{String(f.measured)}</span>
-                                      {f.limit !== undefined && (
-                                        <>
-                                          {" "}/ limit <span className="ml">{String(f.limit)}</span>
-                                        </>
-                                      )}
-                                    </span>
-                                  )}
-                                  <a href={f.docs} target="_blank" rel="noreferrer">
-                                    docs ↗
-                                  </a>
-                                </div>
-                              </div>
-                            ))}
+                            {row.check === "metadata" && (
+                              <MetadataValues
+                                value={loaded.metadata ?? loaded.zipMetadata}
+                                source={loaded.metadata !== undefined ? "Published entity" : loaded.zipMetadataSource ?? "Package metadata"}
+                              />
+                            )}
+                            <CheckAbout check={row.check} rule={def?.rule} collapsed={findings.length > 0 || row.check === "metadata"} />
                           </div>
                         </details>
                       );
@@ -380,6 +473,33 @@ export function App() {
         </div>
       )}
     </div>
+  );
+}
+
+function CheckAbout({ check, rule, collapsed }: { check: string; rule?: string; collapsed: boolean }) {
+  const body = (
+    <>
+      <p className="explain">{explanations[check]}</p>
+      {details[check] && <p className="how">{details[check]}</p>}
+      <div className="about-meta">
+        <span>
+          {check} · {rule}
+        </span>
+        <a href={docsUrl(check)} target="_blank" rel="noreferrer">
+          docs ↗
+        </a>
+        <a href={sourceLinks[check]} target="_blank" rel="noreferrer">
+          source ↗
+        </a>
+      </div>
+    </>
+  );
+  if (!collapsed) return <div className="about">{body}</div>;
+  return (
+    <details className="about">
+      <summary>About this check</summary>
+      {body}
+    </details>
   );
 }
 
@@ -409,14 +529,16 @@ function Dropzone({
           if (file) void onFile(file);
         }}
       />
-      <h1>Drop a wearable or emote</h1>
-      <p>Every rule from the rule book, checked instantly.</p>
+      <h1>Check your wearable or emote GLB</h1>
+      <p>Drop your export to inspect geometry, textures, rigging, and animation.</p>
       <div className="formats">
-        <span className="chip">.zip — Builder export</span>
-        <span className="chip">.glb — bare model</span>
+        <span className="chip">.glb — your model</span>
+        <span className="chip">.zip — Builder export also supported</span>
       </div>
       <p className="privacy">runs 100% in your browser — nothing is uploaded</p>
     </label>
+    <details className="published-example">
+      <summary>Explore a published example</summary>
     <form
       className="reference"
       onSubmit={(e) => {
@@ -426,16 +548,17 @@ function Dropzone({
     >
       <input
         className="reference-input"
-        placeholder="…or paste a marketplace item URL or URN to analyze a published wearable"
+        placeholder="Paste a shop item URL or URN"
         value={reference}
         onChange={(e) => setReference(e.target.value)}
         aria-label="marketplace URL or URN"
       />
-      <button className="reference-btn" type="submit">Analyze</button>
+      <button className="reference-btn" type="submit">Load example</button>
     </form>
+    </details>
     {samples.length > 0 && (
       <div className="samples">
-        <span className="samples-label">or try a published item</span>
+        <span className="samples-label">See how it works with an example</span>
         <div className="samples-row">
           {samples.map((s) => (
             <button key={s.key} className="sample-chip" title={s.name} onClick={() => onSample(s)}>
@@ -454,10 +577,10 @@ function Verdict({ result, bare }: { result: Result; bare: boolean }) {
   return (
     <div className="verdict">
       <div className="verdict-word">
-        <span className="eui-overline">verdict</span>
+        <span className="eui-overline">{bare ? "GLB analysis" : "verdict"}</span>
         {result.passed === true && <span className="stamp pass">Passed</span>}
         {result.passed === false && <span className="stamp fail">Failed</span>}
-        {result.passed === null && <span className="stamp none">{bare ? "Advisory — no verdict" : "Incomplete"}</span>}
+        {result.passed === null && <span className={`stamp ${bare ? "analysis" : "none"}`}>{bare ? "Model checks" : "Incomplete"}</span>}
       </div>
       <div className="verdict-facts">
         <div>

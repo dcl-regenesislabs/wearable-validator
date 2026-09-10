@@ -27,6 +27,8 @@ export interface CheckResult {
   check: string;
   group: Group;
   status: CheckStatus;
+  /** What the item actually measures for this check (e.g. "1,240 tris"). */
+  measured?: string;
   skipReason?: string;
   durationMs?: number;
 }
@@ -98,6 +100,7 @@ export interface CheckContext {
   /** Resolved category (metadata or hint) — undefined for a hint-less bare GLB. */
   category?: string;
   metadataMode: MetadataMode;
+  entityMetadata?: unknown;
   inputKind: InputKind;
   totalBytes: number;
   /** One entry per representation; bare GLB = one entry. Empty when the GLB failed to parse. */

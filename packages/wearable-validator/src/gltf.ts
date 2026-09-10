@@ -94,8 +94,7 @@ export function computeAabb(doc: Document): { width: number; height: number; dep
     }
   }
   if (!any) return null;
-  const round2 = (n: number) => Math.round(n * 100) / 100;
-  return { width: round2(max[0] - min[0]), height: round2(max[1] - min[1]), depth: round2(max[2] - min[2]) };
+  return { width: max[0] - min[0], height: max[1] - min[1], depth: max[2] - min[2] };
 }
 
 function transformPoint(m: number[], p: [number, number, number]): [number, number, number] {
@@ -117,4 +116,8 @@ export function listJointNames(doc: Document): string[] {
 
 export function hasSkinnedMesh(doc: Document): boolean {
   return doc.getRoot().listNodes().some((n) => n.getMesh() && n.getSkin());
+}
+
+export function formatDimensions(box: { width: number; height: number; depth: number }): string {
+  return `${[box.width, box.height, box.depth].map(value => Number(value.toPrecision(7))).join(" × ")} m`;
 }

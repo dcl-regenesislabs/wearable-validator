@@ -1,4 +1,5 @@
 import { loadInput } from "./loader.js";
+import { measures } from "./measures.js";
 import { registry, resolveCheck } from "./registry.js";
 import type { CheckContext, CheckDefinition, CheckResult, Finding, Group, Input, Options, Result } from "./types.js";
 import { docsUrl } from "./types.js";
@@ -55,10 +56,17 @@ export async function validate(input: Input, options: Options = {}): Promise<Res
       findings.push(...checkFindings);
       const hasError = checkFindings.some((f) => f.severity === "error");
       const hasWarning = checkFindings.some((f) => f.severity === "warning");
+      let measured: string | undefined;
+      try {
+        measured = measures[check.name]?.(ctx);
+      } catch {
+        // display-only — a measurement failure must never affect the run
+      }
       checkResults.push({
         check: check.name,
         group: check.group,
         status: hasError ? "failed" : hasWarning ? "warning" : "passed",
+        measured,
         durationMs: Date.now() - started
       });
     } catch (err) {
