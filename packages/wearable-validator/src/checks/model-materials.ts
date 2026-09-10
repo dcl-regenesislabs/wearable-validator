@@ -11,7 +11,7 @@ function finding(check: string, rule: string, severity: Severity, message: strin
 }
 
 /** Materials that count toward limits: used by primitives of meshes on non-collider nodes. */
-function countedMaterials(doc: Document): Material[] {
+export function countedMaterials(doc: Document): Material[] {
   const set = new Set<Material>();
   for (const node of doc.getRoot().listNodes()) {
     const mesh = node.getMesh();
@@ -77,7 +77,7 @@ function pngHasAlpha(bytes: Uint8Array): boolean {
 }
 
 /** JPEG SOF precision (bits per channel) — scans markers for SOF0..SOF15 (minus DHT/JPG/DAC). */
-function jpegPrecision(bytes: Uint8Array): number | undefined {
+export function jpegPrecision(bytes: Uint8Array): number | undefined {
   let i = 2;
   while (i + 4 < bytes.length) {
     if (bytes[i] !== 0xff) { i++; continue; }

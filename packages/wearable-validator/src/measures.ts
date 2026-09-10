@@ -1,5 +1,7 @@
+import { BodyShape } from "@dcl/schemas";
 import { imageSize } from "image-size";
-import { computeAabb, countTriangles, listJointNames } from "./gltf.js";
+import { countedMaterials, isJpegBytes, isPngBytes, jpegPrecision } from "./checks/model-materials.js";
+import { computeAabb, formatDimensions, countTriangles, listJointNames } from "./gltf.js";
 import type { CheckContext } from "./types.js";
 
 const mb = (bytes: number): string => `${Math.round((bytes / 1048576) * 100) / 100} MB`;
@@ -19,17 +21,6 @@ function textureSizes(ctx: CheckContext): [number, number][] {
     }
   }
   return sizes;
-}
-
-function countedMaterials(ctx: CheckContext): string[] {
-  const names = new Set<string>();
-  for (const model of ctx.models) {
-    for (const material of model.doc.getRoot().listMaterials()) {
-      const name = material.getName();
-      if (name !== ctx.manifest.materials.avatarSkinMat) names.add(name || "(unnamed)");
-    }
-  }
-  return [...names];
 }
 
 function maxClipSeconds(ctx: CheckContext): number {
@@ -63,7 +54,7 @@ export const measures: Record<string, (ctx: CheckContext) => string | undefined>
   "representations": (ctx) => {
     const reps = ctx.item.representations ?? [];
     if (reps.length === 0) return undefined;
-    const shapes = new Set(reps.flatMap((r) => r.bodyShapes.map((s) => (s.toLowerCase().includes("female") ? "female" : "male"))));
+    const shapes = new Set(reps.flatMap((r) => r.bodyShapes.map((s) => (s === BodyShape.FEMALE ? "female" : s === BodyShape.MALE ? "male" : `unknown: ${s}`))));
     return `${shapes.size} body shape${shapes.size > 1 ? "s" : ""} (${[...shapes].join(", ")})`;
   },
   "file-size": (ctx) => `${mb(totalBytes(ctx))} total`,
@@ -112,6 +103,21 @@ export const measures: Record<string, (ctx: CheckContext) => string | undefined>
     const largest = sizes.reduce((a, b) => (b[0] * b[1] > a[0] * a[1] ? b : a));
     return `largest ${largest[0]}×${largest[1]}`;
   },
+  "texture-format": (ctx) => {
+    const formats = new Set<string>();
+    for (const model of ctx.models) {
+      for (const texture of model.doc.getRoot().listTextures()) {
+        const bytes = texture.getImage();
+        if (!bytes) formats.add("Image bytes unavailable");
+        else if (isPngBytes(bytes)) formats.add(`PNG · ${bytes[24]}-bit`);
+        else if (isJpegBytes(bytes)) {
+          const depth = jpegPrecision(bytes);
+          formats.add(`JPEG · ${depth === undefined ? "unknown bit depth" : `${depth}-bit`}`);
+        } else formats.add(texture.getMimeType() || "Unknown format");
+      }
+    }
+    return formats.size > 0 ? [...formats].join(" / ") : "No embedded textures";
+  },
   "texture-maps": (ctx) => {
     const slots = new Set<string>();
     for (const model of ctx.models) {
@@ -126,8 +132,8 @@ export const measures: Record<string, (ctx: CheckContext) => string | undefined>
     return slots.size > 0 ? [...slots].join(" · ") : "untextured";
   },
   "material-count": (ctx) => {
-    const materials = countedMaterials(ctx);
-    return `${materials.length} material${materials.length === 1 ? "" : "s"}`;
+    const count = Math.max(0, ...ctx.models.map(model => countedMaterials(model.doc).filter(material => material.getName() !== ctx.manifest.materials.avatarSkinMat).length));
+    return `${count} material${count === 1 ? "" : "s"}`;
   },
   "material-names": (ctx) => {
     for (const model of ctx.models) {
@@ -138,11 +144,12 @@ export const measures: Record<string, (ctx: CheckContext) => string | undefined>
     return `no ${ctx.manifest.materials.avatarSkinMat}`;
   },
   "bounding-box": (ctx) => {
-    for (const model of ctx.models) {
+    const bounds = ctx.models.flatMap(model => {
       const box = computeAabb(model.doc);
-      if (box) return `${box.width} × ${box.height} × ${box.depth} m`;
-    }
-    return undefined;
+      return box ? [{ file: model.mainFile, value: formatDimensions(box) }] : [];
+    });
+    if (bounds.length === 1) return bounds[0].value;
+    return bounds.length > 0 ? bounds.map(box => `${box.file}: ${box.value}`).join(" / ") : undefined;
   },
   "skeleton": (ctx) => {
     const joints = new Set(ctx.models.flatMap((m) => listJointNames(m.doc)));

@@ -1,5 +1,5 @@
 import { Accessor, type Document } from "@gltf-transform/core";
-import { computeAabb, countTriangles, hasSkinnedMesh, listJointNames } from "../gltf.js";
+import { computeAabb, formatDimensions, countTriangles, hasSkinnedMesh, listJointNames } from "../gltf.js";
 import { AVATAR_BONE_NAME_SET, AVATAR_CORE_BONE_NAMES, effectiveTriangleLimit } from "../manifest/index.js";
 import type { CheckContext, CheckDefinition, Finding, Severity } from "../types.js";
 import { docsUrl } from "../types.js";
@@ -102,13 +102,14 @@ const boundingBox: CheckDefinition = {
     for (const model of ctx.models) {
       const aabb = computeAabb(model.doc);
       if (!aabb) continue;
-      if (aabb.width > box.width || aabb.height > box.height || aabb.depth > box.depth) {
+      // Compare at glTF POSITION's float32 precision, without centimetre rounding.
+      if (Math.fround(aabb.width) > Math.fround(box.width) || Math.fround(aabb.height) > Math.fround(box.height) || Math.fround(aabb.depth) > Math.fround(box.depth)) {
         findings.push(
           make("bounding-box", "M-08", "error",
-            `"${model.mainFile}" measures ${aabb.width} × ${aabb.height} × ${aabb.depth} m (W×H×D) at rest pose — wearables must fit inside ${box.width} × ${box.height} × ${box.depth} m. Scale the model to the avatar's proportions before export.`,
+            `"${model.mainFile}" measures ${formatDimensions(aabb)} (W×H×D) at rest pose — wearables must fit inside ${box.width} × ${box.height} × ${box.depth} m. Scale the model to the avatar's proportions before export.`,
             {
               where: model.mainFile,
-              measured: `${aabb.width}×${aabb.height}×${aabb.depth} m`,
+              measured: formatDimensions(aabb),
               limit: `${box.width}×${box.height}×${box.depth} m`,
               data: { width: aabb.width, height: aabb.height, depth: aabb.depth }
             })

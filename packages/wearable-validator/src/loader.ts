@@ -109,7 +109,7 @@ async function buildContext(args: BuildArgs): Promise<LoadedInput> {
   let item: NormalizedItem = {};
   const embedded = readEmbeddedManifest(files);
 
-  if (args.entityMetadata) {
+  if (args.entityMetadata !== undefined) {
     metadataMode = "entity";
     item = normalizeEntityMetadata(args.entityMetadata);
   } else if (embedded) {
@@ -119,7 +119,7 @@ async function buildContext(args: BuildArgs): Promise<LoadedInput> {
   // Explicit metadata beats the embedded manifest; divergence is surfaced by the `metadata` check.
 
   const itemTypeFromMetadata: ItemType | undefined =
-    metadataMode !== "none" ? (item.emoteData || embedded?.kind === "emote" ? "emote" : "wearable") : undefined;
+    metadataMode !== "none" ? (item.emoteData || (metadataMode === "builder" && embedded?.kind === "emote") ? "emote" : "wearable") : undefined;
 
   // Parse every model (per representation, deduped by mainFile).
   const models: ParsedModel[] = [];
@@ -150,6 +150,7 @@ async function buildContext(args: BuildArgs): Promise<LoadedInput> {
   const ctx: CheckContext = {
     files,
     content: args.content,
+    entityMetadata: args.entityMetadata,
     item,
     itemType,
     category,
@@ -208,7 +209,8 @@ function normalizeBuilderManifest(raw: Record<string, unknown>, kind: "wearable"
     hides: pick<string[]>("hides"),
     replaces: pick<string[]>("replaces"),
     representations: pick<NormalizedItem["representations"]>("representations"),
-    requiredPermissions: pick<string[]>("requiredPermissions")
+    requiredPermissions: pick<string[]>("requiredPermissions"),
+    springBones: pick<unknown>("springBones")
   };
   if (kind === "emote") {
     item.emoteData = { category: pick<string>("category"), loop: (pick<boolean>("loop") ?? (raw.play_mode === "loop")) || undefined };
@@ -219,28 +221,53 @@ function normalizeBuilderManifest(raw: Record<string, unknown>, kind: "wearable"
 
 /** @dcl/schemas entity metadata (Wearable | Emote). */
 function normalizeEntityMetadata(raw: unknown): NormalizedItem {
-  const meta = raw as Record<string, unknown>;
-  const emoteData = meta.emoteDataADR74 as Record<string, unknown> | undefined;
-  const data = (meta.data ?? emoteData ?? {}) as Record<string, unknown>;
-  const reps = (data.representations ?? []) as { bodyShapes: string[]; mainFile: string; contents: string[]; overrideHides?: string[]; overrideReplaces?: string[] }[];
+  const meta = record(raw);
+  const hasEmote = "emoteDataADR74" in meta;
+  const emoteData = record(meta.emoteDataADR74);
+  const data = hasEmote ? emoteData : record(meta.data);
+  const reps = Array.isArray(data.representations) ? data.representations.map((value) => {
+    const rep = record(value);
+    return {
+      bodyShapes: strings(rep.bodyShapes) ?? [],
+      mainFile: string(rep.mainFile) ?? "",
+      contents: strings(rep.contents) ?? [],
+      overrideHides: strings(rep.overrideHides),
+      overrideReplaces: strings(rep.overrideReplaces)
+    };
+  }) : undefined;
+  const loop = typeof emoteData.loop === "boolean" ? emoteData.loop : undefined;
   return {
-    name: meta.name as string | undefined,
-    description: meta.description as string | undefined,
-    rarity: meta.rarity as string | undefined,
-    category: (data.category ?? undefined) as string | undefined,
-    tags: (data.tags ?? undefined) as string[] | undefined,
-    hides: (data.hides ?? undefined) as string[] | undefined,
-    replaces: (data.replaces ?? undefined) as string[] | undefined,
-    representations: reps.length ? reps : undefined,
-    thumbnailPath: meta.thumbnail as string | undefined,
-    rarityImagePath: meta.image as string | undefined,
-    springBones: (data as { springBones?: unknown }).springBones,
-    requiredPermissions: (data.requiredPermissions ?? undefined) as string[] | undefined,
-    emoteData: emoteData
-      ? { category: emoteData.category as string | undefined, loop: emoteData.loop as boolean | undefined, outcomes: emoteData.outcomes as unknown[] | undefined, startAnimation: emoteData.startAnimation }
-      : undefined,
-    loop: emoteData?.loop as boolean | undefined
+    name: string(meta.name),
+    description: string(meta.description),
+    rarity: string(meta.rarity),
+    category: string(data.category),
+    tags: strings(data.tags),
+    hides: strings(data.hides),
+    replaces: strings(data.replaces),
+    representations: reps,
+    thumbnailPath: string(meta.thumbnail),
+    rarityImagePath: string(meta.image),
+    springBones: data.springBones,
+    requiredPermissions: strings(data.requiredPermissions),
+    emoteData: hasEmote ? {
+      category: string(emoteData.category), loop,
+      outcomes: Array.isArray(emoteData.outcomes) ? emoteData.outcomes : undefined,
+      startAnimation: emoteData.startAnimation
+    } : undefined,
+    loop
   };
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function string(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function strings(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : undefined;
 }
 
 export function normalizePath(path: string): string {

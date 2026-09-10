@@ -1,5 +1,6 @@
-import { RequiredPermission, WearableCategory } from "@dcl/schemas";
-import dclHashing from "@dcl/hashing";
+import { BodyShape, EmoteCategory, Rarity, RequiredPermission, WearableCategory } from "@dcl/schemas";
+import { metadataSchemaFindings } from "../metadata-schema.js";
+import { contentHash } from "../content-hash.js";
 import { decode as decodePng } from "fast-png";
 import { isGlb, readGlbJsonChunk } from "../gltf.js";
 import { docsUrl, type CheckContext, type CheckDefinition, type Finding, type Severity } from "../types.js";
@@ -220,9 +221,6 @@ const gltfValid: CheckDefinition = {
 };
 
 // ── S-03 metadata ───────────────────────────────────────────────────────
-// TODO(S-03): entity mode should run full Wearable.validate / Emote.validate from
-// @dcl/schemas — the raw entity metadata is not retained on CheckContext yet, so both
-// modes get the shared required-field checks (id/i18n/urn are never findings in builder mode).
 
 function divergentFields(ctx: CheckContext): string[] {
   const embedded = ctx.embeddedManifest;
@@ -249,7 +247,7 @@ const metadata: CheckDefinition = {
   group: "files",
   rule: "S-03",
   title: "Metadata",
-  describe: "required metadata fields are present — entity or builder mode",
+  describe: "supplied item matches its platform schema; Builder manifests have required fields",
   appliesTo: (ctx) => (ctx.inputKind === "glb" || ctx.inputKind === "png-set" ? "bare inputs carry no metadata" : true),
   run: (ctx) => {
     const findings: Finding[] = [];
@@ -277,7 +275,12 @@ const metadata: CheckDefinition = {
       }
     }
 
-    if (!ctx.item.name?.trim()) {
+    if (ctx.metadataMode === "entity") findings.push(...metadataSchemaFindings(ctx.entityMetadata, ctx.itemType));
+
+    if (ctx.metadataMode === "builder" && ctx.item.rarity !== undefined && !Rarity.validate(ctx.item.rarity)) {
+      findings.push(finding("metadata", "S-03", "error", `Unknown rarity "${ctx.item.rarity}" — choose a valid item rarity in the Builder.`, { where: "rarity", measured: String(ctx.item.rarity) }));
+    }
+    if (typeof ctx.item.name !== "string" || !ctx.item.name.trim()) {
       findings.push(finding("metadata", "S-03", "error", "The item has no name — give it a name before publishing."));
     }
     const category = ctx.itemType === "emote" ? ctx.item.emoteData?.category ?? ctx.item.category : ctx.item.category;
@@ -329,6 +332,11 @@ const representations: CheckDefinition = {
       const where = rep.bodyShapes.join(", ") || `representation ${index + 1}`;
       if (rep.bodyShapes.length === 0) {
         findings.push(finding("representations", "S-04", "error", `Representation ${index + 1} lists no body shapes — every representation needs at least one.`, { where: `representation ${index + 1}` }));
+      }
+      for (const shape of rep.bodyShapes) {
+        if (!BodyShape.validate(shape)) {
+          findings.push(finding("representations", "S-04", "error", `Unknown body shape "${shape}" — use BaseMale or BaseFemale's full body-shape URN.`, { where, measured: String(shape), limit: `${BodyShape.MALE} or ${BodyShape.FEMALE}` }));
+        }
       }
       if (!rep.contents.includes(rep.mainFile)) {
         findings.push(
@@ -521,8 +529,6 @@ const nameDescription: CheckDefinition = {
 };
 
 // ── S-08 category ───────────────────────────────────────────────────────
-// TODO(S-08): validate emote categories against @dcl/schemas EmoteCategory once the
-// emote metadata pathway settles — for now any non-empty emote category is accepted.
 
 const category: CheckDefinition = {
   name: "category",
@@ -535,8 +541,8 @@ const category: CheckDefinition = {
     const findings: Finding[] = [];
     if (ctx.itemType === "emote") {
       const emoteCategory = ctx.item.emoteData?.category ?? ctx.item.category ?? ctx.category;
-      if (emoteCategory !== undefined && emoteCategory.trim() === "") {
-        findings.push(finding("category", "S-08", "error", "The emote category is empty — set one (e.g. dance, fun, greetings)."));
+      if (!EmoteCategory.validate(emoteCategory)) {
+        findings.push(finding("category", "S-08", "error", `Unknown or missing emote category "${emoteCategory ?? ""}" — choose a supported category such as dance, fun, or greetings.`, { where: "category", measured: String(emoteCategory ?? "") }));
       }
       return findings;
     }
@@ -566,7 +572,7 @@ const contentIntegrity: CheckDefinition = {
   group: "files",
   rule: "S-09",
   title: "Content integrity",
-  describe: "declared content hashes match recomputed CIDv1 hashes, both directions",
+  describe: "file contents match their declared legacy or CIDv1 hashes",
   appliesTo: (ctx) => (ctx.content ? true : "no entity content list"),
   run: async (ctx) => {
     const findings: Finding[] = [];
@@ -581,7 +587,7 @@ const contentIntegrity: CheckDefinition = {
         );
         continue;
       }
-      const computed = await dclHashing.hashV1(bytes);
+      const computed = await contentHash(bytes, hash.startsWith("Qm") ? 0 : 1);
       if (computed !== hash) {
         findings.push(
           finding(

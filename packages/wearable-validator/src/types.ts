@@ -100,6 +100,7 @@ export interface CheckContext {
   /** Resolved category (metadata or hint) — undefined for a hint-less bare GLB. */
   category?: string;
   metadataMode: MetadataMode;
+  entityMetadata?: unknown;
   inputKind: InputKind;
   totalBytes: number;
   /** One entry per representation; bare GLB = one entry. Empty when the GLB failed to parse. */

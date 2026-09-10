@@ -161,10 +161,11 @@ describe("metadata (S-03)", () => {
       data: { category: "hat", representations: [{ bodyShapes: ["urn:decentraland:off-chain:base-avatars:BaseMale"], mainFile: "model.glb", contents: ["model.glb"] }] }
     };
     const findings = only((await validate({ files, metadata }, { checks: ["metadata"] })).findings, "metadata");
-    assert.equal(findings.length, 1);
-    assert.equal(findings[0].severity, "warning");
-    assert.deepEqual(findings[0].data?.fields, ["name"]);
-    assert.match(findings[0].message, /embedded manifest/);
+    const warnings = findings.filter(f => f.severity === "warning");
+    assert.equal(warnings.length, 1);
+    assert.deepEqual(warnings[0].data?.fields, ["name"]);
+    assert.match(warnings[0].message, /embedded manifest/);
+    assert.ok(findings.some(f => f.severity === "error" && f.where === "id"));
   });
 
   it("passes a builder zip with name and category", async () => {

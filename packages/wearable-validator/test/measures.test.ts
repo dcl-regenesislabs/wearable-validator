@@ -26,3 +26,15 @@ describe("measured values", () => {
     assert.ok(result.checks.length > 0);
   });
 });
+
+it("reports embedded texture format and bit depth", async () => {
+  const glb = await syntheticGlb({ texture: { size: 64 } });
+  const result = await validate(glb, { category: "hat", checks: ["texture-format"] });
+  assert.equal(result.checks[0]?.status, "passed");
+  assert.equal(result.checks[0]?.measured, "PNG · 8-bit");
+});
+
+it("reports when no embedded textures exist", async () => {
+  const result = await validate(await syntheticGlb(), { category: "hat", checks: ["texture-format"] });
+  assert.equal(result.checks[0]?.measured, "No embedded textures");
+});
