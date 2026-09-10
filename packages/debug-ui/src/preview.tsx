@@ -47,7 +47,7 @@ export function Preview({ file, kind, category }: PreviewProps) {
 
   const sendEmoteCommand = useCallback((method: "play" | "pause" | "goTo", params: unknown[] = []) => {
     iframeRef.current?.contentWindow?.postMessage(
-      { type: "controller_request", payload: { id: ++requestId.current, namespace: "emote", method, params } },
+      { type: "controller_request", payload: { id: String(++requestId.current), namespace: "emote", method, params } },
       "*"
     );
   }, []);
@@ -80,8 +80,8 @@ export function Preview({ file, kind, category }: PreviewProps) {
         } else if (data?.type === "error") {
           setState("failed");
         } else if (data?.type === "emote_event") {
-          if (data.payload?.type === "animationPlay") setPlaying(true);
-          if (data.payload?.type === "animationPause" || data.payload?.type === "animationEnd") setPlaying(false);
+          if (data.payload?.type === "animation_play") setPlaying(true);
+          if (data.payload?.type === "animation_pause" || data.payload?.type === "animation_end") setPlaying(false);
         }
       };
       window.addEventListener("message", onMessage);
@@ -150,11 +150,12 @@ export function Preview({ file, kind, category }: PreviewProps) {
           </select>
         ) : (
           <div className="emote-buttons" role="group" aria-label="emote playback">
-            <button className="shape-btn" onClick={() => sendEmoteCommand(playing ? "pause" : "play")}>
+            <button className="shape-btn" disabled={state !== "ready"} onClick={() => sendEmoteCommand(playing ? "pause" : "play")}>
               {playing ? "⏸ pause" : "▶ play"}
             </button>
             <button
               className="shape-btn"
+              disabled={state !== "ready"}
               onClick={() => {
                 sendEmoteCommand("goTo", [0]);
                 sendEmoteCommand("play");
