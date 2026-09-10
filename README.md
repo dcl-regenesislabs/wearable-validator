@@ -33,6 +33,8 @@ npm run catalyst -w wearable-validator-tools -- --wearables 15 --emotes 10
 | `packages/debug-ui` | the website: upload → filterable per-rule results with separate values, requirements, and colored status labels (including on mobile), inspectable metadata fields, plain explanations, concrete how-to-fix steps, exact-section docs links, and a live 3D preview |
 | `tools` | catalyst runner (validate published items), sample generator, and `tools/corpus/` — downloaded catalyst content (blobs are a gitignored cache) + validation reports |
 
+Requirement labels are formatted in the debug UI; the package owns the manifest values and category-dependent limit calculations.
+
 Every check carries a rule-book ID (`M-01`…), a plain-language explanation, fix guidance, and a docs link — all exported from the package (`checks`, `explanations`, `fixes`) so no surface can drift from the code.
 
 Rendering checks (headless renderer) and AI checks (IP/policy screening) land later as optional entries (`/rendering`, `/ai`); the design docs live in the project's planning workspace.

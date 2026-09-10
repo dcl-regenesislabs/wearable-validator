@@ -6,7 +6,6 @@ import {
   explanations,
   fixes,
   docsUrl,
-  limitFor,
   sourceLinks,
   manifest,
   registry,
@@ -16,6 +15,7 @@ import {
   type Result
 } from "@dcl-regenesislabs/wearable-validator";
 import JSZip from "jszip";
+import { limitFor } from "./limits.js";
 import { Preview } from "./preview.js";
 import { MetadataValues } from "./metadata-values.js";
 import { fetchItem, parseItemReference } from "./catalyst.js";

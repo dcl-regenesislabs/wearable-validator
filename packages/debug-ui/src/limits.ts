@@ -1,4 +1,4 @@
-import { effectiveTriangleLimit, manifest } from "./manifest/index.js";
+import { effectiveTriangleLimit, manifest } from "@dcl-regenesislabs/wearable-validator";
 
 const mb = (bytes: number): string => `${Math.round((bytes / 1048576) * 10) / 10} MB`;
 
