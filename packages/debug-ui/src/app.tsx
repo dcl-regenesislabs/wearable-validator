@@ -5,6 +5,7 @@ import {
   details,
   explanations,
   fixes,
+  docsUrl,
   limitFor,
   sourceLinks,
   manifest,
@@ -351,13 +352,12 @@ export function App() {
               const notApplicable = registry.filter((c) => c.group === group).length - rows.length;
               return (
                 <section className="group" key={group} style={{ animationDelay: `${gi * 0.05}s` }}>
-                  <div className="group-head">
+                  <div className="group-head" title={GROUP_INTROS[group]}>
                     <h2>{GROUP_LABELS[group]}</h2>
                     <span className="tally">
                       {passed}/{rows.length} clean{notApplicable > 0 && <> · {notApplicable} n/a</>}
                     </span>
                   </div>
-                  <p className="group-intro">{GROUP_INTROS[group]}</p>
                   <div className="group-list">
                     {rows.map((row) => {
                       const findings = findingsByCheck.get(row.check) ?? [];
@@ -368,12 +368,7 @@ export function App() {
                         <details className="check" key={row.check} open={row.status === "failed" || row.status === "errored"}>
                           <summary>
                             <span className={`glyph ${row.status}`}>{GLYPHS[row.status]}</span>
-                            <span className="check-title">
-                              {def?.title ?? row.check}
-                              <span className="cname">
-                                {row.check} · {def?.rule}
-                              </span>
-                            </span>
+                            <span className={`check-title${row.status === "passed" ? " quiet" : ""}`}>{def?.title ?? row.check}</span>
                             <span className="limit-chip">
                               {row.measured && <span className="measured-val">{row.measured}</span>}
                               {row.measured && limitFor(row.check, resolvedCategory, hides) && <span className="limit-sep"> — </span>}
@@ -383,50 +378,40 @@ export function App() {
                               <span className="count-chip err">{errs} error{errs > 1 ? "s" : ""}</span>
                             ) : warns > 0 ? (
                               <span className="count-chip wrn">{warns} warning{warns > 1 ? "s" : ""}</span>
-                            ) : (
-                              <span className="count-chip ok">{row.status === "passed" ? "ok" : row.status}</span>
-                            )}
+                            ) : row.status === "skipped" || row.status === "errored" ? (
+                              <span className="count-chip ok">{row.status}</span>
+                            ) : null}
                           </summary>
                           <div className="check-body">
-                            <p className="explain">{explanations[row.check]}</p>
-                            {details[row.check] && (
-                              <p className="how">
-                                <span className="fix-label">How it's checked</span>
-                                {details[row.check]}{" "}
-                                <a className="src-link" href={sourceLinks[row.check]} target="_blank" rel="noreferrer">
-                                  source ↗
-                                </a>
-                              </p>
-                            )}
                             {row.status === "skipped" && <p className="skip-note">skipped — {row.skipReason}</p>}
                             {row.status === "errored" && <p className="skip-note">check crashed — {row.skipReason}</p>}
+                            {findings.map((f, fi) => (
+                              <div className={`finding ${f.severity}`} key={fi}>
+                                <p className="msg">{f.message}</p>
+                                {(f.where || f.measured !== undefined) && (
+                                  <div className="meta">
+                                    {f.where && <span>{f.where}</span>}
+                                    {f.measured !== undefined && (
+                                      <span>
+                                        measured <span className="ml">{String(f.measured)}</span>
+                                        {f.limit !== undefined && (
+                                          <>
+                                            {" "}/ limit <span className="ml">{String(f.limit)}</span>
+                                          </>
+                                        )}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
                             {(row.status === "failed" || row.status === "warning") && fixes[row.check] && (
                               <p className="fix-hint">
                                 <span className="fix-label">How to fix</span>
                                 {fixes[row.check]}
                               </p>
                             )}
-                            {findings.map((f, fi) => (
-                              <div className={`finding ${f.severity}`} key={fi}>
-                                <p className="msg">{f.message}</p>
-                                <div className="meta">
-                                  {f.where && <span>{f.where}</span>}
-                                  {f.measured !== undefined && (
-                                    <span>
-                                      measured <span className="ml">{String(f.measured)}</span>
-                                      {f.limit !== undefined && (
-                                        <>
-                                          {" "}/ limit <span className="ml">{String(f.limit)}</span>
-                                        </>
-                                      )}
-                                    </span>
-                                  )}
-                                  <a href={f.docs} target="_blank" rel="noreferrer">
-                                    docs ↗
-                                  </a>
-                                </div>
-                              </div>
-                            ))}
+                            <CheckAbout check={row.check} rule={def?.rule} collapsed={findings.length > 0} />
                           </div>
                         </details>
                       );
@@ -444,6 +429,33 @@ export function App() {
         </div>
       )}
     </div>
+  );
+}
+
+function CheckAbout({ check, rule, collapsed }: { check: string; rule?: string; collapsed: boolean }) {
+  const body = (
+    <>
+      <p className="explain">{explanations[check]}</p>
+      {details[check] && <p className="how">{details[check]}</p>}
+      <div className="about-meta">
+        <span>
+          {check} · {rule}
+        </span>
+        <a href={docsUrl(check)} target="_blank" rel="noreferrer">
+          docs ↗
+        </a>
+        <a href={sourceLinks[check]} target="_blank" rel="noreferrer">
+          source ↗
+        </a>
+      </div>
+    </>
+  );
+  if (!collapsed) return <div className="about">{body}</div>;
+  return (
+    <details className="about">
+      <summary>About this check</summary>
+      {body}
+    </details>
   );
 }
 
