@@ -31,21 +31,19 @@
     "gen:sources": "tsx generate-source-links.ts"
   },
   "dependencies": {
+    "@dcl/hashing": "3.0.4",
     "@dcl/schemas": "^16.11.1",
     "@gltf-transform/core": "^4.2.1",
     "@gltf-transform/extensions": "^4.2.1",
     "commander": "^12.1.0",
     "fast-png": "^6.3.0",
     "image-size": "^2.0.2",
-    "ipfs-unixfs-importer": "15.1.7",
     "jpeg-js": "^0.4.4",
     "jsqr": "^1.4.0",
     "jszip": "^3.10.1",
-    "multiformats": "12.0.1",
     "music-metadata": "^11.0.0"
   },
   "devDependencies": {
-    "@dcl/hashing": "^3.0.4",
     "@types/node": "^22.0.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3"

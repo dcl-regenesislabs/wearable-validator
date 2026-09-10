@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import dclHashing from "@dcl/hashing";
+import { hashVectors } from "./helpers/hash-vectors.js";
 import { validate } from "../src/validate.js";
 import { contentHash } from "../src/content-hash.js";
 
-for (const size of [0, 12, 262143, 262144, 262145, 1048576]) {
+for (const { size, legacy, cidV1 } of hashVectors) {
   test(`browser-compatible content hash matches Decentraland for ${size} bytes`, async () => {
     const bytes = Uint8Array.from({ length: size }, (_, index) => index % 251);
-    assert.equal(await contentHash(bytes), await dclHashing.hashV1(bytes));
-    assert.equal(await contentHash(bytes, 0), await dclHashing.hashV0(bytes));
+    assert.equal(await contentHash(bytes), cidV1);
+    assert.equal(await contentHash(bytes, 0), legacy);
   });
 }
 
