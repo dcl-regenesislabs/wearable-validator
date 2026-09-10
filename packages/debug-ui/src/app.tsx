@@ -374,7 +374,11 @@ export function App() {
                                 {row.check} · {def?.rule}
                               </span>
                             </span>
-                            <span className="limit-chip">{limitFor(row.check, resolvedCategory, hides) ?? ""}</span>
+                            <span className="limit-chip">
+                              {row.measured && <span className="measured-val">{row.measured}</span>}
+                              {row.measured && limitFor(row.check, resolvedCategory, hides) && <span className="limit-sep"> — </span>}
+                              {limitFor(row.check, resolvedCategory, hides) ?? ""}
+                            </span>
                             {errs > 0 ? (
                               <span className="count-chip err">{errs} error{errs > 1 ? "s" : ""}</span>
                             ) : warns > 0 ? (

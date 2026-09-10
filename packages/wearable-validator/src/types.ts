@@ -27,6 +27,8 @@ export interface CheckResult {
   check: string;
   group: Group;
   status: CheckStatus;
+  /** What the item actually measures for this check (e.g. "1,240 tris"). */
+  measured?: string;
   skipReason?: string;
   durationMs?: number;
 }
