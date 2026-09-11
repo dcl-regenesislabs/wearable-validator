@@ -1,4 +1,4 @@
-> **Status.** Phase-0 lab notebook, frozen, plus one later observation: item-only framing is not deterministic across runs (2026-09-11, three `visual:review` runs of `upper_body.zip` on the same PR #10053 build — worn views identical, isolated views differed in framing in two of three runs). Framing calibration remains open. The probe now drives `packages/wearable-validator/src/rendering.ts`; its parameters live in `manifest.rendering.probe`. The live doc is [visual-validation.md](../visual-validation.md).
+> **Status.** Phase-0 lab notebook, frozen, plus one later observation: item-only framing is not deterministic across runs (2026-09-11, three `visual:review` runs of `upper_body.zip` on the same PR #10053 build — worn views identical, isolated views differed in framing in two of three runs). Framing calibration remains open. The probe now drives `packages/wearable-validator/src/adapters/rendering.ts`; its parameters live in `manifest.rendering.probe`. The live doc is [visual-validation.md](../visual-validation.md).
 
 # Renderer experiment — first review checkpoint
 
