@@ -45,7 +45,8 @@ program
   .description("list every check with its group and rule-book ID")
   .action(() => {
     for (const check of registry) {
-      console.log(`${check.name.padEnd(20)} ${check.group.padEnd(9)} ${check.rule.padEnd(6)} ${check.describe}`);
+      const prompt = check.prompt ? `  prompt v${check.prompt.version}` : "";
+      console.log(`${check.name.padEnd(20)} ${check.group.padEnd(9)} ${check.rule.padEnd(6)} ${check.describe}${prompt}`);
       console.log(`${" ".repeat(37)}${explanations[check.name] ?? ""}\n`);
     }
   });
@@ -67,6 +68,7 @@ function formatFinding(f: Finding): string {
   const head = `${icon} ${f.check}`.padEnd(22);
   const lines = [`${head}${f.message}`];
   if (f.where) lines.push(`${" ".repeat(22)}${f.where}`);
+  if (f.evidence?.length) lines.push(`${" ".repeat(22)}evidence: ${f.evidence.map((e) => e.captureId).join(", ")}`);
   lines.push(`${" ".repeat(22)}${f.docs}   (rule ${f.rule})`);
   return lines.join("\n");
 }

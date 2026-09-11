@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "types": ["node"] },
+  "include": ["src/visual-review.ts", "src/renderer-probe.ts", "test/*.test.ts"]
+}

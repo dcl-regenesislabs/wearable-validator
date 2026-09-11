@@ -138,5 +138,9 @@
   "qr-code": {
     "file": "src/checks/qr-code.ts",
     "line": 66
+  },
+  "thumbnail-honesty": {
+    "file": "src/checks/thumbnail-honesty.ts",
+    "line": 215
   }
 }

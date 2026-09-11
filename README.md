@@ -29,15 +29,23 @@ npm run catalyst -w wearable-validator-tools -- --wearables 15 --emotes 10
 
 | | |
 |---|---|
-| `packages/wearable-validator` | the published package: 35 deterministic checks (files · model · emote · content), rules manifest, CLI. Isomorphic — the website runs it fully in the browser, nothing is uploaded |
+| `packages/wearable-validator` | the published package: 35 deterministic checks (files · model · emote · content) plus the first visual check `thumbnail-honesty` (V-05), rules manifest, CLI. The root entry is isomorphic — the website runs it fully in the browser; the optional `/rendering` and `/ai` entries are Node adapters |
 | `packages/debug-ui` | the website: upload → filterable per-rule results with separate values, requirements, and colored status labels (including on mobile), inspectable metadata fields, plain explanations, concrete how-to-fix steps, exact-section docs links, and a live 3D preview |
-| `tools` | catalyst runner (validate published items), sample generator, and `tools/corpus/` — downloaded catalyst content (blobs are a gitignored cache) + validation reports |
+| `tools` | catalyst runner (validate published items), sample generator, the visual review runner and the renderer probe; run evidence lands in gitignored `tools/artifacts/` |
 
 Requirement labels are formatted in the debug UI; the package owns the manifest values and category-dependent limit calculations.
 
 Every check carries a rule-book ID (`M-01`…), a plain-language explanation, fix guidance, and a docs link — all exported from the package (`checks`, `explanations`, `fixes`) so no surface can drift from the code.
 
-Rendering checks (headless renderer) and AI checks (IP/policy screening) land later as optional entries (`/rendering`, `/ai`); the design docs live in the project's planning workspace.
+Visual validation (Phase 4) starts with `thumbnail-honesty`: the item is rendered headlessly on both body shapes and one pinned vision call compares the renders with the thumbnail. Every run writes a folder you can open — screenshots, the prompt, the exact context sent to the model, the raw answer and the finding. See [docs/visual-validation.md](docs/visual-validation.md).
+
+```sh
+npx playwright-core install chromium --no-shell
+npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip \
+  --renderer-build /path/to/avatar-preview-renderer/Build --no-ai        # renders + writes the prompt, no spend
+npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip \
+  --from tools/artifacts/visual-upper_body-XXXXXX --auth .auth.json      # reuses the renders, one model call
+```
 
 ```ts
 import { validate } from "@dcl-regenesislabs/wearable-validator";

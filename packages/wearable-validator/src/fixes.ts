@@ -4,6 +4,8 @@
  * failed checks in the webview/CLI; completeness is test-enforced.
  */
 export const fixes: Record<string, string> = {
+  "thumbnail-honesty":
+    "Regenerate the thumbnail from the current item. Remove accessories or effects that are not included, and show its actual geometry and textures in a clear view.",
   // files
   "file-format":
     "In Blender: File → Export → glTF 2.0, format 'glTF Binary (.glb)'. For eyebrows/eyes/mouth, export a square PNG with a transparent background instead.",

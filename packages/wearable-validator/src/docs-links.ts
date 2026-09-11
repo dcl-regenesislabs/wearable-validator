@@ -13,6 +13,7 @@ const SMART = "https://docs.decentraland.org/creator/scenes-sdk7/kinds-of-projec
 const POLICY = "https://decentraland.org/content-policy/";
 
 export const DOCS_LINKS: Record<string, string> = {
+  "thumbnail-honesty": `${UPLOADING}#custom-thumbnails`,
   // files
   "file-format": `${WEARABLES}#building-3d-models-for-wearables`,
   "gltf-valid": `${WEARABLES}#building-3d-models-for-wearables`,

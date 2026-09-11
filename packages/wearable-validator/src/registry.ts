@@ -4,6 +4,7 @@ import { modelMaterialChecks } from "./checks/model-materials.js";
 import { modelGeometryChecks } from "./checks/model-geometry.js";
 import { emoteChecks } from "./checks/emote.js";
 import { qrCodeCheck } from "./checks/qr-code.js";
+import { thumbnailHonestyCheck } from "./checks/thumbnail-honesty.js";
 
 /**
  * Registry order IS execution and reporting order — stable across runs
@@ -14,7 +15,8 @@ export const registry: CheckDefinition[] = [
   ...modelMaterialChecks,
   ...modelGeometryChecks,
   ...emoteChecks,
-  qrCodeCheck
+  qrCodeCheck,
+  thumbnailHonestyCheck
 ];
 
 const byName = new Map(registry.map((c) => [c.name, c]));

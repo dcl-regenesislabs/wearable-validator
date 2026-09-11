@@ -32,6 +32,34 @@ export interface Manifest {
   gltf: { extensionAllowlist: string[]; unknownCodeSeverity: string; severityOverrides: Record<string, string> };
   hands: { minHandWeightRatio: number };
   thumbnail: { minTransparentPixelRatio: number; alphaThreshold: number };
+  /** The headless renderer, shared by every visual rule — read by /rendering and captures.ts. */
+  rendering: {
+    imageSizePx: number; bodyShapes: string[];
+    profile: string; background: string; skin: string;
+    wearablePose: string; wearablePoseFraction: number;
+    navigationTimeoutMs: number; loadTimeoutMs: number; commandTimeoutMs: number; timeoutMs: number;
+    settleMs: number; stabilityMs: number; maxStabilityAttempts: number;
+    maxCaptureBytes: number;
+    /** Phase-0 lab parameters, read only by tools/src/renderer-probe.ts. */
+    probe: {
+      pausedObservationMs: number; poseFractions: number[];
+      cameraSideRadians: number; cameraElevationRadians: number; cameraZoomWorldUnits: number;
+      cameraPanTarget: { x: number; y: number; z: number }; chromaSkin: string;
+    };
+  };
+  /** The one vision call, shared by every AI-backed rule — read by /ai (maxTextLength also by answer parsers). */
+  ai: {
+    model: string; maxOutputTokens: number; maxInputTokens: number; maxImages: number; timeoutMs: number; maxRetries: number;
+    thinkingBudgetTokens: number; imagePixelsPerToken: number; textCharactersPerToken: number; maxTextLength: number;
+  };
+  /** V-05 only. */
+  thumbnailHonesty: {
+    promptVersion: number; recipeVersion: number;
+    views: { wearable: ("avatar" | "wearable")[]; emote: ("avatar" | "wearable")[] };
+    azimuthDegrees: { wearable: number[]; emote: number[] };
+    emoteFractions: number[];
+    maxCaptures: number; maxFindings: number;
+  };
   receipts: Record<string, string>;
 }
 

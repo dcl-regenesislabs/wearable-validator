@@ -4,6 +4,8 @@
  * toggles). Shown in the webview's expanded panels and the generated docs.
  */
 export const details: Record<string, string> = {
+  "thumbnail-honesty":
+    "Renders the item on both body shapes — front, side and rear, worn and alone (emotes: front and side at start, middle and end) — then asks one pinned vision model, with a versioned prompt, whether the original thumbnail depicts that item. Mismatches are advisory warnings with the capture ids as evidence. Missing evidence, an inconclusive answer or a provider failure never pass.",
   // files
   "file-format":
     "Reads the model files' magic bytes — a real GLB starts with the 'glTF' header. Facial-feature categories route to the PNG path instead (square, ≤256×256, alpha channel) and skip every mesh rule.",

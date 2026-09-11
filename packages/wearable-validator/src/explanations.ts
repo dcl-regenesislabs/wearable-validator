@@ -4,6 +4,8 @@
  * all read from here; a test asserts every registry check has one.
  */
 export const explanations: Record<string, string> = {
+  "thumbnail-honesty":
+    "The thumbnail should show the item people will actually receive, with the same recognizable shape, colors, textures and included props.",
   // files
   "file-format":
     "Wearables must be exported as a single .glb file. Eyebrows, eyes and mouth items are PNG images with a transparent background instead of a 3D model.",

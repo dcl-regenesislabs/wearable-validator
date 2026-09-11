@@ -21,6 +21,19 @@ export interface Finding {
   /** Rule-book ID, e.g. 'M-01'. */
   rule: string;
   docs: string;
+  /** Visual rules: the capture ids (PNG file stems) the finding points at. */
+  evidence?: { captureId: string }[];
+}
+
+/** What a visual check hands back when it cannot return plain findings: coverage says whether the evidence was complete. */
+export interface CheckExecution {
+  status: CheckStatus;
+  coverage: "complete" | "missing";
+  findings: Finding[];
+  /** Creator-facing reason for skipped/errored. */
+  reason?: string;
+  measured?: string;
+  review?: ReviewMetadata;
 }
 
 export interface CheckResult {
@@ -31,6 +44,10 @@ export interface CheckResult {
   measured?: string;
   skipReason?: string;
   durationMs?: number;
+  /** "missing" = the check could not see everything it needed; never counts as a pass. */
+  coverage: "complete" | "missing";
+  /** Model/prompt/usage provenance for AI-backed checks. */
+  review?: ReviewMetadata;
 }
 
 export interface Result {
@@ -38,6 +55,8 @@ export interface Result {
   passed: boolean | null;
   checks: CheckResult[];
   findings: Finding[];
+  /** Every render the run used (supplied or fresh) — pass them back as Options.captures to skip re-rendering. */
+  captures: CaptureRecord[];
   summary: { errors: number; warnings: number; checked: number; skipped: number };
 }
 
@@ -51,6 +70,11 @@ export interface Options {
   itemType?: ItemType;
   /** Default 260 MB. Exceeding it yields an error finding, never a crash. */
   maxInputBytes?: number;
+  /** Previously rendered views; only stale or missing ones are rendered again. */
+  captures?: CaptureRecord[];
+  /** Renderer/reviewer adapters for the rendering group — see /rendering and /ai. */
+  services?: Services;
+  signal?: AbortSignal;
 }
 
 export type Input =
@@ -112,6 +136,9 @@ export interface CheckContext {
   emptyFiles: string[];
   /** The zip's own wearable.json/emote.json view — the `metadata` check reports divergence from explicit metadata. */
   embeddedManifest?: NormalizedItem;
+  captures?: CaptureRecord[];
+  services?: Services;
+  signal?: AbortSignal;
 }
 
 export interface CheckDefinition {
@@ -125,7 +152,101 @@ export interface CheckDefinition {
   categoryDependent?: boolean;
   /** Return a reason string to mark the check not-applicable (absent from results). */
   appliesTo?: (ctx: CheckContext) => true | string;
-  run: (ctx: CheckContext) => Finding[] | Promise<Finding[]>;
+  /** AI-backed checks carry their versioned prompt here so it is registry metadata, not hidden code. */
+  prompt?: Prompt;
+  run: (ctx: CheckContext) => Finding[] | CheckExecution | Promise<Finding[] | CheckExecution>;
+}
+
+// Visual validation — see docs/visual-validation.md. Types only; adapters live in /rendering and /ai.
+
+export interface CaptureRequest {
+  /** Human id, doubles as the PNG file stem and the "Image ID" the model is told: BaseMale-avatar-090. */
+  id: string;
+  /** Reuse identity: digest of every field below plus the scene settings (manifest.rendering). */
+  key: string;
+  inputDigest: string;
+  rendererBuild: string;
+  recipeVersion: number;
+  bodyShape: string;
+  mainFile: string;
+  /** avatar = worn on the body shape; wearable = the item alone. */
+  view: "avatar" | "wearable";
+  azimuthDegrees: number;
+  /** Emotes: fraction of the clip to scrub to. */
+  timeFraction?: number;
+  size: number;
+}
+
+/** Always a PNG of request.size × request.size. */
+export interface CaptureRecord {
+  request: CaptureRequest;
+  bytes: Uint8Array;
+  sha256: string;
+  width: number;
+  height: number;
+}
+
+export interface RenderInput {
+  files: Map<string, Uint8Array>;
+  item: NormalizedItem;
+  itemType: ItemType;
+  category: string;
+}
+
+export interface Renderer {
+  /** Digest of everything that changes pixels: wrapper lock, binaries, browser, platform. */
+  buildId: string;
+  capture(input: RenderInput, requests: CaptureRequest[], signal?: AbortSignal): Promise<CaptureRecord[]>;
+  stop(): Promise<void>;
+}
+
+export interface Prompt {
+  version: number;
+  system: string;
+  instructions: string;
+  /** JSON schema the model must answer with. */
+  schema: Record<string, unknown>;
+}
+
+export interface ReviewImage {
+  id: string;
+  label: string;
+  bytes: Uint8Array;
+  mimeType: "image/png" | "image/jpeg";
+}
+
+export interface ReviewRequest {
+  check: string;
+  prompt: Prompt;
+  /** sha256 of the canonical prompt — stamped on every answer so a verdict can be re-checked. */
+  promptDigest: string;
+  images: ReviewImage[];
+}
+
+export interface ReviewMetadata {
+  provider: string;
+  model: string;
+  promptVersion: number;
+  promptDigest: string;
+  stopReason?: string;
+  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
+  images?: { id: string; sha256: string }[];
+  /** Raw model text — the run folder alone reproduces the review. */
+  answer?: string;
+}
+
+/** Adapters fail soft: ok:false keeps the provenance so an errored row still says which model refused and what it cost. */
+export type ReviewResult =
+  | { ok: true; answer: unknown; metadata: ReviewMetadata }
+  | { ok: false; reason: string; metadata: ReviewMetadata };
+
+export interface Reviewer {
+  review(request: ReviewRequest, signal?: AbortSignal): Promise<ReviewResult>;
+}
+
+export interface Services {
+  renderer?: Renderer;
+  reviewer?: Reviewer;
 }
 
 export const DOCS_BASE = "https://dcl-regenesislabs.github.io/wearable-validator/checks";

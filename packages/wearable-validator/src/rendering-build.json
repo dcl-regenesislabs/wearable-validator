@@ -1,0 +1,42 @@
+{
+  "previewVersion": "2.20.0",
+  "previewSourceCommit": "0a04b9c5d28e1a52f26a995bf7e725c8a3eacbca",
+  "digestEncoding": "HTTP-decoded response bytes",
+  "assets": [
+    {
+      "path": "assets/index-CNxIRVBj.js",
+      "sha256": "71866ff2054e2525744f249dac78dcfb716f093f1f9984732b788beb44094eae",
+      "bytes": 289144
+    },
+    {
+      "path": "assets/UnityPreview-ZydJxDeJ.js",
+      "sha256": "1cfd392a785a13e8b05aa0cb724b35142e92c2d2ededa1cd901172ba31c464e9",
+      "bytes": 16781
+    },
+    {
+      "path": "unity/Build/avatar-preview-renderer.loader.js",
+      "sha256": "053fe18c6f04c9f4576a714255d48cd6942e2e056058d1f87327f045bef6aaac",
+      "bytes": 27797
+    },
+    {
+      "path": "unity/Build/avatar-preview-renderer.framework.js.br",
+      "sha256": "6e5d882ab55d2e078206151355846f1412191fe6f81515f408b70f69d75ab99a",
+      "bytes": 349162
+    },
+    {
+      "path": "unity/Build/avatar-preview-renderer.data.br",
+      "sha256": "3d6004a33231064ecc32668d8cbf5bb411382b03eaa3e0810dec1a5733494602",
+      "bytes": 17480876
+    },
+    {
+      "path": "unity/Build/avatar-preview-renderer.wasm.br",
+      "sha256": "1c1ae608be1d0ed97490abd709751b5393f38c2f9b5126568937505799f9ced9",
+      "bytes": 55940852
+    },
+    {
+      "path": "emotes/fist-pump.glb",
+      "sha256": "4c0d339aaad4dcd91303cebbda990114a3b9965dba271f70f320bc59f4f3820a",
+      "bytes": 238200
+    }
+  ]
+}

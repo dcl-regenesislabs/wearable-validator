@@ -1,3 +1,6 @@
 node_modules/
 dist/
 tools/corpus/blobs/
+tools/artifacts/
+.auth.json
+.auth.json.*
