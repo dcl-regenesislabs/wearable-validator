@@ -14,12 +14,12 @@
       "import": "./dist/index.js"
     },
     "./rendering": {
-      "types": "./dist/rendering.d.ts",
-      "import": "./dist/rendering.js"
+      "types": "./dist/adapters/rendering.d.ts",
+      "import": "./dist/adapters/rendering.js"
     },
     "./ai": {
-      "types": "./dist/ai.d.ts",
-      "import": "./dist/ai.js"
+      "types": "./dist/adapters/ai.d.ts",
+      "import": "./dist/adapters/ai.js"
     }
   },
   "bin": {
@@ -35,7 +35,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test test/*.test.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\" \"test/*.test.ts\"",
     "gen:sources": "tsx generate-source-links.ts"
   },
   "dependencies": {
@@ -69,5 +69,8 @@
     "playwright-core": {
       "optional": true
     }
+  },
+  "imports": {
+    "#test/*": "./test/*"
   }
 }

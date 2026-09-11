@@ -4,7 +4,7 @@ import { basename } from "node:path";
 import { Command } from "commander";
 import { validate } from "./validate.js";
 import { registry } from "./registry.js";
-import { explanations } from "./explanations.js";
+import { explanations } from "./registry.js";
 import type { Finding, Group, Result } from "./types.js";
 
 const program = new Command();

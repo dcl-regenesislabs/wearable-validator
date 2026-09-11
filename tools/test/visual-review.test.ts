@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pngBytes, syntheticGlb, syntheticZip } from "../../packages/wearable-validator/test/helpers/synthetic.js";
-import { digest } from "../../packages/wearable-validator/src/captures.js";
+import { digest } from "../../packages/wearable-validator/src/logic/captures.js";
 import type { CaptureRecord, Result } from "../../packages/wearable-validator/src/types.js";
 import type { ReviewRequest, ReviewResult } from "../../packages/wearable-validator/src/types.js";
 import { dryRunReviewer, fileCredentials, readRun, recordingReviewer, replayReviewer, writeRun } from "../src/visual-review.js";

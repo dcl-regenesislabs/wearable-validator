@@ -29,7 +29,7 @@ npm run catalyst -w wearable-validator-tools -- --wearables 15 --emotes 10
 
 | | |
 |---|---|
-| `packages/wearable-validator` | the published package: 35 deterministic checks (files · model · emote · content) plus the first visual check `thumbnail-honesty` (V-05), rules manifest, CLI. The root entry is isomorphic — the website runs it fully in the browser; the optional `/rendering` and `/ai` entries are Node adapters |
+| `packages/wearable-validator` | the published package: 35 deterministic checks (files · model · emote · content) plus the first visual check `thumbnail-honesty` (V-05), rules manifest, CLI. One folder per check under `src/checks/<group>/<name>/` (algorithm, creator-facing text and tests together); shared algorithms in `src/logic/`; Node-only adapters in `src/adapters/` (`/rendering`, `/ai`). The root entry is isomorphic — the website runs it fully in the browser |
 | `packages/debug-ui` | the website: upload → filterable per-rule results with separate values, requirements, and colored status labels (including on mobile), inspectable metadata fields, plain explanations, concrete how-to-fix steps, exact-section docs links, and a live 3D preview |
 | `tools` | catalyst runner (validate published items), sample generator, the visual review runner and the renderer probe; run evidence lands in gitignored `tools/artifacts/` |
 

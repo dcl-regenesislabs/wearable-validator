@@ -1,8 +1,6 @@
 import { loadInput } from "./loader.js";
-import { measures } from "./measures.js";
 import { registry, resolveCheck } from "./registry.js";
 import type { CheckContext, CheckDefinition, CheckExecution, CheckResult, Finding, Group, Input, Options, Result } from "./types.js";
-import { docsUrl } from "./types.js";
 
 const CORE_GROUPS: Group[] = ["files", "model", "emote", "content"];
 
@@ -49,7 +47,7 @@ export async function validate(input: Input, options: Options = {}): Promise<Res
         message: `Can't verify ${check.title.toLowerCase()} — the category is unknown and its limits depend on it. Pass --category (or metadata) to check exactly.`,
         data: { reason: "category-unknown" },
         rule: check.rule,
-        docs: docsUrl(check.name)
+        docs: check.docs
       };
       findings.push(finding);
       checkResults.push({ check: check.name, group: check.group, status: "warning", coverage: "missing", durationMs: Date.now() - started });
@@ -67,7 +65,7 @@ export async function validate(input: Input, options: Options = {}): Promise<Res
       findings.push(...execution.findings);
       let measured: string | undefined;
       try {
-        measured = measures[check.name]?.(ctx);
+        measured = check.measure?.(ctx);
       } catch {
         // display-only — a measurement failure must never affect the run
       }

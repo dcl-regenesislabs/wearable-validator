@@ -11,10 +11,10 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import lockfile from "proper-lockfile";
 import type { Context, Credential, CredentialStore } from "@earendil-works/pi-ai";
-import { createPiReviewer, reviewMessages } from "../../packages/wearable-validator/src/ai.js";
-import { digest } from "../../packages/wearable-validator/src/captures.js";
+import { createPiReviewer, reviewMessages } from "../../packages/wearable-validator/src/adapters/ai.js";
+import { digest } from "../../packages/wearable-validator/src/logic/captures.js";
 import { loadInput } from "../../packages/wearable-validator/src/loader.js";
-import { createRenderer } from "../../packages/wearable-validator/src/rendering.js";
+import { createRenderer } from "../../packages/wearable-validator/src/adapters/rendering.js";
 import { validate } from "../../packages/wearable-validator/src/validate.js";
 import type {
   CaptureRecord, CaptureRequest, CheckResult, Finding, Result, Reviewer, ReviewRequest, ReviewResult, Services

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { validate } from "../src/index.js";
-import { syntheticGlb, syntheticZip } from "./helpers/synthetic.js";
+import { syntheticGlb, syntheticZip } from "#test/helpers/synthetic.js";
 
 describe("plumbing smoke", () => {
   it("runs on a synthetic wearable zip and returns a result", async () => {

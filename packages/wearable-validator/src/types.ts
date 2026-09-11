@@ -1,5 +1,4 @@
 import type { Document } from "@gltf-transform/core";
-import { DOCS_LINKS } from "./docs-links.js";
 import type { Manifest } from "./manifest/index.js";
 
 export type Group = "files" | "model" | "emote" | "rendering" | "content";
@@ -141,20 +140,43 @@ export interface CheckContext {
   signal?: AbortSignal;
 }
 
+/**
+ * One check = one folder under src/checks/<group>/<name>/ holding this object and its tests.
+ * The creator-facing text lives on the definition so no surface (CLI, website, docs) can drift from the code.
+ */
 export interface CheckDefinition {
+  /** Readable API name, e.g. "triangle-count" — the rule ID is metadata, never the API. */
   name: string;
   group: Group;
+  /** Rule-book ID, e.g. "M-01". */
   rule: string;
   title: string;
   /** One-line "what it verifies" — docs pages generate from this. */
   describe: string;
+  /** Plain words for creators: what the rule is and why it exists. */
+  explanation: string;
+  /** Concrete steps to fix a failure (tool names, menu paths, numbers). */
+  fix: string;
+  /** How the check measures — for the website's expanded panel and the generated docs. */
+  details: string;
+  /** Creator-docs page with the exact section anchor. */
+  docs: string;
   /** Emits one warning finding when the category is unknown (bare GLB without hint). */
   categoryDependent?: boolean;
   /** Return a reason string to mark the check not-applicable (absent from results). */
   appliesTo?: (ctx: CheckContext) => true | string;
+  /** What the item actually measures for this check, e.g. "1,240 tris" — display only, never affects the run. */
+  measure?: (ctx: CheckContext) => string | undefined;
   /** AI-backed checks carry their versioned prompt here so it is registry metadata, not hidden code. */
   prompt?: Prompt;
   run: (ctx: CheckContext) => Finding[] | CheckExecution | Promise<Finding[] | CheckExecution>;
+}
+
+export type CheckMeta = Pick<CheckDefinition, "name" | "group" | "rule" | "docs">;
+
+/** Every finding carries its check's identity and docs link; checks build theirs through this. */
+export function finding(meta: CheckMeta, severity: Severity, message: string, extra: Partial<Finding> = {}): Finding {
+  return { check: meta.name, group: meta.group, rule: meta.rule, docs: meta.docs, severity, message, ...extra };
 }
 
 // Visual validation — see docs/visual-validation.md. Types only; adapters live in /rendering and /ai.
@@ -249,6 +271,3 @@ export interface Services {
   reviewer?: Reviewer;
 }
 
-export const DOCS_BASE = "https://dcl-regenesislabs.github.io/wearable-validator/checks";
-/** Live creator-docs page per check until the generated per-check site deploys. */
-export const docsUrl = (check: string): string => DOCS_LINKS[check] ?? `${DOCS_BASE}/${check}`;

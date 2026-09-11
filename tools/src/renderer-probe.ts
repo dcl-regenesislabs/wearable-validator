@@ -13,12 +13,12 @@ import { platform, arch } from "node:os";
 import type { Browser, Page } from "playwright-core";
 import { decode } from "fast-png";
 import { manifest } from "../../packages/wearable-validator/src/manifest/index.js";
-import build from "../../packages/wearable-validator/src/rendering-build.json" with { type: "json" };
+import build from "../../packages/wearable-validator/src/adapters/rendering-build.json" with { type: "json" };
 import { loadInput } from "../../packages/wearable-validator/src/loader.js";
 import {
   PREVIEW_HOST_URL, PREVIEW_URL, PreviewLoadError, launchChromium, mountPreview, pageSession, previewItem, previewUrl,
   readLocalBuild, requestPreview, routeAssets, screenshot, updatePreview, waitForLoad
-} from "../../packages/wearable-validator/src/rendering.js";
+} from "../../packages/wearable-validator/src/adapters/rendering.js";
 import type { RenderInput } from "../../packages/wearable-validator/src/types.js";
 
 const settings = manifest.rendering;
