@@ -16,7 +16,7 @@ import { manifest } from "../../packages/wearable-validator/src/manifest/index.j
 import build from "../../packages/wearable-validator/src/rendering-build.json" with { type: "json" };
 import { loadInput } from "../../packages/wearable-validator/src/loader.js";
 import {
-  PREVIEW_URL, PreviewLoadError, launchChromium, mountPreview, pageSession, previewItem, previewUrl,
+  PREVIEW_HOST_URL, PREVIEW_URL, PreviewLoadError, launchChromium, mountPreview, pageSession, previewItem, previewUrl,
   readLocalBuild, requestPreview, routeAssets, screenshot, updatePreview, waitForLoad
 } from "../../packages/wearable-validator/src/rendering.js";
 import type { RenderInput } from "../../packages/wearable-validator/src/types.js";
@@ -288,7 +288,7 @@ async function main(): Promise<void> {
     clearTimeout(deadline);
     if (page && !page.isClosed()) {
       await page.screenshot({ path: join(out, "last-page.png") }).catch(() => {});
-      await writeFile(join(out, "events.json"), JSON.stringify(await page.evaluate(() => Reflect.get(window, "probeEvents") ?? []).catch(() => []), null, 2));
+      await writeFile(join(out, "events.json"), JSON.stringify(await page.evaluate(() => Reflect.get(window, "previewEvents") ?? []).catch(() => []), null, 2));
     }
     await browser?.close();
     await Promise.all(assetTasks);

@@ -15,4 +15,4 @@ Optional Node entries:
 - `/rendering`: `await createRenderer({ buildDirectory })` — needs `playwright-core@1.63.0`, its full Chromium (`npx playwright-core install chromium --no-shell`) and a Unity Web build of unity-explorer PR #10053. Call `renderer.stop()` on shutdown.
 - `/ai`: `createPiReviewer({ credentials })` — needs `@earendil-works/pi-ai@0.84.1` and a host-owned Pi `CredentialStore` holding an Anthropic OAuth session. One schema-constrained image request, no tools, no agent loop.
 
-Root imports need neither. See the repository's [docs/visual-validation.md](https://github.com/dcl-regenesislabs/wearable-validator/blob/main/docs/visual-validation.md) for the run folder every review writes.
+Both peers are exact pins on purpose (the browser build and the provider API are what the captures and answers were verified against); a host that already carries another patch of either must install with `--legacy-peer-deps` or match the pin. Root imports need neither. See the repository's [docs/visual-validation.md](https://github.com/dcl-regenesislabs/wearable-validator/blob/main/docs/visual-validation.md) for the run folder every review writes.

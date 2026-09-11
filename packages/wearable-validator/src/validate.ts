@@ -83,6 +83,7 @@ export async function validate(input: Input, options: Options = {}): Promise<Res
       });
       if (execution.status === "skipped") skipped++;
     } catch (err) {
+      if (options.signal?.aborted) throw err; // a cancelled run is not an errored row
       checkResults.push({
         check: check.name,
         group: check.group,
@@ -94,6 +95,7 @@ export async function validate(input: Input, options: Options = {}): Promise<Res
     }
   }
 
+  options.signal?.throwIfAborted();
   const errors = findings.filter((f) => f.severity === "error").length;
   const warnings = findings.filter((f) => f.severity === "warning").length;
   const checked = checkResults.filter((c) => c.status !== "skipped").length;

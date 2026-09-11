@@ -1,7 +1,8 @@
 /**
  * Visual evidence helpers shared by every rendering-group check — isomorphic, pure.
- * Previous hop: /rendering produces CaptureRecords. Next hop: checks/<rule>.ts asks
- * resolveCaptures() for the views its recipe needs and hands them to the reviewer.
+ * Previous hop: checks/<rule>.ts expands its recipe into CaptureRequests and calls resolveCaptures().
+ * Next hop: supplied captures are reused, the rest come from services.renderer (/rendering);
+ * the ordered CaptureRecords go back to the check, which hands them to services.reviewer.
  */
 import { decode } from "fast-png";
 import { imageSize } from "image-size";
@@ -104,8 +105,14 @@ export async function resolveCaptures(ctx: CheckContext, requests: CaptureReques
     }
   }
   const captures = requests.map((request) => resolved.get(request.key)!);
-  // other rules' captures stay in the result so one run can feed several checks
-  const others = (ctx.captures ?? []).filter((capture) => !resolved.has(capture.request.key));
+  // other rules' captures stay in the result so one run can feed several checks — but only valid ones,
+  // and never a stale capture whose id (file name) collides with a view resolved here
+  const ids = new Set(requests.map((request) => request.id));
+  const others: CaptureRecord[] = [];
+  for (const capture of ctx.captures ?? []) {
+    if (resolved.has(capture.request.key) || ids.has(capture.request.id)) continue;
+    if (await validCapture(capture, capture.request, maxCaptureBytes)) others.push(capture);
+  }
   ctx.captures = [...captures, ...others];
   return captures;
 }

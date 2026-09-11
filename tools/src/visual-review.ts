@@ -82,13 +82,15 @@ export function readEvidenceFile(path: string): Promise<Buffer> {
   return readFile(path);
 }
 
-export async function readItem(args: Args): Promise<{ input: { files: Map<string, Uint8Array> }; thumbnail?: Uint8Array }> {
-  const loaded = await loadInput(await readEvidenceFile(args.file), {});
+/** The zip bytes gate the run; the visual run gets the unpacked files so --thumbnail can replace one of them. */
+export async function readItem(args: Args): Promise<{ bytes: Uint8Array; input: { files: Map<string, Uint8Array> }; thumbnail?: Uint8Array }> {
+  const bytes = new Uint8Array(await readEvidenceFile(args.file));
+  const loaded = await loadInput(bytes, {});
   if (!loaded.ctx) throw new Error("Provide a readable Builder wearable/emote ZIP with its thumbnail and representations.");
   const files = loaded.ctx.files;
   const thumbnailPath = loaded.ctx.item.thumbnailPath ?? "thumbnail.png";
   if (args.thumbnail) files.set(thumbnailPath, await readEvidenceFile(args.thumbnail));
-  return { input: { files }, thumbnail: files.get(thumbnailPath) };
+  return { bytes, input: { files }, thumbnail: files.get(thumbnailPath) };
 }
 
 // refresh tokens are single-use and the file is shared across terminals: lock, write <file>.<uuid>.tmp 0o600, rename; refuses api_key and .env* basenames
@@ -186,8 +188,10 @@ export async function readRun(dir: string): Promise<CaptureRecord[]> {
       throw new Error(`${join(folder, "captures.json")} holds an invalid capture entry. Re-run visual:review to regenerate it.`);
     }
     const entry = value as CaptureEntry;
-    const bytes = new Uint8Array(await readEvidenceFile(join(folder, basename(entry.file))));
-    captures.push({ request: entry.request, bytes, sha256: entry.sha256, width: entry.width, height: entry.height });
+    // a deleted PNG is a missing view: resolveCaptures renders it again (with --renderer-build) or reports it
+    const bytes = await readEvidenceFile(join(folder, basename(entry.file))).catch(() => undefined);
+    if (!bytes) continue;
+    captures.push({ request: entry.request, bytes: new Uint8Array(bytes), sha256: entry.sha256, width: entry.width, height: entry.height });
   }
   return captures;
 }
@@ -321,9 +325,12 @@ export async function writeRun(dir: string, result: Result, thumbnail?: Uint8Arr
   const folder = join(dir, "captures");
   await mkdir(folder, { recursive: true });
   const entries: CaptureEntry[] = [];
+  const seen = new Set<string>();
   for (const capture of result.captures) {
     const { id } = capture.request;
     if (!/^[\w.-]+$/.test(id)) throw new Error(`Capture id "${id}" is not a safe file stem.`);
+    if (seen.has(id)) throw new Error(`Two captures share the id "${id}"; the run folder cannot hold both.`);
+    seen.add(id);
     await writeFile(join(folder, `${id}.png`), capture.bytes);
     entries.push({ file: `${id}.png`, sha256: capture.sha256, width: capture.width, height: capture.height, request: capture.request });
   }
@@ -370,10 +377,10 @@ function printSummary(result: Result, index: string): void {
 
 async function main(): Promise<void> {
   const args = readArgs();
-  const { input, thumbnail } = await readItem(args);
-  // code gate is zero-cost: no browser, no OAuth until passed === true or --standalone
+  const { bytes, input, thumbnail } = await readItem(args);
+  // code gate is zero-cost: no browser, no OAuth until passed === true or --standalone; it judges the zip itself, not the unpacked files
   if (!args.standalone) {
-    const code = await validate(input);
+    const code = await validate(bytes);
     if (code.passed !== true) {
       console.log(JSON.stringify({
         stage: "code",

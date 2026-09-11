@@ -50,14 +50,14 @@ export function createPiReviewer(options: PiReviewerOptions): Reviewer {
     };
     const failure = (reason: string): ReviewResult => ({ ok: false, reason, metadata });
 
+    const gate = await requireOAuth(options.credentials, signal);
+    if (gate !== true) return failure(gate);
+    signal?.throwIfAborted();
     const estimated = estimateTokens(request);
     if (typeof estimated === "string") return failure(estimated);
     if (estimated > ai.maxInputTokens) {
       return failure(`The review needs about ${estimated} input tokens; the budget is ${ai.maxInputTokens}. Reduce the evidence size.`);
     }
-    const gate = await requireOAuth(options.credentials, signal);
-    if (gate !== true) return failure(gate);
-    signal?.throwIfAborted();
 
     const controller = new AbortController();
     const abort = (): void => controller.abort();
@@ -88,6 +88,41 @@ export function createPiReviewer(options: PiReviewerOptions): Reviewer {
     return parseResponse(response, metadata);
   }
   return { review };
+}
+
+/** Reads the credential store before any network: only an Anthropic OAuth session passes — API keys are refused on purpose. */
+async function requireOAuth(credentials: CredentialStore, signal?: AbortSignal): Promise<true | string> {
+  let credential;
+  try {
+    credential = await credentials.read("anthropic", { signal });
+  } catch {
+    signal?.throwIfAborted();
+    return "Cannot read the OAuth session. Check the credential store and try again.";
+  }
+  if (credential?.type !== "oauth" || !credential.access.startsWith("sk-ant-oat")) {
+    return "Provide an Anthropic OAuth session through credentials. API-key credentials are not supported.";
+  }
+  return true;
+}
+
+/** Pre-call budget: ceil(chars/3) + Σ ceil(w·h/750) ≤ maxInputTokens, 1..maxImages images — or the reason it cannot be sent. */
+function estimateTokens(request: ReviewRequest): number | string {
+  const ai = manifest.ai;
+  if (!request.images.length || request.images.length > ai.maxImages) {
+    return `The review sends ${request.images.length} images; the budget is 1 to ${ai.maxImages}.`;
+  }
+  const text = request.prompt.system + request.prompt.instructions + request.images.map(imageText).join("");
+  let tokens = Math.ceil(text.length / ai.textCharactersPerToken);
+  for (const image of request.images) {
+    if (!isPngBytes(image.bytes) && !isJpegBytes(image.bytes)) return `Provide PNG or JPEG evidence for the review (${image.id}).`;
+    const { width, height } = imageSize(image.bytes);
+    tokens += Math.ceil((width * height) / ai.imagePixelsPerToken);
+  }
+  return tokens;
+}
+
+function imageText(image: ReviewImage): string {
+  return `Image ID: ${image.id}\n${image.label}`;
 }
 
 /** The exact Context sent: "Image ID" + label before each image, the rule instructions last. */
@@ -121,42 +156,7 @@ export function configurePayload(body: unknown, schema: Record<string, unknown>,
   if (lastImage) lastImage.cache_control = { type: "ephemeral" };
 }
 
-function imageText(image: ReviewImage): string {
-  return `Image ID: ${image.id}\n${image.label}`;
-}
-
-/** Pre-call budget: ceil(chars/3) + Σ ceil(w·h/750) ≤ maxInputTokens, 1..maxImages images — or the reason it cannot be sent. */
-function estimateTokens(request: ReviewRequest): number | string {
-  const ai = manifest.ai;
-  if (!request.images.length || request.images.length > ai.maxImages) {
-    return `The review sends ${request.images.length} images; the budget is 1 to ${ai.maxImages}.`;
-  }
-  const text = request.prompt.system + request.prompt.instructions + request.images.map(imageText).join("");
-  let tokens = Math.ceil(text.length / ai.textCharactersPerToken);
-  for (const image of request.images) {
-    if (!isPngBytes(image.bytes) && !isJpegBytes(image.bytes)) return `Provide PNG or JPEG evidence for the review (${image.id}).`;
-    const { width, height } = imageSize(image.bytes);
-    tokens += Math.ceil((width * height) / ai.imagePixelsPerToken);
-  }
-  return tokens;
-}
-
-// type "oauth" and access sk-ant-oat… or { ok: false } before any fetch
-async function requireOAuth(credentials: CredentialStore, signal?: AbortSignal): Promise<true | string> {
-  let credential;
-  try {
-    credential = await credentials.read("anthropic", { signal });
-  } catch {
-    signal?.throwIfAborted();
-    return "Cannot read the OAuth session. Check the credential store and try again.";
-  }
-  if (credential?.type !== "oauth" || !credential.access.startsWith("sk-ant-oat")) {
-    return "Provide an Anthropic OAuth session through credentials. API-key credentials are not supported.";
-  }
-  return true;
-}
-
-// ok only when stopReason "stop", rawStopReason ≠ "refusal", no toolCall blocks, JSON parses; metadata (usage, stopReason, raw text) survives every failure
+/** Narrows the one response; provenance (usage, stopReason, raw text) survives every failure. */
 function parseResponse(response: AssistantMessage, base: ReviewMetadata): ReviewResult {
   const { input, output, cacheRead, cacheWrite, cost } = response.usage;
   const text = response.content.filter((block) => block.type === "text").map((block) => block.text).join("");
@@ -181,7 +181,6 @@ function parseResponse(response: AssistantMessage, base: ReviewMetadata): Review
   }
 }
 
-// sk-* and Bearer redacted; 401/429/404 mapped to creator-facing sentences
 function failureText(response: AssistantMessage): string {
   const message = response.errorMessage ?? "";
   if (/401|authentication_error|invalid.*token/i.test(message)) return "The OAuth session was rejected. Sign in again before retrying the review.";

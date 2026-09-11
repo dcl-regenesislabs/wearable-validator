@@ -141,6 +141,6 @@
   },
   "thumbnail-honesty": {
     "file": "src/checks/thumbnail-honesty.ts",
-    "line": 215
+    "line": 219
   }
 }

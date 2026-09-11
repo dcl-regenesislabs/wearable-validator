@@ -2,7 +2,7 @@
 
 # Visual validation contracts and fixtures
 
-Implementation detail for the [plan](visual-validation.md). The [V-05 iteration](../../README.md#thumbnail-honesty-v-05) now implements `CheckExecution`, complete/missing coverage, service injection, reusable captures and optional renderer/Pi entries. Inapplicable legacy checks remain absent. Identity-bound production aggregation, policy profiles, shared recipes/contact sheets and the other visual checks below remain proposed.
+Implementation detail for the [plan](visual-validation.md). The [V-05 iteration](../visual-validation.md) now implements `CheckExecution`, complete/missing coverage, service injection, reusable captures and optional renderer/Pi entries. Inapplicable legacy checks remain absent. Identity-bound production aggregation, policy profiles, shared recipes/contact sheets and the other visual checks below remain proposed.
 
 ## Check execution and returned evidence
 

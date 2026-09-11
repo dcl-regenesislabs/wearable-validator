@@ -1,8 +1,8 @@
-> **Status.** Phase-0 lab notebook, frozen. The probe now drives `packages/wearable-validator/src/rendering.ts`; its parameters live in `manifest.rendering.probe`. The live doc is [visual-validation.md](../visual-validation.md).
+> **Status.** Phase-0 lab notebook, frozen, plus one later observation: item-only framing is not deterministic across runs (2026-09-11, three `visual:review` runs of `upper_body.zip` on the same PR #10053 build — worn views identical, isolated views differed in framing in two of three runs). Framing calibration remains open. The probe now drives `packages/wearable-validator/src/rendering.ts`; its parameters live in `manifest.rendering.probe`. The live doc is [visual-validation.md](../visual-validation.md).
 
 # Renderer experiment — first review checkpoint
 
-The probe runs on `main`; production visual validation has not started. A local Unity build verifies camera controls and isolated local wearables. The subsequent [V-05 iteration](../../README.md#thumbnail-honesty-v-05) adds experimental adapters and a local review runner. **Keep renderer acceptance open:** framing, the remaining fixture matrix and Linux measurements still need validation before production rollout.
+The probe runs on `main`; production visual validation has not started. A local Unity build verifies camera controls and isolated local wearables. The subsequent [V-05 iteration](../visual-validation.md) adds experimental adapters and a local review runner. **Keep renderer acceptance open:** framing, the remaining fixture matrix and Linux measurements still need validation before production rollout.
 
 ## Reproduce
 

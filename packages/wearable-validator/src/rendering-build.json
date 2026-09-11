@@ -4,6 +4,11 @@
   "digestEncoding": "HTTP-decoded response bytes",
   "assets": [
     {
+      "path": "index.html",
+      "sha256": "26b13b48b3b08743aa1e842f3d6967e4f2f47f653b35dbec8477cf01b0c18d12",
+      "bytes": 1084
+    },
+    {
       "path": "assets/index-CNxIRVBj.js",
       "sha256": "71866ff2054e2525744f249dac78dcfb716f093f1f9984732b788beb44094eae",
       "bytes": 289144
@@ -37,6 +42,22 @@
       "path": "emotes/fist-pump.glb",
       "sha256": "4c0d339aaad4dcd91303cebbda990114a3b9965dba271f70f320bc59f4f3820a",
       "bytes": 238200
+    },
+    {
+      "path": "assets/index-gUzEzpYO.css",
+      "sha256": "38f84a4e7ba26ef8e2fa34f50063c659970b26a8be7b4ae636beb615ac473bca",
+      "bytes": 352
+    },
+    {
+      "path": "assets/UnityPreview-DDBpN-Lh.css",
+      "sha256": "ee035bda4b69bcf211674c72fe84d77a2b979549c3fdf364137a794d9ec285b8",
+      "bytes": 928
+    },
+    {
+      "path": "assets/emote-events-B_ZXW9TH.js",
+      "sha256": "7de6321e84a7c3132ff66662955381f61ba9c518d5c02ae99213d4174a71395e",
+      "bytes": 324563
     }
-  ]
+  ],
+  "note": "Allowlist: every path the wrapper may request under previewVersion. A mismatch is not fixed by bumping the hash \u2014 inspect what changed. Verified 2026-09-11."
 }

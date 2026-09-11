@@ -188,3 +188,49 @@ describe("run folder", () => {
     }
   });
 });
+
+describe("run folder edge cases", () => {
+  async function capture(id: string, key: string, azimuthDegrees: number): Promise<CaptureRecord> {
+    const bytes = pngBytes(8, 8, azimuthDegrees === 90);
+    return {
+      request: {
+        id, key, inputDigest: "input", rendererBuild: "build", recipeVersion: 1,
+        bodyShape: "urn:decentraland:off-chain:base-avatars:BaseMale", mainFile: "model.glb",
+        view: "avatar", azimuthDegrees, size: 8
+      },
+      bytes, sha256: await digest(bytes), width: 8, height: 8
+    };
+  }
+  function resultWith(captures: CaptureRecord[]): Result {
+    return {
+      passed: null,
+      checks: [{ check: "thumbnail-honesty", group: "rendering", status: "skipped", coverage: "missing", skipReason: "Configure services.reviewer." }],
+      findings: [],
+      captures,
+      summary: { errors: 0, warnings: 0, checked: 0, skipped: 1 }
+    };
+  }
+
+  it("readRun treats a deleted PNG as a missing view instead of failing the run", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "visual-review-missing-"));
+    try {
+      const captures = [await capture("BaseMale-avatar-000", "k0", 0), await capture("BaseMale-avatar-090", "k90", 90)];
+      await writeRun(directory, resultWith(captures));
+      await rm(join(directory, "captures", "BaseMale-avatar-090.png"));
+      const restored = await readRun(directory);
+      assert.deepEqual(restored.map((c) => c.request.id), ["BaseMale-avatar-000"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("writeRun refuses two captures that would share one file name", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "visual-review-dup-"));
+    try {
+      const captures = [await capture("BaseMale-avatar-000", "k0", 0), await capture("BaseMale-avatar-000", "k0-other-build", 0)];
+      await assert.rejects(writeRun(directory, resultWith(captures)), /share the id/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});

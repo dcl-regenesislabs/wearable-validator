@@ -148,3 +148,21 @@ describe("captures", () => {
     assert.deepEqual(rendered, []);
   });
 });
+
+describe("captures passthrough", () => {
+  it("drops other-rule captures that collide with a resolved id or fail their own validation", async () => {
+    const ctx = context();
+    const fresh = await request(ctx);
+    const staleSameId = await record({ ...fresh, key: "other-key", rendererBuild: "build-b" });
+    const otherRule = await record(await request(ctx, { azimuthDegrees: 45 }));
+    const corrupt = { ...(await record(await request(ctx, { azimuthDegrees: 135 }))), bytes: new Uint8Array([1, 2, 3]) };
+    ctx.captures = [staleSameId, otherRule, corrupt];
+    const rendered: CaptureRequest[][] = [];
+    ctx.services = { renderer: fakeRenderer("build-a", rendered) };
+    const resolved = await resolveCaptures(ctx, [fresh]);
+    assert.ok(Array.isArray(resolved));
+    assert.deepEqual(rendered.map((batch) => batch.length), [1]);
+    assert.deepEqual(ctx.captures?.map((capture) => capture.request.id), [fresh.id, otherRule.request.id]);
+    assert.equal(ctx.captures?.[0].request.key, fresh.key);
+  });
+});

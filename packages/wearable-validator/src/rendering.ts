@@ -20,6 +20,8 @@ import type { CaptureRecord, CaptureRequest, Renderer, RenderInput } from "./typ
 
 /** The only place the wrapper version is read — rendering-build.json pins it with its asset hashes. */
 export const PREVIEW_URL = `https://cdn.decentraland.org/@dcl/wearable-preview/${build.previewVersion}/`;
+/** Fulfilled from memory with the page that holds the iframe — never fetched. */
+export const PREVIEW_HOST_URL = "https://preview-host.invalid/";
 
 export type Gpu = "hardware" | "software";
 
@@ -105,13 +107,13 @@ export function previewItem(input: RenderInput): PreviewItem {
     overrideReplaces: rep.overrideReplaces ?? []
   }));
   const item: PreviewItem = {
-    id: "urn:decentraland:off-chain:preview:thumbnail-review",
-    name: "Thumbnail review",
+    id: "urn:decentraland:off-chain:preview:visual-review",
+    name: "Visual review",
     description: "",
     thumbnail: "",
     image: "",
     rarity: "common",
-    i18n: [{ code: "en", text: "Thumbnail review" }]
+    i18n: [{ code: "en", text: "Visual review" }]
   };
   if (input.itemType === "wearable") {
     item.data = {
@@ -136,11 +138,8 @@ export interface PreviewEvent {
 
 export class PreviewLoadError extends Error {}
 
-declare global {
-  interface Window {
-    probeEvents: PreviewEvent[];
-  }
-}
+/** The host page buffers wrapper messages here; typed locally so consumers' Window stays untouched. */
+type PreviewWindow = Window & { previewEvents: PreviewEvent[] };
 
 /** The seam createRenderer works through: the wrapper's postMessage protocol, not Playwright's Page. */
 export interface PreviewSession {
@@ -174,17 +173,18 @@ export function previewUrl(engine: "unity" | "babylon" = "unity"): string {
 }
 
 export async function mountPreview(page: Page, url: string, size: number): Promise<void> {
-  await page.goto("https://renderer-probe.invalid/");
-  // only messages from the iframe window and the wrapper origin count; emote_event is chatter; buffered into window.probeEvents so waitForFunction can poll
+  await page.goto(PREVIEW_HOST_URL);
+  // only messages from the iframe window and the wrapper origin count; emote_event is chatter; buffered on the window so waitForFunction can poll
   await page.evaluate(
     ({ url, size }) => {
-      window.probeEvents = [];
+      const host = window as unknown as PreviewWindow;
+      host.previewEvents = [];
       const iframe = document.createElement("iframe");
       iframe.style.cssText = `width:${size}px;height:${size}px;border:0;display:block`;
       window.addEventListener("message", (event) => {
         if (event.source !== iframe.contentWindow || event.origin !== new URL(url).origin) return;
         if (typeof event.data?.type !== "string" || event.data.type === "emote_event") return;
-        window.probeEvents.push(event.data);
+        host.previewEvents.push(event.data);
       });
       iframe.src = url;
       document.body.style.margin = "0";
@@ -200,7 +200,7 @@ export async function updatePreview(
   options: Record<string, unknown>,
   timeout: number
 ): Promise<PreviewEvent> {
-  const start = await page.evaluate(() => window.probeEvents.length);
+  const start = await page.evaluate(() => (window as unknown as PreviewWindow).previewEvents.length);
   // Blobs cannot cross page.evaluate: bytes travel as base64 and become Blob in-page
   await page.evaluate(
     ({ item, options }) => {
@@ -232,7 +232,7 @@ export async function updatePreview(
 
 export async function waitForLoad(page: Page, start: number, timeout: number): Promise<PreviewEvent> {
   const handle = await page.waitForFunction(
-    (start) => window.probeEvents.slice(start).find((event) => event.type === "load" || event.type === "error"),
+    (start) => (window as unknown as PreviewWindow).previewEvents.slice(start).find((event) => event.type === "load" || event.type === "error"),
     start,
     { timeout }
   );
@@ -263,7 +263,7 @@ export async function requestPreview(
     { id, namespace, method, params }
   );
   const handle = await page.waitForFunction(
-    (id) => window.probeEvents.find((event) => event.type === "controller_response" && event.payload?.id === id),
+    (id) => (window as unknown as PreviewWindow).previewEvents.find((event) => event.type === "controller_response" && event.payload?.id === id),
     id,
     { timeout }
   );
@@ -278,7 +278,6 @@ export type SessionSettings = Pick<Manifest["rendering"], "navigationTimeoutMs" 
 
 /** Binds the protocol to one page; engine stays "unknown" until the caller reads the first load event. */
 export function pageSession(page: Page, settings: SessionSettings): PreviewSession {
-  // page.setDefaultTimeout(commandTimeoutMs), setDefaultNavigationTimeout(navigationTimeoutMs)
   page.setDefaultTimeout(settings.commandTimeoutMs);
   page.setDefaultNavigationTimeout(settings.navigationTimeoutMs);
   return {
@@ -313,8 +312,8 @@ export function launchChromium(options: { gpu: Gpu; headed?: boolean; executable
 /** Without `assets` the deployed binaries are served (the probe's baseline) — still pinned by hash. */
 export async function routeAssets(context: BrowserContext, assets?: LocalBuild): Promise<{ assertHealthy(): void }> {
   let error: string | undefined;
-  // contentsquare/sentry aborted; serviceWorkers blocked; host page renderer-probe.invalid is fulfilled with minimal HTML that holds the iframe
-  await context.route("https://renderer-probe.invalid/", (route) =>
+  // contentsquare/sentry aborted; serviceWorkers blocked; the host page is fulfilled with minimal HTML that holds the iframe
+  await context.route(PREVIEW_HOST_URL, (route) =>
     route.fulfill({
       contentType: "text/html",
       body: "<!doctype html><title>Visual evidence</title>"
@@ -322,7 +321,7 @@ export async function routeAssets(context: BrowserContext, assets?: LocalBuild):
   );
   await context.route(/contentsquare\.net|sentry\.io/, (route) => route.abort());
   await context.route(`${PREVIEW_URL}**`, async (route) => {
-    const path = route.request().url().slice(PREVIEW_URL.length);
+    const path = new URL(route.request().url()).pathname.slice(new URL(PREVIEW_URL).pathname.length);
     // deployed 2.20.0 ignores camera changes and draws the avatar in item-only view; only unity/Build/* is served locally, the JS wrapper stays pinned
     if (assets && path.startsWith("unity/Build/")) {
       const asset = assets.get(path);
@@ -330,8 +329,12 @@ export async function routeAssets(context: BrowserContext, assets?: LocalBuild):
       if (!path.endsWith(".symbols.json.br")) error = `The local renderer is missing ${path}.`;
       return route.fulfill({ status: 404, body: "Missing local Unity asset" });
     }
+    // allowlist, not passthrough: an asset the lock does not know fails the capture instead of loading silently
     const pin = build.assets.find((asset) => asset.path === path);
-    if (!pin) return route.continue();
+    if (!pin) {
+      error = `The preview wrapper requested an unpinned asset: ${path}. Add it to rendering-build.json after verifying it.`;
+      return route.abort();
+    }
     try {
       const response = await route.fetch({ timeout: manifest.rendering.navigationTimeoutMs });
       try {
@@ -560,6 +563,14 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
         throw new Error(`The preview loaded the ${session.engine} engine. Visual evidence requires the configured Unity build.`);
       }
       return await captureAll(session, input, requests, controller.signal);
+    } catch (error) {
+      if (signal?.aborted) throw error; // the caller cancelled: let its AbortError through untouched
+      if (controller.signal.aborted) {
+        throw new Error(stopped
+          ? "Rendering was stopped before the views were captured. Run the capture again."
+          : `Rendering did not finish within ${manifest.rendering.timeoutMs} ms. Retry the capture, or raise rendering.timeoutMs.`);
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);

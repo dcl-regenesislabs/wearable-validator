@@ -297,3 +297,27 @@ describe("thumbnail-honesty prompt", () => {
     }
   });
 });
+
+describe("thumbnail-honesty cancellation and untrusted answers", () => {
+  it("a run cancelled while rendering rejects instead of recording an errored row", async () => {
+    const controller = new AbortController();
+    const mock = services();
+    mock.renderer.capture = async (_input, _requests, signal) => {
+      controller.abort();
+      signal?.throwIfAborted();
+      return [];
+    };
+    await assert.rejects(validate(await syntheticZip(), { ...CHECK, services: mock, signal: controller.signal }), /abort/i);
+    assert.equal(mock.reviews.length, 0);
+  });
+
+  it("rejects a non-string verdict and model text carrying terminal control characters", () => {
+    const ids = ["BaseMale-avatar-000", "thumbnail"];
+    const limits = { maxFindings: manifest.thumbnailHonesty.maxFindings, maxTextLength: manifest.ai.maxTextLength };
+    const valid = { verdict: "matches", summary: "Matches.", reviewedCaptureIds: ids, findings: [] };
+    const escape = String.fromCharCode(27);
+    assert.equal(typeof parseThumbnailAnswer({ ...valid, verdict: ["matches"] }, ids, limits), "string");
+    assert.equal(typeof parseThumbnailAnswer({ ...valid, summary: `clear${escape}[2J the screen` }, ids, limits), "string");
+    assert.equal(typeof parseThumbnailAnswer({ ...valid, summary: "two\nlines are fine" }, ids, limits), "object");
+  });
+});

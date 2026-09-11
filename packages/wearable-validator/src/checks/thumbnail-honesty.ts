@@ -70,6 +70,9 @@ export interface ThumbnailAnswer {
 }
 
 const MALFORMED = "The thumbnail review is malformed or does not cover every supplied image. Run the review again.";
+const VERDICTS = ["matches", "mismatch", "inconclusive"] as const;
+// model text reaches terminals and HTML: control characters are treated as malformed output
+const CONTROL_CHARACTERS = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
 
 /** Narrows the model's JSON to a ThumbnailAnswer; returns the creator-facing reason instead when it cannot be trusted. */
 export function parseThumbnailAnswer(
@@ -80,12 +83,14 @@ export function parseThumbnailAnswer(
   const record = object(value);
   if (!record) return "The thumbnail reviewer returned an invalid JSON object.";
   const text = (entry: unknown): entry is string =>
-    typeof entry === "string" && entry.trim().length > 0 && entry.length <= limits.maxTextLength;
+    typeof entry === "string" && entry.trim().length > 0 && entry.length <= limits.maxTextLength && !CONTROL_CHARACTERS.test(entry);
+  const verdict = (entry: unknown): entry is ThumbnailAnswer["verdict"] =>
+    typeof entry === "string" && (VERDICTS as readonly string[]).includes(entry);
   const ids = (entry: unknown): entry is string[] =>
     Array.isArray(entry) && entry.every((id) => typeof id === "string" && imageIds.includes(id));
   // reviewedCaptureIds must be exactly the supplied ids; each finding cites thumbnail + ≥1 render; mismatch ⇔ findings non-empty
   if (
-    !["matches", "mismatch", "inconclusive"].includes(String(record.verdict)) ||
+    !verdict(record.verdict) ||
     !text(record.summary) ||
     !ids(record.reviewedCaptureIds) ||
     new Set(record.reviewedCaptureIds).size !== imageIds.length ||
@@ -114,7 +119,7 @@ export function parseThumbnailAnswer(
     return "The thumbnail review's verdict contradicts its findings.";
   }
   return {
-    verdict: record.verdict as ThumbnailAnswer["verdict"],
+    verdict: record.verdict,
     summary: record.summary,
     reviewedCaptureIds: record.reviewedCaptureIds,
     findings
@@ -125,7 +130,6 @@ function object(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
-// thumbnailPath ?? thumbnail.png; PNG/JPEG by magic; ≤ fileSize.thumbnailBytes; side ≤ thumbnailMaxSize; fully decodable; id "thumbnail"
 function readThumbnail(ctx: CheckContext): ReviewImage | string {
   const path = ctx.item.thumbnailPath ?? "thumbnail.png";
   const bytes = ctx.files.get(path);

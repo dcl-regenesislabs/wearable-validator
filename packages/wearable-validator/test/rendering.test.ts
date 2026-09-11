@@ -369,7 +369,7 @@ describe("createRenderer", () => {
         return wire.session;
       });
       const operation = engine.capture(input, [request(engine.buildId)]);
-      const rejected = assert.rejects(operation, /aborted/);
+      const rejected = assert.rejects(operation, /stopped before the views/);
       await started;
       await engine.stop();
       await rejected;
