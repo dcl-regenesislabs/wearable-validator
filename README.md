@@ -37,6 +37,8 @@ Requirement labels are formatted in the debug UI; the package owns the manifest 
 
 Every check carries a rule-book ID (`M-01`…), a plain-language explanation, fix guidance, and a docs link — all exported from the package (`checks`, `explanations`, `fixes`) so no surface can drift from the code.
 
+To add or change a rule, follow [docs/adding-a-check.md](docs/adding-a-check.md): one folder per check, numbers in the manifest, tests beside the code.
+
 Visual validation (Phase 4) starts with `thumbnail-honesty`: the item is rendered headlessly on both body shapes and one pinned vision call compares the renders with the thumbnail. Every run writes a folder you can open — screenshots, the prompt, the exact context sent to the model, the raw answer and the finding. See [docs/visual-validation.md](docs/visual-validation.md).
 
 ```sh
