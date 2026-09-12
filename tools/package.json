@@ -8,7 +8,8 @@
     "visual:review": "tsx src/visual-review.ts",
     "renderer:probe": "tsx src/renderer-probe.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "serve": "tsx src/serve.ts"
   },
   "devDependencies": {
     "tsx": "^4.20.0",

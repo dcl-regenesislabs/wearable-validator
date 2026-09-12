@@ -19,6 +19,7 @@ import { limitFor } from "./limits.js";
 import { Preview } from "./preview.js";
 import { MetadataValues } from "./metadata-values.js";
 import { fetchItem, parseItemReference } from "./catalyst.js";
+import { VisualReview } from "./visual-review.js";
 
 const GROUP_LABELS: Record<Group, string> = {
   files: "Files & metadata",
@@ -33,7 +34,7 @@ const GROUP_INTROS: Record<Group, string> = {
   files: "The cheapest checks run first: the package's files, sizes, metadata and integrity — everything knowable without opening the 3D model.",
   model: "The 3D model itself: geometry budgets, textures, materials, skeleton and skinning — parsed from the GLB and measured exactly.",
   emote: "The animation data: length, clips, bone targets, root motion and sound — measured from the keyframes.",
-  rendering: "Real renders reviewed against the thumbnail — runs through the package's server adapters (npm run visual:review), not in the browser.",
+  rendering: "Real renders reviewed against the thumbnail — rendered by the local run server (npm run serve) and streamed here as they happen.",
   content: "Deterministic content screening. The AI-based IP and policy checks arrive with the renderer."
 };
 const CATEGORIES = Object.keys(manifest.triangles.perCategory).concat(manifest.facialCategories);
@@ -465,10 +466,11 @@ export function App() {
                 </section>
               );
             })}
+            {!loaded.isBareGlb && !loaded.files && <VisualReview bytes={loaded.bytes} name={loaded.name} codeResult={result} />}
             <footer className="foot">
               Checks that don't apply to this item (wrong item type, or metadata a bare .glb can't carry) aren't shown — that's
-              why fewer than {CODE_CHECK_COUNT} appear. Visual checks run through the package's server adapters, not here. Nothing leaves this
-              page: files are read and validated locally.
+              why fewer than {CODE_CHECK_COUNT} appear. Code checks never leave this page. The visual review, when a run server is
+              running, uploads the zip to it and streams the screenshots back.
             </footer>
           </main>
         </div>

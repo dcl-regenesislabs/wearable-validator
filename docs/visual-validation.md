@@ -37,6 +37,22 @@ Ground rules (CLAUDE.md, restated for this phase):
 
 ---
 
+## Live view in the website
+
+`npm run serve -w wearable-validator-tools -- --renderer-build <Build> [--auth .auth.json]` starts a local run server on `127.0.0.1:4180` (`tools/src/serve.ts`). The Vite dev server proxies `/api` to it, so the site gains a **Visual review** panel under the code results: one click uploads the zip, and the panel shows the server-side code gate, each screenshot the moment it is captured, the prompt version with a link to the exact prompt and image order, the raw answer with token usage, and the resulting findings with evidence chips that highlight the capture they cite. The static production site never shows the panel because nothing answers `/api/health`.
+
+The API is deliberately small so a hosted worker can implement it later without touching the page:
+
+| Call | Meaning |
+| --- | --- |
+| `GET /api/health` | `{ visual: { renderer, reviewer: "pi" \| "dry-run" }, checks, rulesVersion }` — what the site can offer |
+| `POST /api/runs[?standalone=1]` (zip bytes, `x-file-name`) | `201 { id }`; 409 while another run is active; the code gate runs first and stops the run unless `standalone` |
+| `GET /api/runs/:id/events` | Server-Sent Events: `check` (start/finish of every check), `gate` (code result), `stage`, `capture` (`{ id, request, url }` as each PNG lands), `review` (`request` with prompt digest and image order, then `answer` = the `ReviewResult`), `done` (the `Result` with capture URLs) or `error`. Events carry ids; `Last-Event-ID` replays the rest |
+| `GET /api/runs/:id/captures/<id>.png`, `/thumbnail.png`, `/<check>/1-prompt.md` … | files from the run folder (§3), path-safe |
+| `DELETE /api/runs/:id` | cancel |
+
+Why SSE and not WebSockets: progress is one-way, `EventSource` reconnects and replays on its own, it is plain HTTP that every proxy and Cloudflare pass through, and images stay ordinary cacheable GETs. The package exposes the hooks the server relays: `Options.onProgress` (check start/finish), `createRenderer({ onCapture })` (each screenshot), and the host wraps the reviewer as `tools/src/serve.ts` `liveReviewer` does.
+
 ## 1. Reading path
 
 Open a run folder first, then the code in the same order. Files in reading order inside `packages/wearable-validator/src/`: `types.ts` (the contracts) → `adapters/rendering.ts` → `logic/captures.ts` → `checks/rendering/thumbnail-honesty/index.ts` → `adapters/ai.ts`. Each opens with a 3–6 line header naming the previous and next hop.

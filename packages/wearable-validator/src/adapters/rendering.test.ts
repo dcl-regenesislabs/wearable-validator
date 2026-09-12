@@ -412,4 +412,13 @@ describe("captureAll", () => {
     const updates = wire.log.filter(([name]) => name === "update");
     assert.equal(updates.length, 4);
   });
+
+  it("hands each capture to onCapture the moment it lands, in request order", async () => {
+    const wire = scripted();
+    const requests = recipe("build");
+    const seen: string[] = [];
+    const captures = await captureAll(wire.session, input, requests, new AbortController().signal, (capture) => seen.push(capture.request.id));
+    assert.deepEqual(seen, requests.map((request) => request.id));
+    assert.equal(captures.length, seen.length);
+  });
 });

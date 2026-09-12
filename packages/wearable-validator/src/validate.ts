@@ -60,6 +60,7 @@ export async function validate(input: Input, options: Options = {}): Promise<Res
       continue;
     }
 
+    options.onProgress?.({ type: "check-started", check: check.name, group: check.group });
     try {
       const execution = normalizeExecution(await check.run(ctx), check);
       findings.push(...execution.findings);
@@ -80,6 +81,7 @@ export async function validate(input: Input, options: Options = {}): Promise<Res
         durationMs: Date.now() - started
       });
       if (execution.status === "skipped") skipped++;
+      options.onProgress?.({ type: "check-finished", result: checkResults.at(-1)!, findings: execution.findings });
     } catch (err) {
       if (options.signal?.aborted) throw err; // a cancelled run is not an errored row
       checkResults.push({
@@ -90,6 +92,7 @@ export async function validate(input: Input, options: Options = {}): Promise<Res
         skipReason: err instanceof Error ? err.message : String(err),
         durationMs: Date.now() - started
       });
+      options.onProgress?.({ type: "check-finished", result: checkResults.at(-1)!, findings: [] });
     }
   }
 

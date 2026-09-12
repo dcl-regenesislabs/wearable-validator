@@ -27,3 +27,16 @@ describe("plumbing smoke", () => {
     await assert.rejects(() => validate(new Uint8Array([1]), { checks: ["nope"] }), /Unknown check/);
   });
 });
+
+describe("progress events", () => {
+  it("reports every check starting and finishing, in registry order, without changing the result", async () => {
+    const events: string[] = [];
+    const result = await validate(await syntheticZip(), {
+      onProgress: (event) => events.push(event.type === "check-started" ? `>${event.check}` : `<${event.result.check}:${event.result.status}`)
+    });
+    const names = result.checks.map((row) => row.check);
+    assert.deepEqual(events.filter((e) => e.startsWith(">")).map((e) => e.slice(1)), names);
+    assert.deepEqual(events.filter((e) => e.startsWith("<")).map((e) => e.slice(1)), result.checks.map((row) => `${row.check}:${row.status}`));
+    for (let i = 0; i < names.length; i++) assert.equal(events.indexOf(`>${names[i]}`) < events.findIndex((e) => e.startsWith(`<${names[i]}:`)), true);
+  });
+});

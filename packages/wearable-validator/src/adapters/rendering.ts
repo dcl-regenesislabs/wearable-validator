@@ -448,7 +448,8 @@ export async function captureAll(
   session: PreviewSession,
   input: RenderInput,
   requests: CaptureRequest[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  onCapture?: (capture: CaptureRecord) => void
 ): Promise<CaptureRecord[]> {
   const settings = manifest.rendering;
   const item = previewItem(input);
@@ -488,7 +489,9 @@ export async function captureAll(
         front = undefined;
       }
     }
-    captures.push({ request, bytes, sha256: await digest(bytes), width: request.size, height: request.size });
+    const capture = { request, bytes, sha256: await digest(bytes), width: request.size, height: request.size };
+    captures.push(capture);
+    onCapture?.(capture);
   }
   return captures;
 }
@@ -503,6 +506,8 @@ export interface RendererOptions {
   headed?: boolean;
   /** Test seam, defaults to Chromium. */
   open?: OpenPreview;
+  /** Called the moment each view is captured — a live UI can show it while the rest render. */
+  onCapture?: (capture: CaptureRecord) => void;
 }
 
 export async function createRenderer(options: RendererOptions): Promise<Renderer> {
@@ -562,7 +567,7 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
       if (session.engine !== "unity") {
         throw new Error(`The preview loaded the ${session.engine} engine. Visual evidence requires the configured Unity build.`);
       }
-      return await captureAll(session, input, requests, controller.signal);
+      return await captureAll(session, input, requests, controller.signal, options.onCapture);
     } catch (error) {
       if (signal?.aborted) throw error; // the caller cancelled: let its AbortError through untouched
       if (controller.signal.aborted) {

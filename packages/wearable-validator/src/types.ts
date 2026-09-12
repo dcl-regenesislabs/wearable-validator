@@ -74,7 +74,14 @@ export interface Options {
   /** Renderer/reviewer adapters for the rendering group — see /rendering and /ai. */
   services?: Services;
   signal?: AbortSignal;
+  /** Called as each check starts and finishes — for live UIs; never affects the result. */
+  onProgress?: (event: ProgressEvent) => void;
 }
+
+/** Check-level progress. Captures and model answers are reported by the adapters that produce them. */
+export type ProgressEvent =
+  | { type: "check-started"; check: string; group: Group }
+  | { type: "check-finished"; result: CheckResult; findings: Finding[] };
 
 export type Input =
   | Uint8Array
