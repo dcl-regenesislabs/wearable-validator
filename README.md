@@ -44,9 +44,8 @@ Visual validation (Phase 4) starts with `thumbnail-honesty`: the item is rendere
 ```sh
 npx playwright-core install chromium --no-shell
 # once: put the Unity build from unity-explorer PR #10053 in tools/renderer-build/ (see docs/visual-validation.md)
-# watch it live in the website: start the run server, then the site (it proxies /api to the server)
-npm run serve -w wearable-validator-tools -- --auth .auth.json
-npm run dev -w wearable-validator-debug-ui      # drop a zip → "Render and review" streams every screenshot, the prompt and the answer
+# the website with live visual review: builds the site and serves it with the run server at http://127.0.0.1:4180
+npm run serve -- --auth .auth.json              # drop a zip → "Render and review" streams every screenshot, the prompt and the answer
 # or from the terminal
 npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip --no-ai   # renders + writes the prompt, no spend
 npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip \
