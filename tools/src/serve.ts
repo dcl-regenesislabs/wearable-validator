@@ -5,9 +5,9 @@
  * Next hop: validate() with the renderer/reviewer adapters; the run folder on disk is the same one
  * tools/src/visual-review.ts writes. A hosted worker can offer this exact API later; only the storage changes.
  */
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdir, readFile, stat, writeFile, appendFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile, appendFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -18,7 +18,7 @@ import { manifest } from "../../packages/wearable-validator/src/manifest/index.j
 import { registry } from "../../packages/wearable-validator/src/registry.js";
 import { validate } from "../../packages/wearable-validator/src/validate.js";
 import type { CaptureRecord, Renderer, Result, Reviewer } from "../../packages/wearable-validator/src/types.js";
-import { dryRunReviewer, fileCredentials, recordingReviewer, writeRun } from "./visual-review.js";
+import { dryRunReviewer, fileCredentials, readRun, recordingReviewer, writeRun } from "./visual-review.js";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const VISUAL_CHECKS = registry.filter((check) => check.group === "rendering").map((check) => check.name);
@@ -112,6 +112,24 @@ async function sendFile(res: ServerResponse, root: string, relativePath: string)
   }
 }
 
+/** Run folders remember which zip they came from (input.json); the newest per zip wins. */
+async function indexPreviousRuns(out: string, previous: Map<string, string>): Promise<void> {
+  const entries = await readdir(out).catch(() => [] as string[]);
+  const found: { sha256: string; dir: string; mtime: number }[] = [];
+  for (const entry of entries) {
+    if (!entry.startsWith("visual-")) continue;
+    const dir = join(out, entry);
+    try {
+      const input = JSON.parse(await readFile(join(dir, "input.json"), "utf8")) as { sha256?: string };
+      const info = await stat(join(dir, "captures", "captures.json"));
+      if (input.sha256) found.push({ sha256: input.sha256, dir, mtime: info.mtimeMs });
+    } catch {
+      // not a run folder with reusable captures
+    }
+  }
+  for (const item of found.sort((a, b) => a.mtime - b.mtime)) previous.set(item.sha256, item.dir);
+}
+
 /** Result for the wire: capture bytes become URLs the page can load. */
 function serializeResult(run: Run, result: Result): unknown {
   return { ...result, captures: result.captures.map(({ bytes, ...capture }) => ({ ...capture, url: `/api/runs/${run.id}/captures/${capture.request.id}.png` })) };
@@ -119,7 +137,10 @@ function serializeResult(run: Run, result: Result): unknown {
 
 export function createRunServer(options: ServeOptions): { server: Server; close(): Promise<void> } {
   const runs = new Map<string, Run>();
+  // latest run folder per uploaded zip (sha256) — its captures are offered to the next run of the same file
+  const previous = new Map<string, string>();
   let active = 0;
+  void indexPreviousRuns(options.out, previous);
 
   function emit(run: Run, type: string, data: unknown): void {
     const event: RunEvent = { id: run.events.length + 1, type, data };
@@ -143,8 +164,19 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       const loaded = await loadInput(bytes, {});
       const thumbnail = loaded.ctx?.files.get(loaded.ctx.item.thumbnailPath ?? "thumbnail.png");
       if (thumbnail) await writeFile(join(run.dir, "thumbnail.png"), thumbnail);
+      const inputSha = createHash("sha256").update(bytes).digest("hex");
+      await writeFile(join(run.dir, "input.json"), JSON.stringify({ name, sha256: inputSha }));
+      // an earlier run of the same file: show its photos now; only stale or missing views get rendered again
+      const earlier = previous.get(inputSha);
+      const captures = earlier && earlier !== run.dir ? await readRun(earlier).catch(() => []) : [];
+      previous.set(inputSha, run.dir);
+      const io = sink(run);
+      if (captures.length) {
+        emit(run, "stage", { text: `Reusing ${captures.length} views from an earlier run` });
+        for (const capture of captures) await io.capture(capture);
+      }
       emit(run, "stage", { text: "Starting the renderer" });
-      services = await options.services(sink(run));
+      services = await options.services(io);
       if (!services.renderer && !services.reviewer) {
         emit(run, "done", { skipped: true, message: "This server has no renderer or reviewer configured (start it with --renderer-build and --auth)." });
         return;
@@ -152,6 +184,7 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       emit(run, "stage", { text: "Rendering the item on both body shapes" });
       const result = await validate(bytes, {
         checks: VISUAL_CHECKS,
+        captures,
         services: { renderer: services.renderer, reviewer: services.reviewer },
         signal: run.controller.signal,
         onProgress: (event) => emit(run, "check", event)

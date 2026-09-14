@@ -31,7 +31,7 @@ async function readEvents(url: string): Promise<Frame[]> {
     });
 }
 
-function fakeServices(calls: { services: number }) {
+function fakeServices(calls: { services: number; rendered: number[] }) {
   return async (run: RunSink) => {
     calls.services++;
     const size = manifest.rendering.imageSizePx;
@@ -39,6 +39,7 @@ function fakeServices(calls: { services: number }) {
     const renderer: Renderer = {
       buildId: "fake-build",
       capture: async (_input, requests) => {
+        calls.rendered.push(requests.length);
         const captures: CaptureRecord[] = [];
         for (const request of requests) {
           const capture = { request, bytes, sha256: await digest(bytes), width: size, height: size };
@@ -65,7 +66,7 @@ describe("run server", () => {
   let out: string;
   let base: string;
   let close: () => Promise<void>;
-  const calls = { services: 0 };
+  const calls = { services: 0, rendered: [] as number[] };
 
   before(async () => {
     out = await mkdtemp(join(tmpdir(), "run-server-"));
@@ -119,6 +120,20 @@ describe("run server", () => {
     assert.equal(prompt.status, 200);
     assert.match(await prompt.text(), /Image ID: BaseMale-avatar-000/);
     assert.equal(calls.services, 1);
+  });
+
+  it("shows an earlier run's photos at once and renders nothing again for the same file", async () => {
+    const zip = await syntheticZip();
+    const first = (await (await fetch(`${base}/api/runs?standalone=1`, { method: "POST", body: body(zip) })).json()) as { id: string };
+    await readEvents(`${base}/api/runs/${first.id}/events`);
+    const renderedBefore = calls.rendered.length;
+    const second = (await (await fetch(`${base}/api/runs?standalone=1`, { method: "POST", body: body(zip) })).json()) as { id: string };
+    const events = await readEvents(`${base}/api/runs/${second.id}/events`);
+    const types = events.map((e) => e.type);
+    assert.equal(types.filter((t) => t === "capture").length, 12);
+    assert.ok(types.indexOf("capture") < types.indexOf("review"), "photos arrive before the model is asked");
+    assert.deepEqual(calls.rendered.slice(renderedBefore), [], "no renderer call for an unchanged file");
+    assert.equal(events.at(-1)!.type, "done");
   });
 
   it("replays a finished run after Last-Event-ID and refuses paths outside the run folder", async () => {

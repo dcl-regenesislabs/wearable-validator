@@ -46,8 +46,11 @@ function reduce(state: RunState, event: RunEvent): RunState {
       return { ...state, gate: event.data.result, rows: new Map() };
     case "stage":
       return { ...state, phase: "rendering", stage: event.data.text };
-    case "capture":
-      return { ...state, phase: "rendering", stage: `Captured ${captionFor(event.data)}`, captures: [...state.captures, event.data] };
+    case "capture": {
+      // a view rendered again replaces the reused one with the same id
+      const captures = state.captures.filter((capture) => capture.id !== event.data.id);
+      return { ...state, phase: "rendering", stage: `Captured ${captionFor(event.data)}`, captures: [...captures, event.data] };
+    }
     case "review":
       return event.data.phase === "request"
         ? { ...state, phase: "reviewing", stage: "Asking the model", request: event.data }
@@ -73,7 +76,6 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
     };
   }, []);
   useEffect(() => () => stop.current?.(), []);
-  useEffect(() => setState(EMPTY), [bytes]);
 
   const start = useCallback(async () => {
     if (!bytes) return;
@@ -83,7 +85,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
       // the server may have been restarted with other flags since the panel mounted
       const health = await visualHealth();
       if (!health) throw new Error("The run server is not reachable. Start it with npm run serve -w wearable-validator-tools.");
-      setCapabilities(health.visual);
+      setCapabilities((current) => (JSON.stringify(current) === JSON.stringify(health.visual) ? current : health.visual));
       const { id } = await startRun(bytes, name, codeResult?.passed !== true);
       setState((s) => ({ ...s, id, stage: "Running the code checks" }));
       stop.current = followRun(id, (event) => setState((s) => reduce(s, event)));
@@ -91,6 +93,15 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
       setState({ ...EMPTY, phase: "failed", stage: error instanceof Error ? error.message : "Could not start the run." });
     }
   }, [bytes, name, codeResult]);
+
+  // a run server is there and a zip is loaded: render right away, the photos are the point
+  const latestStart = useRef(start);
+  latestStart.current = start;
+  const serverKnown = capabilities !== null;
+  useEffect(() => {
+    setState(EMPTY);
+    if (serverKnown && bytes && codeResult) void latestStart.current();
+  }, [serverKnown, bytes, codeResult]);
 
   if (!capabilities || !bytes) return null;
   const running = state.phase !== "idle" && state.phase !== "done" && state.phase !== "failed";
@@ -104,13 +115,13 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
       <div className="group-head">
         <h2>Visual review</h2>
         <span className="tally">
-          {capabilities.renderer ? "local renderer" : "no renderer"} · {capabilities.reviewer === "pi" ? "model: claude" : "model: dry run"}
+          {capabilities.renderer ? "local renderer" : "no renderer"} · {capabilities.reviewer === "pi" ? "one model call per run" : "model: dry run"}
         </span>
       </div>
       <div className="visual-body">
         {state.phase === "idle" && (
           <div className="visual-intro">
-            <p>{def.explanation} The run server renders the item on both body shapes, then asks one pinned vision model whether the thumbnail depicts it. Every screenshot appears here as it is taken.</p>
+            <p>{def.explanation} The run server renders the item on both body shapes, then asks one pinned vision model whether the thumbnail depicts it.</p>
             <div className="visual-actions">
               <button className="visual-btn" onClick={() => void start()}>
                 {codeResult?.passed === true ? "Render and review" : "Render and review anyway"}
@@ -123,7 +134,11 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
         {state.phase !== "idle" && (
           <div className={`visual-stage ${state.phase}`}>
             {running && <span className="spin-inline" aria-hidden="true" />}
-            {row && <span className={`rule-status ${row.status}`}>{STATUS_LABELS[row.status]}</span>}
+            {row && (
+              <span className={`rule-status ${row.status === "errored" && capabilities.reviewer !== "pi" ? "skipped" : row.status}`}>
+                {row.status === "errored" && capabilities.reviewer !== "pi" ? "Rendered, no model" : STATUS_LABELS[row.status]}
+              </span>
+            )}
             <span className="visual-stage-text">{state.stage}</span>
             {running && state.id && (
               <button className="visual-cancel" onClick={() => void cancelRun(state.id!)}>Cancel</button>
@@ -148,7 +163,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
             )}
             {state.captures.map((capture) => (
               <figure className={`visual-figure${highlight === capture.id ? " lit" : ""}`} key={capture.id} id={`capture-${capture.id}`}>
-                <img src={capture.url} alt={captionFor(capture)} />
+                <img src={`${capture.url}?v=${capture.sha256.slice(0, 8)}`} alt={captionFor(capture)} />
                 <figcaption>{captionFor(capture)}</figcaption>
               </figure>
             ))}
