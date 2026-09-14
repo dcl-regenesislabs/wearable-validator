@@ -297,7 +297,11 @@ async function main(): Promise<void> {
     }
   });
   const cwd = process.env.INIT_CWD ?? process.cwd();
-  const buildDirectory = values["renderer-build"] ? resolve(cwd, values["renderer-build"]) : undefined;
+  // tools/renderer-build is the gitignored home for the PR #10053 Unity build, so the flag is optional once it is there
+  const defaultBuild = join(ROOT, "tools/renderer-build");
+  const buildDirectory = values["renderer-build"]
+    ? resolve(cwd, values["renderer-build"])
+    : await stat(join(defaultBuild, "avatar-preview-renderer.wasm")).then(() => defaultBuild).catch(() => undefined);
   const auth = values.auth ? resolve(cwd, values.auth) : undefined;
   const out = values.out ? resolve(cwd, values.out) : join(ROOT, "tools/artifacts");
   const site = values.site ? resolve(cwd, values.site) : join(ROOT, "packages/debug-ui/dist");

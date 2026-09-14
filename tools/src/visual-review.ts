@@ -5,6 +5,7 @@
  * boundary (captures, prompt, context, answer, finding) is written to disk — see docs/visual-validation.md §3.
  */
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,7 +67,7 @@ export function readArgs(argv = process.argv.slice(2)): Args {
   return {
     file: path(positionals[0])!,
     auth: path(values.auth),
-    buildDirectory: path(values["renderer-build"]),
+    buildDirectory: path(values["renderer-build"]) ?? (existsSync(join(ROOT, "tools/renderer-build/avatar-preview-renderer.wasm")) ? join(ROOT, "tools/renderer-build") : undefined),
     from: path(values.from),
     answer: values.answer!,
     thumbnail: path(values.thumbnail),

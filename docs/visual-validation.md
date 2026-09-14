@@ -6,12 +6,12 @@
 
 ## How to run
 
-Once: `npm install`, `npx playwright-core install chromium --no-shell`, and a Unity Web build of [unity-explorer PR #10053](https://github.com/decentraland/unity-explorer/pull/10053) (Unity 6000.5.9f1 + Web Build Support); point `--renderer-build` at its `Build` folder. The deployed 2.20.0 binaries ignore camera changes and cannot isolate the item, so the run aborts on them by design.
+Once: `npm install`, `npx playwright-core install chromium --no-shell`, and a Unity Web build of [unity-explorer PR #10053](https://github.com/decentraland/unity-explorer/pull/10053) (Unity 6000.5.9f1 + Web Build Support; branch `feat/validator-capture-controls` in the unity-explorer checkout, project `avatar-preview-renderer`). Copy its `Build/` files (`avatar-preview-renderer.{loader.js,framework.js,wasm,data}`, plain, `.br` or `.gz`) into `tools/renderer-build/` (gitignored) and every command finds them; `--renderer-build <dir>` points elsewhere. The deployed 2.20.0 binaries ignore camera changes and cannot isolate the item, so the run aborts on them by design.
 
 ```sh
 # render + write the prompt, no model call (the code checks must pass first, or add --standalone)
 npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip \
-  --renderer-build ~/avatar-preview-renderer/Build --no-ai
+  --no-ai
 
 # reuse those renders, one model call over OAuth (a Pi CredentialStore JSON: { "anthropic": { "type": "oauth", ... } })
 npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip \
@@ -39,7 +39,7 @@ Ground rules (CLAUDE.md, restated for this phase):
 
 ## Live view in the website
 
-`npm run serve -w wearable-validator-tools -- --renderer-build <Build> [--auth .auth.json]` starts a local run server on `127.0.0.1:4180` (`tools/src/serve.ts`). The Vite dev server proxies `/api` to it, so the site gains a **Visual review** panel under the code results: one click uploads the zip, and the panel shows the server-side code gate, each screenshot the moment it is captured, the prompt version with a link to the exact prompt and image order, the raw answer with token usage, and the resulting findings with evidence chips that highlight the capture they cite. The static production site never shows the panel because nothing answers `/api/health`.
+`npm run serve -w wearable-validator-tools -- [--auth .auth.json]` starts a local run server on `127.0.0.1:4180` (`tools/src/serve.ts`). The Vite dev server proxies `/api` to it, so the site gains a **Visual review** panel under the code results: one click uploads the zip, and the panel shows the server-side code gate, each screenshot the moment it is captured, the prompt version with a link to the exact prompt and image order, the raw answer with token usage, and the resulting findings with evidence chips that highlight the capture they cite. The static production site never shows the panel because nothing answers `/api/health`.
 
 The API is deliberately small so a hosted worker can implement it later without touching the page:
 

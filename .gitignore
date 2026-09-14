@@ -4,3 +4,4 @@ tools/corpus/blobs/
 tools/artifacts/
 .auth.json
 .auth.json.*
+tools/renderer-build/
