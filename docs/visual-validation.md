@@ -51,6 +51,8 @@ The API is deliberately small so a hosted worker can implement it later without 
 | `GET /api/runs/:id/captures/<id>.png`, `/thumbnail.png`, `/<check>/1-prompt.md` … | files from the run folder (§3), path-safe |
 | `DELETE /api/runs/:id` | cancel |
 
+**Running it as a service.** The same process is configured by environment when hosted: `PORT`, `HOST` (`0.0.0.0` in a container), `AUTH_FILE` (the Pi OAuth session JSON), `RENDERER_BUILD`, `ARTIFACTS_DIR`, `SITE_DIR`, `LOG_FORMAT=json`; flags win over the environment. Logs are one line per event on stdout — pretty on a terminal, JSON lines when piped — covering run accepted, code gate, each capture, the model request (prompt version, digest, image count), the answer (model, verdict, findings, tokens, cost, summary) or its failure reason, and run finished/failed with elapsed ms; tokens and file contents are never logged. `SIGTERM` stops accepting, aborts running captures, closes Chromium and exits. Still missing before a real deployment: a container image with Chromium and the Unity build, durable storage for run folders, and request authentication (ADR-44 signed fetch) — the run API today trusts anyone who can reach the port.
+
 Why SSE and not WebSockets: progress is one-way, `EventSource` reconnects and replays on its own, it is plain HTTP that every proxy and Cloudflare pass through, and images stay ordinary cacheable GETs. The package exposes the hooks the server relays: `Options.onProgress` (check start/finish), `createRenderer({ onCapture })` (each screenshot), and the host wraps the reviewer as `tools/src/serve.ts` `liveReviewer` does.
 
 ## 1. Reading path

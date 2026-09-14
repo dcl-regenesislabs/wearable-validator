@@ -70,7 +70,8 @@ describe("run server", () => {
 
   before(async () => {
     out = await mkdtemp(join(tmpdir(), "run-server-"));
-    const created = createRunServer({ out, services: fakeServices(calls), capabilities: { renderer: true, reviewer: "dry-run" } });
+    const silent = { info() {}, warn() {}, error() {} };
+    const created = createRunServer({ out, services: fakeServices(calls), capabilities: { renderer: true, reviewer: "dry-run" }, logger: silent });
     close = created.close;
     await new Promise<void>((resolve) => created.server.listen(0, "127.0.0.1", () => resolve()));
     base = `http://127.0.0.1:${(created.server.address() as AddressInfo).port}`;
