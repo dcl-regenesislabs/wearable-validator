@@ -45,8 +45,10 @@ export async function visualHealth(): Promise<{ visual: VisualCapabilities; chec
   }
 }
 
-export async function startRun(bytes: Uint8Array, name: string, standalone: boolean): Promise<{ id: string }> {
-  const res = await fetch(`/api/runs${standalone ? "?standalone=1" : ""}`, {
+/** `model: false` renders only; `standalone` asks the model even though the code checks failed. */
+export async function startRun(bytes: Uint8Array, name: string, options: { model: boolean; standalone: boolean }): Promise<{ id: string }> {
+  const query = new URLSearchParams({ ...(options.model ? {} : { model: "0" }), ...(options.standalone ? { standalone: "1" } : {}) }).toString();
+  const res = await fetch(`/api/runs${query ? `?${query}` : ""}`, {
     method: "POST",
     // a plain ArrayBuffer: the body type fetch accepts everywhere
     body: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,

@@ -209,17 +209,15 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
     void appendFile(join(run.dir, "events.jsonl"), JSON.stringify(event) + "\n").catch(() => {});
   }
 
-  async function execute(run: Run, bytes: Uint8Array, name: string, standalone: boolean): Promise<void> {
+  async function execute(run: Run, bytes: Uint8Array, name: string, mode: { model: boolean; standalone: boolean }): Promise<void> {
     active++;
     let services: RunServices | undefined;
     try {
-      // the code gate judges the zip itself and costs nothing: no browser, no model until it passes
+      // the code gate costs nothing; screenshots are always taken, the model is only asked when the code checks pass or the caller insists
       const code = await validate(bytes, { signal: run.controller.signal, onProgress: (event) => emit(run, "check", event) });
       emit(run, "gate", { result: code, passed: code.passed });
-      if (code.passed !== true && !standalone) {
-        emit(run, "done", { skipped: true, result: code, message: "Visual review was not started: fix the code checks first, or run it anyway." });
-        return;
-      }
+      const askModel = mode.model && (code.passed === true || mode.standalone);
+      if (mode.model && !askModel) emit(run, "stage", { text: "Code checks failed: rendering only, the model is not asked" });
       const loaded = await loadInput(bytes, {});
       const thumbnail = loaded.ctx?.files.get(loaded.ctx.item.thumbnailPath ?? "thumbnail.png");
       if (thumbnail) await writeFile(join(run.dir, "thumbnail.png"), thumbnail);
@@ -244,7 +242,7 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       const result = await validate(bytes, {
         checks: VISUAL_CHECKS,
         captures,
-        services: { renderer: services.renderer, reviewer: services.reviewer },
+        services: { renderer: services.renderer, reviewer: askModel ? services.reviewer : undefined },
         signal: run.controller.signal,
         onProgress: (event) => emit(run, "check", event)
       });
@@ -305,9 +303,9 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       await mkdir(dir, { recursive: true });
       const run: Run = { id, name, dir, events: [], listeners: new Set(), controller: new AbortController(), done: false, startedAt: Date.now() };
       runs.set(id, run);
-      log.info("run accepted", { run: id, file: name, bytes: bytes.length, standalone: url.searchParams.get("standalone") === "1", dir });
+      log.info("run accepted", { run: id, file: name, bytes: bytes.length, model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1", dir });
       json(res, 201, { id, events: `/api/runs/${id}/events` });
-      void execute(run, bytes, name, url.searchParams.get("standalone") === "1");
+      void execute(run, bytes, name, { model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1" });
       return;
     }
 

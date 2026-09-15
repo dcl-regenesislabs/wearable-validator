@@ -79,7 +79,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
   }, []);
   useEffect(() => () => stop.current?.(), []);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (askModel: boolean) => {
     if (!bytes) return;
     stop.current?.();
     setState({ ...EMPTY, phase: "starting", stage: "Uploading to the run server" });
@@ -88,7 +88,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
       const health = await visualHealth();
       if (!health) throw new Error("The run server is not reachable. Start it with npm run serve -w wearable-validator-tools.");
       setCapabilities((current) => (JSON.stringify(current) === JSON.stringify(health.visual) ? current : health.visual));
-      const { id } = await startRun(bytes, name, codeResult?.passed !== true);
+      const { id } = await startRun(bytes, name, { model: askModel, standalone: askModel && codeResult?.passed !== true });
       setState((s) => ({ ...s, id, stage: "Running the code checks" }));
       stop.current = followRun(id, (event) => setState((s) => reduce(s, event)));
     } catch (error) {
@@ -96,15 +96,16 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
     }
   }, [bytes, name, codeResult]);
 
-  // a run server is there and the code checks passed: render right away. With code errors the creator has
-  // things to fix first, so rendering and the model call wait for an explicit click.
+  // a run server is there and a zip is loaded: the photos are always taken. The model is asked right away only
+  // when the code checks passed; with errors the creator has things to fix first, so that waits for a click.
   const latestStart = useRef(start);
   latestStart.current = start;
   const serverKnown = capabilities !== null;
   useEffect(() => {
     setState(EMPTY);
-    if (serverKnown && bytes && codeResult?.passed === true) void latestStart.current();
+    if (serverKnown && bytes && codeResult) void latestStart.current(codeResult.passed === true);
   }, [serverKnown, bytes, codeResult]);
+  const modelAsked = Object.keys(state.reviews).length > 0;
 
   if (!capabilities || !bytes) return null;
   const running = state.phase !== "idle" && state.phase !== "done" && state.phase !== "failed";
@@ -120,38 +121,32 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
         </span>
       </div>
       <div className="visual-body">
-        {state.phase === "idle" && (
-          <div className="visual-intro">
-            <p>{intro.explanation} The run server renders the item on both body shapes, then asks one pinned vision model about the thumbnail and about clipping, skinning, textures and scale. Every screenshot is taken once and reused by every review.</p>
-            <div className="visual-actions">
-              <button className="visual-btn" onClick={() => void start()}>
-                {codeResult?.passed === true ? "Render and review" : "Render and review anyway"}
-              </button>
-              {codeResult?.passed !== true && <span className="visual-note">The code checks did not pass. Fix those first; this renders and asks the model anyway.</span>}
-            </div>
-          </div>
-        )}
-
         {state.phase !== "idle" && (
           <div className={`visual-stage ${state.phase}`}>
             {running && <span className="spin-inline" aria-hidden="true" />}
-            {rows.map((row) => (
-              <span key={row.check} className={`rule-status ${row.status === "errored" && capabilities.reviewer !== "pi" ? "skipped" : row.status}`} title={row.check}>
-                {checkRegistry[row.check]?.title ?? row.check}: {row.status === "errored" && capabilities.reviewer !== "pi" ? "no model" : STATUS_LABELS[row.status]}
-              </span>
-            ))}
+            {rows.map((row) => {
+              const notAsked = (row.status === "skipped" || row.status === "errored") && Boolean(checkRegistry[row.check]?.prompt) && (!modelAsked || capabilities.reviewer !== "pi");
+              return (
+                <span key={row.check} className={`rule-status ${notAsked ? "skipped" : row.status}`} title={row.check}>
+                  {checkRegistry[row.check]?.title ?? row.check}: {notAsked ? "model not asked" : STATUS_LABELS[row.status]}
+                </span>
+              );
+            })}
             <span className="visual-stage-text">{state.stage}</span>
             {running && state.id && (
               <button className="visual-cancel" onClick={() => void cancelRun(state.id!)}>Cancel</button>
             )}
+            {!running && !modelAsked && codeResult?.passed !== true && (
+              <button className="visual-btn" onClick={() => void start(true)}>Ask the model anyway</button>
+            )}
             {!running && (
-              <button className="visual-cancel" onClick={() => void start()}>Run again</button>
+              <button className="visual-cancel" onClick={() => void start(modelAsked || codeResult?.passed === true)}>Run again</button>
             )}
           </div>
         )}
 
         {state.gate && state.gate.passed !== true && state.phase !== "idle" && (
-          <p className="visual-note">Server-side code checks: {state.gate.summary.errors} errors, {state.gate.summary.warnings} warnings{state.message && state.phase === "done" && !state.result ? ` — ${state.message}` : ""}.</p>
+          <p className="visual-note">Server-side code checks: {state.gate.summary.errors} errors, {state.gate.summary.warnings} warnings — fix those first; the model is only asked when you press the button.</p>
         )}
 
         {(state.captures.length > 0 || state.phase === "rendering") && (

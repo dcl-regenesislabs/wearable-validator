@@ -88,16 +88,24 @@ describe("run server", () => {
     assert.deepEqual(health.checks, ["render-valid", "thumbnail-honesty", "visual-quality", "emote-quality"]);
   });
 
-  it("stops at the code gate without building any adapter when the item fails code checks", async () => {
+  it("still renders an item that fails code checks, but never asks the model", async () => {
     const zip = await syntheticZip({ glb: await syntheticGlb({ triangles: 2000 }) });
     const started = (await (await fetch(`${base}/api/runs`, { method: "POST", body: body(zip), headers: { "x-file-name": "bad.zip" } })).json()) as { id: string };
     const events = await readEvents(`${base}/api/runs/${started.id}/events`);
     const types = events.map((e) => e.type);
     assert.ok(types.includes("gate"));
-    assert.equal(types.at(-1), "done");
-    assert.equal((events.at(-1)!.data as { skipped?: boolean }).skipped, true);
-    assert.equal(calls.services, 0);
+    assert.equal(types.filter((t) => t === "capture").length, 12, "the photos are still taken");
+    assert.equal(types.filter((t) => t === "review").length, 0, "no model call without an explicit ask");
+    const result = (events.at(-1)!.data as { result: { checks: { check: string; status: string }[] } }).result;
+    assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:skipped", "visual-quality:skipped"]);
     assert.ok(types.filter((t) => t === "check").length > 10, "the code checks stream too");
+  });
+
+  it("renders without the model when asked with model=0 even if code checks pass", async () => {
+    const started = (await (await fetch(`${base}/api/runs?model=0`, { method: "POST", body: body(await syntheticZip()) })).json()) as { id: string };
+    const events = await readEvents(`${base}/api/runs/${started.id}/events`);
+    assert.equal(events.filter((e) => e.type === "review").length, 0);
+    assert.equal(events.filter((e) => e.type === "capture").length, 12);
   });
 
   it("streams every capture, the prompt and the answer, and serves the images", async () => {
@@ -106,7 +114,7 @@ describe("run server", () => {
     const events = await readEvents(`${base}/api/runs/${started.id}/events`);
     const captures = events.filter((e) => e.type === "capture");
     assert.equal(captures.length, 12);
-    assert.equal(captures[0].data.id, "BaseMale-wearable-000"); // render-valid takes the item-alone front view first
+    assert.ok(captures.some((c) => c.data.id === "BaseMale-wearable-000"), "the item-alone front view is among them");
     const reviews = events.filter((e) => e.type === "review").map((e) => `${e.data.check}:${e.data.phase}`);
     assert.deepEqual(reviews, ["thumbnail-honesty:request", "thumbnail-honesty:answer", "visual-quality:request", "visual-quality:answer"]);
     const done = events.at(-1)!;
@@ -121,7 +129,7 @@ describe("run server", () => {
     const prompt = await fetch(`${base}/api/runs/${started.id}/thumbnail-honesty/1-prompt.md`);
     assert.equal(prompt.status, 200);
     assert.match(await prompt.text(), /Image ID: BaseMale-avatar-000/);
-    assert.equal(calls.services, 1);
+    assert.ok(calls.services >= 1);
   });
 
   it("shows an earlier run's photos at once and renders nothing again for the same file", async () => {
