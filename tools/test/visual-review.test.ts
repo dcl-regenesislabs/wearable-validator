@@ -9,7 +9,7 @@ import { pngBytes, syntheticGlb, syntheticZip } from "../../packages/wearable-va
 import { digest } from "../../packages/wearable-validator/src/logic/captures.js";
 import type { CaptureRecord, Result } from "../../packages/wearable-validator/src/types.js";
 import type { ReviewRequest, ReviewResult } from "../../packages/wearable-validator/src/types.js";
-import { dryRunReviewer, fileCredentials, readRun, recordingReviewer, replayReviewer, writeRun } from "../src/visual-review.js";
+import { dryRunReviewer, fileCredentials, readRun, recordingReviewer, replayReviewer, tokenCredentials, writeRun } from "../src/visual-review.js";
 
 function reviewRequest(): ReviewRequest {
   return {
@@ -232,5 +232,23 @@ describe("run folder edge cases", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("tokenCredentials", () => {
+  it("seeds a setup token as a year-long OAuth access credential and keeps edits in memory", async () => {
+    const store = tokenCredentials("sk-ant-oat01-test");
+    const credential = await store.read("anthropic");
+    assert.equal(credential?.type, "oauth");
+    assert.equal(credential?.type === "oauth" && credential.access, "sk-ant-oat01-test");
+    assert.ok(credential?.type === "oauth" && credential.expires > Date.now() + 300 * 24 * 60 * 60 * 1000);
+    assert.equal(await store.read("openai"), undefined);
+    await store.modify("anthropic", async (current) => (current?.type === "oauth" ? { ...current, access: "sk-ant-oat01-rotated" } : current));
+    const updated = await store.read("anthropic");
+    assert.equal(updated?.type === "oauth" && updated.access, "sk-ant-oat01-rotated");
+  });
+
+  it("refuses anything that is not a setup token", () => {
+    assert.throws(() => tokenCredentials("sk-ant-api03-key"), /setup-token/);
   });
 });

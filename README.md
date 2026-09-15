@@ -52,7 +52,7 @@ npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/sa
   --from tools/artifacts/visual-upper_body-XXXXXX --auth .auth.json      # reuses the renders, one model call
 ```
 
-Leave out `--auth` and the server renders and writes the prompt without calling the model. The terminal shows one line per event (run accepted, code gate, each capture, the model request, the answer with tokens and cost); when hosted, the same process is configured with `PORT`, `HOST`, `AUTH_FILE`, `RENDERER_BUILD`, `ARTIFACTS_DIR` and logs JSON lines — see [docs/visual-validation.md](docs/visual-validation.md).
+Leave out `--auth` and the server renders and writes the prompt without calling the model. The terminal shows one line per event (run accepted, code gate, each capture, the model request, the answer with tokens and cost); when hosted, the same process is configured with `PORT`, `HOST`, `ANTHROPIC_OAUTH_SETUP_TOKEN` (a year-long `claude setup-token`, no session file needed), `RENDERER_BUILD`, `ARTIFACTS_DIR` and logs JSON lines — see [docs/visual-validation.md](docs/visual-validation.md).
 
 ```ts
 import { validate } from "@dcl-regenesislabs/wearable-validator";

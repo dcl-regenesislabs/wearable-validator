@@ -19,7 +19,7 @@ import { registry } from "../../packages/wearable-validator/src/registry.js";
 import { validate } from "../../packages/wearable-validator/src/validate.js";
 import type { CaptureRecord, Renderer, Result, Reviewer } from "../../packages/wearable-validator/src/types.js";
 import { createLogger, type Logger } from "./log.js";
-import { dryRunReviewer, fileCredentials, readRun, recordingReviewer, writeRun } from "./visual-review.js";
+import { dryRunReviewer, fileCredentials, readRun, recordingReviewer, tokenCredentials, writeRun } from "./visual-review.js";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const VISUAL_CHECKS = registry.filter((check) => check.group === "rendering").map((check) => check.name);
@@ -448,15 +448,18 @@ async function main(): Promise<void> {
   const buildDirectory = buildFlag
     ? resolve(cwd, buildFlag)
     : await stat(join(defaultBuild, "avatar-preview-renderer.wasm")).then(() => defaultBuild).catch(() => undefined);
-  const authFlag = values.auth ?? env.AUTH_FILE;
+  // --auth wins; a hosted process passes the year-long `claude setup-token` by environment and needs no writable session file
+  const authFlag = values.auth ?? (env.ANTHROPIC_OAUTH_SETUP_TOKEN ? undefined : env.AUTH_FILE);
   const auth = authFlag && !values["no-ai"] ? resolve(cwd, authFlag) : undefined;
+  const setupToken = !auth && !values["no-ai"] ? env.ANTHROPIC_OAUTH_SETUP_TOKEN : undefined;
+  const credentials = auth ? fileCredentials(auth) : setupToken ? tokenCredentials(setupToken) : undefined;
   const out = resolve(cwd, values.out ?? env.ARTIFACTS_DIR ?? join(ROOT, "tools/artifacts"));
   const site = resolve(cwd, values.site ?? env.SITE_DIR ?? join(ROOT, "packages/debug-ui/dist"));
   const siteExists = await stat(join(site, "index.html")).then(() => true).catch(() => false);
   const port = Number(values.port ?? env.PORT ?? 4180);
   const host = values.host ?? env.HOST ?? "127.0.0.1";
-  const reviewerKind = auth ? "pi" : "dry-run";
-  if (!auth) log.warn("no OAuth session: reviews render and write the prompt without calling the model (pass --auth or AUTH_FILE)");
+  const reviewerKind = credentials ? "pi" : "dry-run";
+  if (!credentials) log.warn("no OAuth session: reviews render and write the prompt without calling the model (pass --auth, AUTH_FILE or ANTHROPIC_OAUTH_SETUP_TOKEN)");
   if (!buildDirectory) log.warn("no Unity build found: visual runs will skip rendering (put the PR #10053 build in tools/renderer-build or pass --renderer-build)");
 
   const { server, close } = createRunServer({
@@ -467,7 +470,7 @@ async function main(): Promise<void> {
     site: siteExists ? site : undefined,
     services: async (run) => {
       const renderer = buildDirectory ? await createRenderer({ buildDirectory, onCapture: (capture) => void run.capture(capture) }) : undefined;
-      const base = auth ? createPiReviewer({ credentials: fileCredentials(auth) }) : dryRunReviewer();
+      const base = credentials ? createPiReviewer({ credentials }) : dryRunReviewer();
       const reviewer = liveReviewer(recordingReviewer(base, run.dir), run);
       return { renderer, reviewer, stop: () => renderer?.stop() ?? Promise.resolve() };
     }
@@ -475,7 +478,7 @@ async function main(): Promise<void> {
   server.listen(port, host, () => {
     log.info("run server listening", {
       url: `http://${host}:${port}`, renderer: buildDirectory ? "local Unity build" : "none", reviewer: reviewerKind,
-      model: auth ? manifest.ai.model : undefined, rules: manifest.version, artifacts: out,
+      model: credentials ? manifest.ai.model : undefined, auth: auth ? "session file" : setupToken ? "setup token" : "none", rules: manifest.version, artifacts: out,
       site: siteExists ? `http://${host}:${port}/` : "not built (run npm run build -w wearable-validator-debug-ui, or use the Vite dev server)"
     });
   });

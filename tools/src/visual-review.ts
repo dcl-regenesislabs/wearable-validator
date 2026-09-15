@@ -22,6 +22,34 @@ import type {
   CaptureRecord, CaptureRequest, CheckResult, Finding, Result, Reviewer, ReviewRequest, ReviewResult, Services
 } from "../../packages/wearable-validator/src/types.js";
 
+// a `claude setup-token` (sk-ant-oat…) lives about a year and is itself the bearer, not a refresh token
+const SETUP_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
+/** A hosted process gets the long-lived setup token by environment: seeded in memory as the access token so the SDK never tries to refresh it. */
+export function tokenCredentials(token: string): CredentialStore {
+  if (!token.startsWith("sk-ant-oat")) throw new Error("ANTHROPIC_OAUTH_SETUP_TOKEN must be a `claude setup-token` (sk-ant-oat…), not an API key.");
+  let current: Credential | undefined = { type: "oauth", access: token, refresh: token, expires: Date.now() + SETUP_TOKEN_TTL_MS };
+  return {
+    async read(provider, options) {
+      options?.signal?.throwIfAborted();
+      return provider === "anthropic" ? current : undefined;
+    },
+    async list() {
+      return current ? [{ providerId: "anthropic", type: "oauth" }] : [];
+    },
+    async modify(provider, fn) {
+      if (provider !== "anthropic") throw new Error("This credential store supports Anthropic OAuth only.");
+      const next = await fn(current);
+      if (next && next.type !== "oauth") throw new Error("Only OAuth credentials can be stored here.");
+      if (next) current = next;
+      return next ?? current;
+    },
+    async delete(provider) {
+      if (provider === "anthropic") current = undefined;
+    }
+  };
+}
+
 // dev-tool I/O, not a rule: refresh tokens are single-use and .auth.json is shared across terminals
 const OAUTH_LOCK = { stale: 180000, retries: 10, minTimeout: 200, maxTimeout: 1000 };
 const ROOT = resolve(import.meta.dirname, "../..");
@@ -60,7 +88,7 @@ export function readArgs(argv = process.argv.slice(2)): Args {
   const usage = "Usage: visual:review -- <item.zip> [--auth <session.json>] [--renderer-build <Build>] [--from <run dir>] [--answer] [--thumbnail <png>] [--standalone] [--no-ai] [--cache none|short] [--out tools/artifacts]";
   if (positionals.length !== 1) throw new Error(usage);
   if (values.answer && !values.from) throw new Error("--answer replays <run>/thumbnail-honesty/3-answer.json — add --from <run dir>.");
-  if (!values.auth && !values["no-ai"] && !values.answer) throw new Error(`Pass --auth <session.json>, or --no-ai to skip the model.\n${usage}`);
+  if (!values.auth && !process.env.ANTHROPIC_OAUTH_SETUP_TOKEN && !values["no-ai"] && !values.answer) throw new Error(`Pass --auth <session.json>, set ANTHROPIC_OAUTH_SETUP_TOKEN, or --no-ai to skip the model.\n${usage}`);
   if (values.cache !== "none" && values.cache !== "short") throw new Error("Choose --cache none or --cache short.");
   // npm -w runs scripts from tools/; INIT_CWD is where the command was typed, so relative paths mean what the user sees
   const cwd = process.env.INIT_CWD ?? process.cwd();
@@ -400,7 +428,7 @@ async function main(): Promise<void> {
   const renderer = args.buildDirectory ? await createRenderer({ buildDirectory: args.buildDirectory }) : undefined;
   const reviewer = args.noAi ? dryRunReviewer()
     : args.answer ? replayReviewer(args.from!)
-    : createPiReviewer({ credentials: fileCredentials(args.auth!), cache: args.cache });
+    : createPiReviewer({ credentials: args.auth ? fileCredentials(args.auth) : tokenCredentials(process.env.ANTHROPIC_OAUTH_SETUP_TOKEN ?? ""), cache: args.cache });
   const services: Services = { renderer, reviewer: recordingReviewer(reviewer, runDir) };
   const controller = new AbortController();
   const abort = () => controller.abort();
