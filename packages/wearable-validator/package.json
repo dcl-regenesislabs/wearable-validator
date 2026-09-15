@@ -45,7 +45,7 @@
     "@gltf-transform/extensions": "^4.2.1",
     "commander": "^12.1.0",
     "fast-png": "^6.3.0",
-    "image-size": "^2.0.2",
+    "image-size": "^2.0.4",
     "jpeg-js": "^0.4.4",
     "jsqr": "^1.4.0",
     "jszip": "^3.10.1",

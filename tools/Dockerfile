@@ -13,7 +13,11 @@ COPY tools ./tools
 COPY tsconfig.base.json ./
 # the Playwright image ships Chromium for its own version; playwright-core@1.63.0 must match it
 RUN npx playwright-core install chromium --no-shell
-# Linux Chromium reaches SwiftShader WebGPU only through Vulkan; without these two flags pipeline creation fails
+# Linux Chromium reaches SwiftShader WebGPU only through Vulkan; without these two flags pipeline creation fails.
+# CHROMIUM_ARGS is an operator-trusted knob spliced straight into the launch arguments.
 ENV CHROMIUM_ARGS="--enable-features=Vulkan --use-vulkan=swiftshader"
 ENV LOG_FORMAT=json
+# Chromium loads creator-supplied models: never as root. pwuser ships with the Playwright image.
+RUN chown -R pwuser:pwuser /app
+USER pwuser
 CMD ["npm", "run", "visual:review", "-w", "wearable-validator-tools", "--", "packages/debug-ui/public/samples/upper_body.zip", "--no-ai", "--standalone", "--out", "/tmp/artifacts"]

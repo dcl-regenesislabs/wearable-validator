@@ -59,6 +59,10 @@ export interface ServeOptions {
   capabilities: { renderer: boolean; reviewer: "pi" | "dry-run" | "none" };
   /** Built website to serve at / (optional — Vite dev proxies /api instead). */
   site?: string;
+  /** The bind address; requests whose Host header names anything else are refused (DNS rebinding). */
+  host?: string;
+  /** Upload cap; defaults to manifest.fileSize.maxInputBytes. */
+  maxUploadBytes?: number;
   logger?: Logger;
 }
 
@@ -74,26 +78,47 @@ interface Run {
 }
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
+/** Finished runs kept in memory (events replay); run folders on disk are the durable record. */
+const MAX_RUNS_IN_MEMORY = 50;
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1"]);
+// model text reaches the operator's terminal before any parser sees it: never let it carry escape sequences
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+const clean = (value: unknown, max: number): string => String(value ?? "").replace(CONTROL, " ").slice(0, max);
+
+/** A page that DNS-rebinds its hostname to this address is same-origin with us; the Host header still names the attacker. */
+export function hostAllowed(header: string | undefined, configured?: string): boolean {
+  if (!header) return false;
+  try {
+    const { hostname } = new URL(`http://${header}`);
+    const bare = hostname.replace(/^\[|\]$/g, "");
+    return LOOPBACK.has(bare) || (configured !== undefined && bare === configured.replace(/^\[|\]$/g, ""));
+  } catch {
+    return false;
+  }
+}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, JSON_HEADERS);
   res.end(JSON.stringify(body));
 }
 
+/** Collects the body up to `limit`; past it the rest is drained and discarded so the 413 reaches a client still uploading. */
 function readBody(req: IncomingMessage, limit: number): Promise<Uint8Array | undefined> {
   return new Promise((resolvePromise, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
+    let overflowed = false;
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
+      if (overflowed) return;
       if (size > limit) {
-        resolvePromise(undefined);
-        req.destroy();
+        overflowed = true;
+        chunks.length = 0;
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => resolvePromise(new Uint8Array(Buffer.concat(chunks))));
+    req.on("end", () => resolvePromise(overflowed ? undefined : new Uint8Array(Buffer.concat(chunks))));
     req.on("error", reject);
   });
 }
@@ -151,7 +176,7 @@ function logEvent(log: Logger, run: Run, type: string, data: unknown): void {
       return;
     }
     case "stage":
-      log.info(String(d.text), { run: run.id, ms });
+      log.info(clean(d.text, 200), { run: run.id, ms });
       return;
     case "capture":
       log.info("captured", { run: run.id, view: d.id, ms });
@@ -168,10 +193,10 @@ function logEvent(log: Logger, run: Run, type: string, data: unknown): void {
         log.info("model answered", {
           run: run.id, check: d.check, model: metadata.model, verdict: answer?.verdict, findings: answer?.findings?.length ?? 0,
           input: metadata.usage?.input, output: metadata.usage?.output, cacheRead: metadata.usage?.cacheRead,
-          cost: metadata.usage ? `$${metadata.usage.cost.toFixed(4)}` : undefined, ms, summary: answer?.summary?.slice(0, 160)
+          cost: metadata.usage ? `$${metadata.usage.cost.toFixed(4)}` : undefined, ms, summary: clean(answer?.summary, 160)
         });
       } else {
-        log.warn("model did not answer", { run: run.id, check: d.check, model: metadata.model, stop: metadata.stopReason, reason: String(d.reason).slice(0, 200), ms });
+        log.warn("model did not answer", { run: run.id, check: d.check, model: metadata.model, stop: metadata.stopReason, reason: clean(d.reason, 200), ms });
       }
       return;
     }
@@ -182,7 +207,7 @@ function logEvent(log: Logger, run: Run, type: string, data: unknown): void {
       return;
     }
     case "error":
-      log.error("run failed", { run: run.id, error: d.message, ms });
+      log.error("run failed", { run: run.id, error: clean(d.message, 300), ms });
       return;
   }
 }
@@ -210,7 +235,6 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
   }
 
   async function execute(run: Run, bytes: Uint8Array, name: string, mode: { model: boolean; standalone: boolean }): Promise<void> {
-    active++;
     let services: RunServices | undefined;
     try {
       // the code gate costs nothing; screenshots are always taken, the model is only asked when the code checks pass or the caller insists
@@ -276,6 +300,10 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!hostAllowed(req.headers.host, options.host)) {
+      log.warn("request refused, unexpected Host header", { host: clean(req.headers.host, 100) });
+      return json(res, 403, { message: "This server only answers requests addressed to its own host." });
+    }
     const url = new URL(req.url ?? "/", "http://localhost");
     const parts = url.pathname.split("/").filter(Boolean);
 
@@ -294,15 +322,28 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
         log.warn("run refused, another is active");
         return json(res, 409, { message: "A run is already in progress. Wait for it to finish." });
       }
-      const bytes = await readBody(req, manifest.fileSize.maxInputBytes);
-      if (!bytes) return json(res, 413, { message: `The file is larger than ${manifest.fileSize.maxInputBytes} bytes.` });
-      if (bytes.length === 0) return json(res, 400, { message: "Send the zip bytes as the request body." });
+      // the lock is taken before the first await so two uploads arriving together cannot both start
+      active++;
+      const limit = options.maxUploadBytes ?? manifest.fileSize.maxInputBytes;
+      const bytes = await readBody(req, limit).catch(() => undefined);
+      if (!bytes) {
+        active--;
+        return json(res, 413, { message: `The file is larger than ${limit} bytes.` });
+      }
+      if (bytes.length === 0) {
+        active--;
+        return json(res, 400, { message: "Send the zip bytes as the request body." });
+      }
       const name = basename(decodeURIComponent(req.headers["x-file-name"]?.toString() ?? "item.zip")).replace(/[^\w.-]/g, "_");
       const id = randomBytes(4).toString("hex");
       const dir = join(options.out, `visual-${name.replace(/\.zip$/i, "")}-${id}`);
       await mkdir(dir, { recursive: true });
       const run: Run = { id, name, dir, events: [], listeners: new Set(), controller: new AbortController(), done: false, startedAt: Date.now() };
       runs.set(id, run);
+      for (const [oldId, old] of runs) {
+        if (runs.size <= MAX_RUNS_IN_MEMORY) break;
+        if (old.done) runs.delete(oldId);
+      }
       log.info("run accepted", { run: id, file: name, bytes: bytes.length, model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1", dir });
       json(res, 201, { id, events: `/api/runs/${id}/events` });
       void execute(run, bytes, name, { model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1" });
@@ -417,6 +458,7 @@ async function main(): Promise<void> {
 
   const { server, close } = createRunServer({
     out,
+    host,
     logger: log,
     capabilities: { renderer: Boolean(buildDirectory), reviewer: reviewerKind },
     site: siteExists ? site : undefined,

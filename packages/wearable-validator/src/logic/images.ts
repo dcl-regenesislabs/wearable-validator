@@ -10,8 +10,9 @@ export function isJpegBytes(bytes: Uint8Array): boolean {
   return bytes.length > 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
 }
 
-/** Header dimensions; undefined when the bytes are not a decodable image (texture-format reports that). */
+/** Header dimensions of a PNG or JPEG; undefined for anything else (texture-format reports that). Other formats never reach image-size's parsers. */
 export function imageDimensions(bytes: Uint8Array): { width: number; height: number } | undefined {
+  if (!isPngBytes(bytes) && !isJpegBytes(bytes)) return undefined;
   try {
     const { width, height } = imageSize(bytes);
     return { width, height };

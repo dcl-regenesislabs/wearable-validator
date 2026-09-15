@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo } from "node:net";
 import { digest } from "../../packages/wearable-validator/src/logic/captures.js";
 import { manifest } from "../../packages/wearable-validator/src/manifest/index.js";
 import type { CaptureRecord, Renderer, Reviewer } from "../../packages/wearable-validator/src/types.js";
 import { syntheticGlb, syntheticZip } from "../../packages/wearable-validator/test/helpers/synthetic.js";
 import { renderedFrame } from "../../packages/wearable-validator/test/helpers/frames.js";
-import { createRunServer, liveReviewer, type RunSink } from "../src/serve.js";
+import { createRunServer, hostAllowed, liveReviewer, type RunSink } from "../src/serve.js";
 import { recordingReviewer } from "../src/visual-review.js";
 
 interface Frame {
@@ -18,6 +18,20 @@ interface Frame {
 }
 
 const body = (bytes: Uint8Array): ArrayBuffer => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+
+/** One raw HTTP/1.1 request, so the path reaches the server exactly as written. */
+function rawRequest(base: string, path: string, host = new URL(base).host): Promise<string> {
+  const { hostname, port } = new URL(base);
+  return new Promise((resolve, reject) => {
+    const socket = connect(Number(port), hostname, () => {
+      socket.write(`GET ${path} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`);
+    });
+    let text = "";
+    socket.on("data", (chunk) => (text += chunk.toString()));
+    socket.on("end", () => resolve(text));
+    socket.on("error", reject);
+  });
+}
 
 /** Reads one SSE stream to its end and returns the parsed frames. */
 async function readEvents(url: string): Promise<Frame[]> {
@@ -72,7 +86,7 @@ describe("run server", () => {
   before(async () => {
     out = await mkdtemp(join(tmpdir(), "run-server-"));
     const silent = { info() {}, warn() {}, error() {} };
-    const created = createRunServer({ out, services: fakeServices(calls), capabilities: { renderer: true, reviewer: "dry-run" }, logger: silent });
+    const created = createRunServer({ out, services: fakeServices(calls), capabilities: { renderer: true, reviewer: "dry-run" }, logger: silent, maxUploadBytes: 4 * 1024 * 1024 });
     close = created.close;
     await new Promise<void>((resolve) => created.server.listen(0, "127.0.0.1", () => resolve()));
     base = `http://127.0.0.1:${(created.server.address() as AddressInfo).port}`;
@@ -152,7 +166,34 @@ describe("run server", () => {
     const all = await readEvents(`${base}/api/runs/${started.id}/events`);
     const later = await (await fetch(`${base}/api/runs/${started.id}/events`, { headers: { "last-event-id": String(all.length - 2) } })).text();
     assert.equal(later.split("\n\n").filter((block) => block.includes("event:")).length, 2);
-    assert.equal((await fetch(`${base}/api/runs/${started.id}/captures/../../etc/passwd`)).status, 404);
+    // fetch normalises "..", so speak raw HTTP to make sure the guard itself refuses traversal, encoded or not
+    for (const path of [`/api/runs/${started.id}/captures/../../../etc/passwd`, `/api/runs/${started.id}/captures/%2e%2e/%2e%2e/%2e%2e/etc/passwd`]) {
+      assert.match(await rawRequest(base, path), /^HTTP\/1\.1 404/);
+    }
     assert.equal((await fetch(`${base}/api/runs/nope/events`)).status, 404);
+  });
+
+  it("refuses requests whose Host header is not its own address (DNS rebinding)", async () => {
+    assert.match(await rawRequest(base, "/api/health", "attacker.example"), /^HTTP\/1\.1 403/);
+    assert.equal((await fetch(`${base}/api/health`)).status, 200);
+    assert.equal(hostAllowed("localhost:4180"), true);
+    assert.equal(hostAllowed("[::1]:4180"), true);
+    assert.equal(hostAllowed("10.0.0.5:4180", "10.0.0.5"), true);
+    assert.equal(hostAllowed("evil.example", "10.0.0.5"), false);
+    assert.equal(hostAllowed(undefined), false);
+  });
+
+  it("answers 413 with a message instead of dropping the connection on an oversize upload", async () => {
+    const res = await fetch(`${base}/api/runs`, { method: "POST", body: new ArrayBuffer(5 * 1024 * 1024) });
+    assert.equal(res.status, 413);
+    assert.match(((await res.json()) as { message: string }).message, /larger than/);
+  });
+
+  it("lets only one of two simultaneous uploads start", async () => {
+    const zip = body(await syntheticZip());
+    const [a, b] = await Promise.all([1, 2].map(() => fetch(`${base}/api/runs?model=0`, { method: "POST", body: zip })));
+    assert.deepEqual([a.status, b.status].sort(), [201, 409]);
+    const started = (await (a.status === 201 ? a : b).json()) as { id: string };
+    await readEvents(`${base}/api/runs/${started.id}/events`);
   });
 });
