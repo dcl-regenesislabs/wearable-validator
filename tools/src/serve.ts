@@ -237,11 +237,14 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
   async function execute(run: Run, bytes: Uint8Array, name: string, mode: { model: boolean; standalone: boolean }): Promise<void> {
     let services: RunServices | undefined;
     try {
-      // the code gate costs nothing; screenshots are always taken, the model is only asked when the code checks pass or the caller insists
+      // the code gate costs nothing: with code errors nothing is rendered or asked unless the caller insists (standalone)
       const code = await validate(bytes, { signal: run.controller.signal, onProgress: (event) => emit(run, "check", event) });
       emit(run, "gate", { result: code, passed: code.passed });
-      const askModel = mode.model && (code.passed === true || mode.standalone);
-      if (mode.model && !askModel) emit(run, "stage", { text: "Code checks failed: rendering only, the model is not asked" });
+      if (code.passed !== true && !mode.standalone) {
+        emit(run, "done", { skipped: true, result: code, message: "Visual review was not started: fix the code checks first, or press Render and review anyway." });
+        return;
+      }
+      const askModel = mode.model;
       const loaded = await loadInput(bytes, {});
       const thumbnail = loaded.ctx?.files.get(loaded.ctx.item.thumbnailPath ?? "thumbnail.png");
       if (thumbnail) await writeFile(join(run.dir, "thumbnail.png"), thumbnail);

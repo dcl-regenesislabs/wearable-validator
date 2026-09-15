@@ -102,17 +102,20 @@ describe("run server", () => {
     assert.deepEqual(health.checks, ["render-valid", "thumbnail-honesty", "visual-quality", "emote-quality"]);
   });
 
-  it("still renders an item that fails code checks, but never asks the model", async () => {
+  it("stops at the code gate: an item with code errors is neither rendered nor reviewed unless asked", async () => {
     const zip = await syntheticZip({ glb: await syntheticGlb({ triangles: 2000 }) });
     const started = (await (await fetch(`${base}/api/runs`, { method: "POST", body: body(zip), headers: { "x-file-name": "bad.zip" } })).json()) as { id: string };
     const events = await readEvents(`${base}/api/runs/${started.id}/events`);
     const types = events.map((e) => e.type);
     assert.ok(types.includes("gate"));
-    assert.equal(types.filter((t) => t === "capture").length, 12, "the photos are still taken");
-    assert.equal(types.filter((t) => t === "review").length, 0, "no model call without an explicit ask");
-    const result = (events.at(-1)!.data as { result: { checks: { check: string; status: string }[] } }).result;
-    assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:skipped", "visual-quality:skipped"]);
+    assert.equal(types.filter((t) => t === "capture").length, 0, "no rendering");
+    assert.equal(types.filter((t) => t === "review").length, 0, "no model call");
+    assert.equal((events.at(-1)!.data as { skipped?: boolean }).skipped, true);
     assert.ok(types.filter((t) => t === "check").length > 10, "the code checks stream too");
+    const forced = (await (await fetch(`${base}/api/runs?standalone=1`, { method: "POST", body: body(zip) })).json()) as { id: string };
+    const forcedEvents = await readEvents(`${base}/api/runs/${forced.id}/events`);
+    assert.equal(forcedEvents.filter((e) => e.type === "capture").length, 12, "standalone renders");
+    assert.equal(forcedEvents.filter((e) => e.type === "review").length, 4, "and asks the model");
   });
 
   it("renders without the model when asked with model=0 even if code checks pass", async () => {

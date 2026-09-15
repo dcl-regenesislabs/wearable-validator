@@ -384,6 +384,9 @@ footer.foot {
 
 /* ── visual review (live run) ───────────────────────── */
 .visual-body { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
+.visual-body:empty { display: none; }
+.visual-model { margin: var(--space-2) 0; flex-wrap: wrap; }
+.visual-raw { margin: 0; max-height: 40vh; overflow: auto; white-space: pre-wrap; background: var(--input); border: 1px solid var(--divider-soft); border-radius: var(--r-control); padding: var(--space-3); font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--ink-85); }
 .visual-intro p { margin: 0 0 var(--space-3); color: var(--text-2); font-size: var(--fs-xs); max-width: 72ch; }
 .visual-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .visual-btn, .visual-cancel {

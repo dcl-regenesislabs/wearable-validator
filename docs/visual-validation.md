@@ -39,14 +39,14 @@ Ground rules (CLAUDE.md, restated for this phase):
 
 ## Live view in the website
 
-`npm run serve -w wearable-validator-tools -- [--auth .auth.json]` starts a local run server on `127.0.0.1:4180` (`tools/src/serve.ts`). The Vite dev server proxies `/api` to it, so the site gains a **Visual review** panel under the code results: one click uploads the zip, and the panel shows the server-side code gate, each screenshot the moment it is captured, the prompt version with a link to the exact prompt and image order, the raw answer with token usage, and the resulting findings with evidence chips that highlight the capture they cite. The static production site never shows the panel because nothing answers `/api/health`.
+`npm run serve -w wearable-validator-tools -- [--auth .auth.json]` starts a local run server on `127.0.0.1:4180` (`tools/src/serve.ts`). The Vite dev server proxies `/api` to it, so the site gains a **Visual review** panel under the code results: when the code checks pass the site uploads the zip on its own (with errors it waits for **Render and review anyway**, so no screenshot is taken for an item that needs fixing first), and the panel shows the server-side code gate, each screenshot the moment it is captured, the prompt version with a link to the exact prompt and image order, the raw answer with token usage, and the resulting findings as rule rows in the same table design as the code checks, with evidence chips that highlight the capture they cite. The static production site never shows the panel because nothing answers `/api/health`.
 
 The API is deliberately small so a hosted worker can implement it later without touching the page:
 
 | Call | Meaning |
 | --- | --- |
 | `GET /api/health` | `{ visual: { renderer, reviewer: "pi" \| "dry-run" }, checks, rulesVersion }` — what the site can offer |
-| `POST /api/runs[?standalone=1]` (zip bytes, `x-file-name`) | `201 { id }`; 409 while another run is active; the code gate runs first and stops the run unless `standalone` |
+| `POST /api/runs[?standalone=1][&model=0]` (zip bytes, `x-file-name`) | `201 { id }`; 409 while another run is active; the code gate runs first and, when it fails, stops before any screenshot unless `standalone`; `model=0` renders only |
 | `GET /api/runs/:id/events` | Server-Sent Events: `check` (start/finish of every check), `gate` (code result), `stage`, `capture` (`{ id, request, url }` as each PNG lands), `review` (`request` with prompt digest and image order, then `answer` = the `ReviewResult`), `done` (the `Result` with capture URLs) or `error`. Events carry ids; `Last-Event-ID` replays the rest |
 | `GET /api/runs/:id/captures/<id>.png`, `/thumbnail.png`, `/<check>/1-prompt.md` … | files from the run folder (§3), path-safe |
 | `DELETE /api/runs/:id` | cancel |

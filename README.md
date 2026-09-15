@@ -45,7 +45,7 @@ Visual validation (Phase 4): the item is rendered headlessly on both body shapes
 npx playwright-core install chromium --no-shell
 # once: put the Unity build from unity-explorer PR #10053 in tools/renderer-build/ (see docs/visual-validation.md)
 # the website with live visual review: builds the site and serves it with the run server at http://127.0.0.1:4180
-npm run serve -- --auth .auth.json              # drop a zip → "Render and review" streams every screenshot, the prompt and the answer
+npm run serve -- --auth .auth.json              # drop a zip → when the code checks pass, screenshots and the two model answers stream in on their own; with errors, press "Render and review anyway"
 # or from the terminal
 npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip --no-ai   # renders + writes the prompt, no spend
 npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip \
