@@ -8,7 +8,7 @@ The Decentraland wearable/emote rule book as code (DAO proposal e2a13c58). npm m
 ## Commands
 
 - `npm test` / `npm run typecheck` — full suite (node:test) + tsc
-- `npm run dev -w wearable-validator-debug-ui` — the website (Vite); with `npm run serve -w wearable-validator-tools -- [--auth .auth.json]` running, the site streams visual reviews live over SSE
+- `npm run dev -w wearable-validator-debug-ui` — the website (Vite); with `ANTHROPIC_OAUTH_SETUP_TOKEN=… npm run serve -w wearable-validator-tools` running, the site streams visual reviews live over SSE
 - `npx tsx src/cli.ts validate <file> [--checks triangle-count] [--groups model]` (from packages/wearable-validator)
 - `npm run catalyst -w wearable-validator-tools -- --wearables 15 --emotes 10` — validate real published items
 - `npm run samples -w wearable-validator-tools` — regenerate the website's example zips

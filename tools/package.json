@@ -14,13 +14,11 @@
   "devDependencies": {
     "tsx": "^4.20.0",
     "playwright-core": "1.63.0",
-    "@types/proper-lockfile": "4.1.4",
     "typescript": "^5.9.3"
   },
   "dependencies": {
     "jszip": "^3.10.1",
     "@earendil-works/pi-ai": "0.84.1",
-    "proper-lockfile": "4.1.2",
     "fast-png": "^6.3.0"
   }
 }

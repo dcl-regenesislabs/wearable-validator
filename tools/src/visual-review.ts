@@ -4,13 +4,11 @@
  * The only place createRenderer/createPiReviewer are constructed, and the only place the
  * boundary (captures, prompt, context, answer, finding) is written to disk — see docs/visual-validation.md §3.
  */
-import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import lockfile from "proper-lockfile";
 import type { Context, Credential, CredentialStore } from "@earendil-works/pi-ai";
 import { createPiReviewer, reviewMessages } from "../../packages/wearable-validator/src/adapters/ai.js";
 import { digest } from "../../packages/wearable-validator/src/logic/captures.js";
@@ -25,7 +23,7 @@ import type {
 // a `claude setup-token` (sk-ant-oat…) lives about a year and is itself the bearer, not a refresh token
 const SETUP_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
-/** A hosted process gets the long-lived setup token by environment: seeded in memory as the access token so the SDK never tries to refresh it. */
+/** The only credential: a `claude setup-token` from the environment, seeded in memory as the access token so the SDK never tries to refresh it. */
 export function tokenCredentials(token: string): CredentialStore {
   if (!token.startsWith("sk-ant-oat")) throw new Error("ANTHROPIC_OAUTH_SETUP_TOKEN must be a `claude setup-token` (sk-ant-oat…), not an API key.");
   let current: Credential | undefined = { type: "oauth", access: token, refresh: token, expires: Date.now() + SETUP_TOKEN_TTL_MS };
@@ -50,15 +48,12 @@ export function tokenCredentials(token: string): CredentialStore {
   };
 }
 
-// dev-tool I/O, not a rule: refresh tokens are single-use and .auth.json is shared across terminals
-const OAUTH_LOCK = { stale: 180000, retries: 10, minTimeout: 200, maxTimeout: 1000 };
 const ROOT = resolve(import.meta.dirname, "../..");
 const VISUAL_CHECKS = registry.filter((check) => check.group === "rendering").map((check) => check.name);
 const DRY_RUN_REASON = "The model was not called (--no-ai).";
 
 export interface Args {
   file: string;
-  auth?: string;
   buildDirectory?: string;
   from?: string;
   answer: boolean;
@@ -74,7 +69,6 @@ export function readArgs(argv = process.argv.slice(2)): Args {
     args: argv,
     allowPositionals: true,
     options: {
-      auth: { type: "string" },
       "renderer-build": { type: "string" },
       from: { type: "string" },
       answer: { type: "boolean", default: false },
@@ -85,17 +79,16 @@ export function readArgs(argv = process.argv.slice(2)): Args {
       out: { type: "string" }
     }
   });
-  const usage = "Usage: visual:review -- <item.zip> [--auth <session.json>] [--renderer-build <Build>] [--from <run dir>] [--answer] [--thumbnail <png>] [--standalone] [--no-ai] [--cache none|short] [--out tools/artifacts]";
+  const usage = "Usage: visual:review -- <item.zip> [--renderer-build <Build>] [--from <run dir>] [--answer] [--thumbnail <png>] [--standalone] [--no-ai] [--cache none|short] [--out tools/artifacts]";
   if (positionals.length !== 1) throw new Error(usage);
   if (values.answer && !values.from) throw new Error("--answer replays <run>/thumbnail-honesty/3-answer.json — add --from <run dir>.");
-  if (!values.auth && !process.env.ANTHROPIC_OAUTH_SETUP_TOKEN && !values["no-ai"] && !values.answer) throw new Error(`Pass --auth <session.json>, set ANTHROPIC_OAUTH_SETUP_TOKEN, or --no-ai to skip the model.\n${usage}`);
+  if (!process.env.ANTHROPIC_OAUTH_SETUP_TOKEN && !values["no-ai"] && !values.answer) throw new Error(`Set ANTHROPIC_OAUTH_SETUP_TOKEN (a claude setup-token), or pass --no-ai to skip the model.\n${usage}`);
   if (values.cache !== "none" && values.cache !== "short") throw new Error("Choose --cache none or --cache short.");
   // npm -w runs scripts from tools/; INIT_CWD is where the command was typed, so relative paths mean what the user sees
   const cwd = process.env.INIT_CWD ?? process.cwd();
   const path = (value: string | undefined) => (value === undefined ? undefined : resolve(cwd, value));
   return {
     file: path(positionals[0])!,
-    auth: path(values.auth),
     buildDirectory: path(values["renderer-build"]) ?? (existsSync(join(ROOT, "tools/renderer-build/avatar-preview-renderer.wasm")) ? join(ROOT, "tools/renderer-build") : undefined),
     from: path(values.from),
     answer: values.answer!,
@@ -121,82 +114,6 @@ export async function readItem(args: Args): Promise<{ bytes: Uint8Array; input: 
   const thumbnailPath = loaded.ctx.item.thumbnailPath ?? "thumbnail.png";
   if (args.thumbnail) files.set(thumbnailPath, await readEvidenceFile(args.thumbnail));
   return { bytes, input: { files }, thumbnail: files.get(thumbnailPath) };
-}
-
-// refresh tokens are single-use and the file is shared across terminals: lock, write <file>.<uuid>.tmp 0o600, rename; refuses api_key and .env* basenames
-export function fileCredentials(path: string): CredentialStore {
-  if (basename(path).startsWith(".env")) throw new Error("Use a dedicated OAuth session JSON file, not an environment file.");
-  async function readDocument(target: string): Promise<Record<string, unknown>> {
-    const value: unknown = JSON.parse(await readFile(target, "utf8"));
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("The OAuth session file must contain an object.");
-    return value as Record<string, unknown>;
-  }
-  function credential(document: Record<string, unknown>): Credential | undefined {
-    const value = document.anthropic;
-    if (value === undefined) return undefined;
-    if (
-      !value || typeof value !== "object" ||
-      !("type" in value) || value.type !== "oauth" ||
-      !("access" in value) || typeof value.access !== "string" ||
-      !("refresh" in value) || typeof value.refresh !== "string" ||
-      !("expires" in value) || typeof value.expires !== "number" || !Number.isFinite(value.expires)
-    ) {
-      throw new Error("The session file needs a valid Anthropic OAuth credential.");
-    }
-    return { ...value, type: "oauth", access: value.access, refresh: value.refresh, expires: value.expires };
-  }
-  async function modify(fn: (document: Record<string, unknown>) => Promise<void>, signal?: AbortSignal): Promise<void> {
-    signal?.throwIfAborted();
-    const target = await realpath(path);
-    const release = await lockfile.lock(target, {
-      stale: OAUTH_LOCK.stale,
-      retries: { retries: OAUTH_LOCK.retries, minTimeout: OAUTH_LOCK.minTimeout, maxTimeout: OAUTH_LOCK.maxTimeout }
-    });
-    const temporary = `${target}.${randomUUID()}.tmp`;
-    try {
-      signal?.throwIfAborted();
-      const document = await readDocument(target);
-      const before = JSON.stringify(document);
-      await fn(document);
-      signal?.throwIfAborted();
-      if (JSON.stringify(document) !== before) {
-        await writeFile(temporary, JSON.stringify(document, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-        await rename(temporary, target);
-      }
-    } finally {
-      await unlink(temporary).catch(() => {});
-      await release();
-    }
-  }
-  return {
-    async read(provider, options) {
-      options?.signal?.throwIfAborted();
-      return provider === "anthropic" ? credential(await readDocument(path)) : undefined;
-    },
-    async list(options) {
-      const value = await this.read("anthropic", options);
-      return value ? [{ providerId: "anthropic", type: "oauth" }] : [];
-    },
-    async modify(provider, fn, options) {
-      if (provider !== "anthropic") throw new Error("This credential store supports Anthropic OAuth only.");
-      let updated: Credential | undefined;
-      await modify(async (document) => {
-        const current = credential(document);
-        const next = await fn(current);
-        if (next && next.type !== "oauth") throw new Error("Only OAuth credentials can be stored here.");
-        if (next) document.anthropic = next;
-        updated = next ?? current;
-      }, options?.signal);
-      return updated;
-    },
-    async delete(provider, options) {
-      if (provider === "anthropic") {
-        await modify(async (document) => {
-          delete document.anthropic;
-        }, options?.signal);
-      }
-    }
-  };
 }
 
 interface CaptureEntry {
@@ -303,7 +220,7 @@ export function replayReviewer(runDir: string): Reviewer {
       const answerPath = join(runDir, request.check, "3-answer.json");
       const saved: unknown = JSON.parse((await readEvidenceFile(answerPath)).toString("utf8"));
       if (!saved || typeof saved !== "object" || typeof (saved as { ok?: unknown }).ok !== "boolean" || !("metadata" in saved)) {
-        throw new Error(`${answerPath} is not a saved ReviewResult. Run visual:review with --auth first.`);
+        throw new Error(`${answerPath} is not a saved ReviewResult. Run visual:review with ANTHROPIC_OAUTH_SETUP_TOKEN set first.`);
       }
       const result = saved as ReviewResult;
       if (result.metadata.promptDigest !== request.promptDigest) {
@@ -428,7 +345,7 @@ async function main(): Promise<void> {
   const renderer = args.buildDirectory ? await createRenderer({ buildDirectory: args.buildDirectory }) : undefined;
   const reviewer = args.noAi ? dryRunReviewer()
     : args.answer ? replayReviewer(args.from!)
-    : createPiReviewer({ credentials: args.auth ? fileCredentials(args.auth) : tokenCredentials(process.env.ANTHROPIC_OAUTH_SETUP_TOKEN ?? ""), cache: args.cache });
+    : createPiReviewer({ credentials: tokenCredentials(process.env.ANTHROPIC_OAUTH_SETUP_TOKEN ?? ""), cache: args.cache });
   const services: Services = { renderer, reviewer: recordingReviewer(reviewer, runDir) };
   const controller = new AbortController();
   const abort = () => controller.abort();

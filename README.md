@@ -45,14 +45,14 @@ Visual validation (Phase 4): the item is rendered headlessly on both body shapes
 npx playwright-core install chromium --no-shell
 # once: put the Unity build from unity-explorer PR #10053 in tools/renderer-build/ (see docs/visual-validation.md)
 # the website with live visual review: builds the site and serves it with the run server at http://127.0.0.1:4180
-npm run serve -- --auth .auth.json              # drop a zip → when the code checks pass, screenshots and the two model answers stream in on their own; with errors, press "Render and review anyway"
+ANTHROPIC_OAUTH_SETUP_TOKEN=<claude setup-token> npm run serve   # drop a zip → when the code checks pass, screenshots and the two model answers stream in on their own; with errors, press "Render and review anyway"
 # or from the terminal
 npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip --no-ai   # renders + writes the prompt, no spend
 npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip \
-  --from tools/artifacts/visual-upper_body-XXXXXX --auth .auth.json      # reuses the renders, one model call
+  --from tools/artifacts/visual-upper_body-XXXXXX                        # with the token set: reuses the renders, two model calls
 ```
 
-Leave out `--auth` and the server renders and writes the prompt without calling the model. The terminal shows one line per event (run accepted, code gate, each capture, the model request, the answer with tokens and cost); when hosted, the same process is configured with `PORT`, `HOST`, `ANTHROPIC_OAUTH_SETUP_TOKEN` (a year-long `claude setup-token`, no session file needed), `RENDERER_BUILD`, `ARTIFACTS_DIR` and logs JSON lines — see [docs/visual-validation.md](docs/visual-validation.md).
+Leave out the token and the server renders and writes the prompt without calling the model. The terminal shows one line per event (run accepted, code gate, each capture, the model request, the answer with tokens and cost); when hosted, the same process is configured with `PORT`, `HOST`, `ANTHROPIC_OAUTH_SETUP_TOKEN` (a year-long `claude setup-token`, no session file needed), `RENDERER_BUILD`, `ARTIFACTS_DIR` and logs JSON lines — see [docs/visual-validation.md](docs/visual-validation.md).
 
 ```ts
 import { validate } from "@dcl-regenesislabs/wearable-validator";

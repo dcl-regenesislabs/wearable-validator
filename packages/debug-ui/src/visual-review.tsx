@@ -211,7 +211,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
                     <span className="rule-chevron" aria-hidden="true">›</span>
                   </summary>
                   <div className="check-body">
-                    {notAsked && <p className="skip-note">{modelKnown ? "The model was not asked for this run." : "The run server has no reviewer configured — start it with --auth."}</p>}
+                    {notAsked && <p className="skip-note">{modelKnown ? "The model was not asked for this run." : "The run server has no reviewer configured — start it with ANTHROPIC_OAUTH_SETUP_TOKEN."}</p>}
                     {row.status === "errored" && <p className="skip-note">no answer — {row.skipReason}</p>}
                     {row.status === "skipped" && !notAsked && <p className="skip-note">skipped — {row.skipReason}</p>}
                     {row.measured && !notAsked && <p className="explain">{row.measured}</p>}

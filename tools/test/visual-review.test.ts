@@ -9,7 +9,7 @@ import { pngBytes, syntheticGlb, syntheticZip } from "../../packages/wearable-va
 import { digest } from "../../packages/wearable-validator/src/logic/captures.js";
 import type { CaptureRecord, Result } from "../../packages/wearable-validator/src/types.js";
 import type { ReviewRequest, ReviewResult } from "../../packages/wearable-validator/src/types.js";
-import { dryRunReviewer, fileCredentials, readRun, recordingReviewer, replayReviewer, tokenCredentials, writeRun } from "../src/visual-review.js";
+import { dryRunReviewer, readRun, recordingReviewer, replayReviewer, tokenCredentials, writeRun } from "../src/visual-review.js";
 
 function reviewRequest(): ReviewRequest {
   return {
@@ -33,9 +33,8 @@ describe("code gate", () => {
       await assert.rejects(
         promisify(execFile)(process.execPath, [
           "--import", "tsx", script, file,
-          "--auth", join(directory, "missing-session.json"),
           "--renderer-build", join(directory, "missing-build")
-        ]),
+        ], { env: { ...process.env, ANTHROPIC_OAUTH_SETUP_TOKEN: "sk-ant-oat01-never-used" } }),
         (error) => {
           assert.ok(error && typeof error === "object" && "stdout" in error && "stderr" in error);
           assert.equal(error.stderr, "");
@@ -49,42 +48,6 @@ describe("code gate", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
-});
-
-describe("fileCredentials", () => {
-  it("serializes concurrent refreshes and preserves other keys", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "visual-review-auth-"));
-    const path = join(directory, "session.json");
-    try {
-      const original = {
-        anthropic: { type: "oauth", access: "dummy", refresh: "dummy", expires: 0 },
-        other: { keep: true }
-      };
-      await writeFile(path, JSON.stringify(original));
-      const first = fileCredentials(path);
-      const second = fileCredentials(path);
-      await Promise.all(
-        [first, second].map((store) =>
-          store.modify("anthropic", async (current) => {
-            assert.equal(current?.type, "oauth");
-            if (current?.type !== "oauth") throw new Error("Missing test credential");
-            return { ...current, expires: current.expires + 1 };
-          })
-        )
-      );
-      const saved = JSON.parse(await readFile(path, "utf8"));
-      assert.equal(saved.anthropic.expires, 2);
-      assert.deepEqual(saved.other, original.other);
-      await assert.rejects(first.modify("anthropic", async () => ({ type: "api_key", key: "dummy" })), /Only OAuth/);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("refuses environment files", () => {
-    assert.throws(() => fileCredentials(join(tmpdir(), ".env")), /environment file/);
-    assert.throws(() => fileCredentials(join(tmpdir(), ".env.local")), /environment file/);
   });
 });
 

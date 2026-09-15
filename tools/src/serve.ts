@@ -19,7 +19,7 @@ import { registry } from "../../packages/wearable-validator/src/registry.js";
 import { validate } from "../../packages/wearable-validator/src/validate.js";
 import type { CaptureRecord, Renderer, Result, Reviewer } from "../../packages/wearable-validator/src/types.js";
 import { createLogger, type Logger } from "./log.js";
-import { dryRunReviewer, fileCredentials, readRun, recordingReviewer, tokenCredentials, writeRun } from "./visual-review.js";
+import { dryRunReviewer, readRun, recordingReviewer, tokenCredentials, writeRun } from "./visual-review.js";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const VISUAL_CHECKS = registry.filter((check) => check.group === "rendering").map((check) => check.name);
@@ -262,7 +262,7 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       emit(run, "stage", { text: "Starting the renderer" });
       services = await options.services(io);
       if (!services.renderer && !services.reviewer) {
-        emit(run, "done", { skipped: true, message: "This server has no renderer or reviewer configured (start it with --renderer-build and --auth)." });
+        emit(run, "done", { skipped: true, message: "This server has no renderer or reviewer configured (start it with --renderer-build and ANTHROPIC_OAUTH_SETUP_TOKEN)." });
         return;
       }
       emit(run, "stage", { text: "Rendering the item on both body shapes" });
@@ -432,7 +432,6 @@ async function main(): Promise<void> {
     options: {
       port: { type: "string" },
       host: { type: "string" },
-      auth: { type: "string" },
       "renderer-build": { type: "string" },
       "no-ai": { type: "boolean", default: false },
       site: { type: "string" },
@@ -448,18 +447,16 @@ async function main(): Promise<void> {
   const buildDirectory = buildFlag
     ? resolve(cwd, buildFlag)
     : await stat(join(defaultBuild, "avatar-preview-renderer.wasm")).then(() => defaultBuild).catch(() => undefined);
-  // --auth wins; a hosted process passes the year-long `claude setup-token` by environment and needs no writable session file
-  const authFlag = values.auth ?? (env.ANTHROPIC_OAUTH_SETUP_TOKEN ? undefined : env.AUTH_FILE);
-  const auth = authFlag && !values["no-ai"] ? resolve(cwd, authFlag) : undefined;
-  const setupToken = !auth && !values["no-ai"] ? env.ANTHROPIC_OAUTH_SETUP_TOKEN : undefined;
-  const credentials = auth ? fileCredentials(auth) : setupToken ? tokenCredentials(setupToken) : undefined;
+  // the only credential is the year-long `claude setup-token` from the environment: no session file, nothing to refresh or persist
+  const setupToken = values["no-ai"] ? undefined : env.ANTHROPIC_OAUTH_SETUP_TOKEN;
+  const credentials = setupToken ? tokenCredentials(setupToken) : undefined;
   const out = resolve(cwd, values.out ?? env.ARTIFACTS_DIR ?? join(ROOT, "tools/artifacts"));
   const site = resolve(cwd, values.site ?? env.SITE_DIR ?? join(ROOT, "packages/debug-ui/dist"));
   const siteExists = await stat(join(site, "index.html")).then(() => true).catch(() => false);
   const port = Number(values.port ?? env.PORT ?? 4180);
   const host = values.host ?? env.HOST ?? "127.0.0.1";
   const reviewerKind = credentials ? "pi" : "dry-run";
-  if (!credentials) log.warn("no OAuth session: reviews render and write the prompt without calling the model (pass --auth, AUTH_FILE or ANTHROPIC_OAUTH_SETUP_TOKEN)");
+  if (!credentials) log.warn("no OAuth session: reviews render and write the prompt without calling the model (set ANTHROPIC_OAUTH_SETUP_TOKEN to a claude setup-token)");
   if (!buildDirectory) log.warn("no Unity build found: visual runs will skip rendering (put the PR #10053 build in tools/renderer-build or pass --renderer-build)");
 
   const { server, close } = createRunServer({
@@ -478,7 +475,7 @@ async function main(): Promise<void> {
   server.listen(port, host, () => {
     log.info("run server listening", {
       url: `http://${host}:${port}`, renderer: buildDirectory ? "local Unity build" : "none", reviewer: reviewerKind,
-      model: credentials ? manifest.ai.model : undefined, auth: auth ? "session file" : setupToken ? "setup token" : "none", rules: manifest.version, artifacts: out,
+      model: credentials ? manifest.ai.model : undefined, auth: setupToken ? "setup token" : "none", rules: manifest.version, artifacts: out,
       site: siteExists ? `http://${host}:${port}/` : "not built (run npm run build -w wearable-validator-debug-ui, or use the Vite dev server)"
     });
   });
