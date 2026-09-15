@@ -22,7 +22,7 @@ const SIZE = 16;
 const LENGTH = 2;
 const [MALE, FEMALE] = manifest.rendering.bodyShapes;
 const { settleMs, stabilityMs, maxStabilityAttempts, profile, wearablePose, wearablePoseFraction } = manifest.rendering;
-const AZIMUTHS = manifest.thumbnailHonesty.azimuthDegrees.wearable;
+const AZIMUTHS = manifest.rendering.azimuthDegrees.wearable;
 
 /** Three PNGs whose decoded pixels differ — enough to script settling and camera changes. */
 const FRAMES = [pngBytes(SIZE, SIZE), pngBytes(SIZE, SIZE, true), pngBytes(SIZE, SIZE, false, 3)];
@@ -284,7 +284,7 @@ describe("createRenderer", () => {
       const wire = scripted();
       const engine = await renderer(directory, async () => wire.session);
       const emote: RenderInput = { ...input, itemType: "emote", category: "fun" };
-      const fraction = manifest.thumbnailHonesty.emoteFractions[1];
+      const fraction = manifest.rendering.emoteFractions[1];
       await engine.capture(emote, [request(engine.buildId, { id: "t", key: "t", timeFraction: fraction })]);
       const [update, pause, length, goTo] = wire.log; // the settle pause now follows the seek
       assert.equal((update[1] as Record<string, unknown>).emote, undefined);

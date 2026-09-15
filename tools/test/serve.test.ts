@@ -54,12 +54,12 @@ function fakeServices(calls: { services: number; rendered: number[] }) {
     const base: Reviewer = {
       review: async (request) => ({
         ok: true,
-        answer: { verdict: "matches", summary: "Same shirt.", reviewedCaptureIds: request.images.map((image) => image.id), findings: [] },
+        answer: { verdict: request.check === "thumbnail-honesty" ? "matches" : "ok", summary: "Same shirt.", reviewedCaptureIds: request.images.map((image) => image.id), findings: [] },
         metadata: { provider: "fake", model: "fixture", promptVersion: request.prompt.version, promptDigest: request.promptDigest }
       })
     };
     // the same wrapping main() does: record the prompt/answer on disk, then announce them
-    return { renderer, reviewer: liveReviewer(recordingReviewer(base, run.dir, "thumbnail-honesty"), run, "thumbnail-honesty") };
+    return { renderer, reviewer: liveReviewer(recordingReviewer(base, run.dir), run) };
   };
 }
 
@@ -85,7 +85,7 @@ describe("run server", () => {
   it("reports its capabilities", async () => {
     const health = (await (await fetch(`${base}/api/health`)).json()) as { visual: { renderer: boolean }; checks: string[] };
     assert.equal(health.visual.renderer, true);
-    assert.deepEqual(health.checks, ["render-valid", "thumbnail-honesty"]);
+    assert.deepEqual(health.checks, ["render-valid", "thumbnail-honesty", "visual-quality", "emote-quality"]);
   });
 
   it("stops at the code gate without building any adapter when the item fails code checks", async () => {
@@ -107,12 +107,12 @@ describe("run server", () => {
     const captures = events.filter((e) => e.type === "capture");
     assert.equal(captures.length, 12);
     assert.equal(captures[0].data.id, "BaseMale-wearable-000"); // render-valid takes the item-alone front view first
-    const reviews = events.filter((e) => e.type === "review").map((e) => e.data.phase);
-    assert.deepEqual(reviews, ["request", "answer"]);
+    const reviews = events.filter((e) => e.type === "review").map((e) => `${e.data.check}:${e.data.phase}`);
+    assert.deepEqual(reviews, ["thumbnail-honesty:request", "thumbnail-honesty:answer", "visual-quality:request", "visual-quality:answer"]);
     const done = events.at(-1)!;
     assert.equal(done.type, "done");
     const result = done.data.result as { checks: { check: string; status: string }[]; captures: { url: string }[] };
-    assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:passed"]);
+    assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:passed", "visual-quality:passed"]);
     assert.equal(result.captures.length, 12);
     const image = await fetch(`${base}${captures[3].data.url}`);
     assert.equal(image.status, 200);

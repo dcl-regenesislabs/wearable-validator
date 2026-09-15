@@ -38,6 +38,11 @@ export interface Manifest {
     /** Bumped when the capture recipe (views, poses, scene) changes; part of every capture key. */
     recipeVersion: number;
     bodyShapes: string[];
+    /** The capture recipe every visual rule draws from: views × azimuths per body shape, clip fractions for emotes. */
+    views: { wearable: ("avatar" | "wearable")[]; emote: ("avatar" | "wearable")[] };
+    azimuthDegrees: { wearable: number[]; emote: number[] };
+    emoteFractions: number[];
+    maxCaptures: number;
     profile: string; background: string; skin: string;
     wearablePose: string; wearablePoseFraction: number;
     navigationTimeoutMs: number; loadTimeoutMs: number; commandTimeoutMs: number; timeoutMs: number;
@@ -57,14 +62,12 @@ export interface Manifest {
   };
   /** V-01: how much of a capture must be something drawn. */
   renderValid: { minSubjectRatio: number; backgroundTolerance: number };
-  /** V-05 only. */
-  thumbnailHonesty: {
-    promptVersion: number;
-    views: { wearable: ("avatar" | "wearable")[]; emote: ("avatar" | "wearable")[] };
-    azimuthDegrees: { wearable: number[]; emote: number[] };
-    emoteFractions: number[];
-    maxCaptures: number; maxFindings: number;
-  };
+  /** V-05. */
+  thumbnailHonesty: { promptVersion: number; maxFindings: number };
+  /** V-02/V-03/V-04/V-06 in one review of the wearable captures. */
+  visualQuality: { promptVersion: number; maxFindings: number };
+  /** V-07 over the emote captures. */
+  emoteQuality: { promptVersion: number; maxFindings: number };
   receipts: Record<string, string>;
 }
 

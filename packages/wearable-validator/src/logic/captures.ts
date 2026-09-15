@@ -117,3 +117,51 @@ export async function resolveCaptures(ctx: CheckContext, requests: CaptureReques
   ctx.captures = [...captures, ...others];
   return captures;
 }
+
+/** The renderer's full recipe for this item: bodyShapes × views × (emote fractions) × azimuths — the set every visual rule shares. */
+export async function recipeRequests(ctx: CheckContext, build: string): Promise<CaptureRequest[] | string> {
+  const recipe = ctx.manifest.rendering;
+  const representations = ctx.item.representations;
+  if (!ctx.category || !representations?.length) return "Provide the item's category and declared body-shape representations to render it.";
+  for (const path of new Set(representations.flatMap((rep) => rep.contents))) {
+    if (!ctx.files.has(path)) return `Add the declared file "${path}" before rendering.`;
+  }
+  const digest = await inputDigest(ctx);
+  const views = recipe.views[ctx.itemType];
+  const azimuths = recipe.azimuthDegrees[ctx.itemType];
+  const fractions = ctx.itemType === "emote" ? recipe.emoteFractions : [undefined];
+  const requests: CaptureRequest[] = [];
+  const seen = new Set<string>();
+  for (const rep of representations) {
+    if (!rep.contents.includes(rep.mainFile) || !rep.bodyShapes.length) return "Each representation needs a body shape and its main file in contents.";
+    for (const bodyShape of rep.bodyShapes) {
+      if (!recipe.bodyShapes.includes(bodyShape) || seen.has(bodyShape)) return "Declare each supported body shape once, with its own representation.";
+      seen.add(bodyShape);
+      for (const view of views)
+        for (const timeFraction of fractions)
+          for (const azimuthDegrees of azimuths) {
+            requests.push(await captureRequest(ctx, {
+              inputDigest: digest,
+              rendererBuild: build,
+              recipeVersion: recipe.recipeVersion,
+              bodyShape,
+              mainFile: rep.mainFile,
+              view,
+              azimuthDegrees,
+              ...(timeFraction === undefined ? {} : { timeFraction }),
+              size: recipe.imageSizePx
+            }));
+          }
+    }
+  }
+  if (requests.length > recipe.maxCaptures) return "The capture recipe exceeds its image budget.";
+  return requests;
+}
+
+/** The label the model reads beside each image id: "BaseMale: avatar, azimuth 90 degrees[, clip fraction 0.5]". */
+export function captureLabel(request: CaptureRequest): string {
+  const shape = request.bodyShape.split(":").pop() ?? request.bodyShape;
+  const pose = request.pose ? `, pose ${request.pose}` : "";
+  const time = request.timeFraction === undefined ? "" : `, clip fraction ${request.timeFraction}`;
+  return `${shape}: ${request.view}${pose}, azimuth ${request.azimuthDegrees} degrees${time}`;
+}

@@ -77,6 +77,6 @@ describe("render-valid (V-01)", () => {
     const result = await validate(await syntheticZip(), { groups: ["rendering"], services: { renderer: mock.service } });
     assert.deepEqual(mock.rendered.map((batch) => batch.length), [2, 10]);
     assert.equal(result.captures.length, 12);
-    assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:skipped"]);
+    assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:skipped", "visual-quality:skipped"]);
   });
 });

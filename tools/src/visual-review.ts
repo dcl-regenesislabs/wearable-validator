@@ -16,6 +16,7 @@ import { createPiReviewer, reviewMessages } from "../../packages/wearable-valida
 import { digest } from "../../packages/wearable-validator/src/logic/captures.js";
 import { loadInput } from "../../packages/wearable-validator/src/loader.js";
 import { createRenderer } from "../../packages/wearable-validator/src/adapters/rendering.js";
+import { registry } from "../../packages/wearable-validator/src/registry.js";
 import { validate } from "../../packages/wearable-validator/src/validate.js";
 import type {
   CaptureRecord, CaptureRequest, CheckResult, Finding, Result, Reviewer, ReviewRequest, ReviewResult, Services
@@ -24,7 +25,7 @@ import type {
 // dev-tool I/O, not a rule: refresh tokens are single-use and .auth.json is shared across terminals
 const OAUTH_LOCK = { stale: 180000, retries: 10, minTimeout: 200, maxTimeout: 1000 };
 const ROOT = resolve(import.meta.dirname, "../..");
-const CHECK = "thumbnail-honesty";
+const VISUAL_CHECKS = registry.filter((check) => check.group === "rendering").map((check) => check.name);
 const DRY_RUN_REASON = "The model was not called (--no-ai).";
 
 export interface Args {
@@ -239,11 +240,11 @@ async function contextJson(request: ReviewRequest): Promise<Record<string, unkno
   return { ...context, messages };
 }
 
-/** Writes 1-prompt.md and 2-context.json BEFORE forwarding, 3-answer.json after — so --no-ai still leaves the prompt on disk. */
-export function recordingReviewer(reviewer: Reviewer, dir: string, check: string): Reviewer {
+/** Writes <check>/1-prompt.md and 2-context.json BEFORE forwarding, 3-answer.json after — so --no-ai still leaves the prompt on disk. */
+export function recordingReviewer(reviewer: Reviewer, dir: string): Reviewer {
   return {
     async review(request, signal) {
-      const folder = join(dir, check);
+      const folder = join(dir, request.check);
       await mkdir(folder, { recursive: true });
       await writeFile(join(folder, "1-prompt.md"), promptMarkdown(request));
       await writeFile(join(folder, "2-context.json"), JSON.stringify(await contextJson(request), null, 2));
@@ -267,10 +268,11 @@ export function dryRunReviewer(): Reviewer {
   };
 }
 
-/** --from <run> --answer: replays a saved 3-answer.json through the check with zero network. */
-export function replayReviewer(answerPath: string): Reviewer {
+/** --from <run> --answer: replays each check's saved 3-answer.json through the checks with zero network. */
+export function replayReviewer(runDir: string): Reviewer {
   return {
     async review(request) {
+      const answerPath = join(runDir, request.check, "3-answer.json");
       const saved: unknown = JSON.parse((await readEvidenceFile(answerPath)).toString("utf8"));
       if (!saved || typeof saved !== "object" || typeof (saved as { ok?: unknown }).ok !== "boolean" || !("metadata" in saved)) {
         throw new Error(`${answerPath} is not a saved ReviewResult. Run visual:review with --auth first.`);
@@ -397,21 +399,20 @@ async function main(): Promise<void> {
   const captures = args.from ? await readRun(args.from) : undefined;
   const renderer = args.buildDirectory ? await createRenderer({ buildDirectory: args.buildDirectory }) : undefined;
   const reviewer = args.noAi ? dryRunReviewer()
-    : args.answer ? replayReviewer(join(args.from!, CHECK, "3-answer.json"))
+    : args.answer ? replayReviewer(args.from!)
     : createPiReviewer({ credentials: fileCredentials(args.auth!), cache: args.cache });
-  const services: Services = { renderer, reviewer: recordingReviewer(reviewer, runDir, CHECK) };
+  const services: Services = { renderer, reviewer: recordingReviewer(reviewer, runDir) };
   const controller = new AbortController();
   const abort = () => controller.abort();
   process.once("SIGINT", abort);
   process.once("SIGTERM", abort);
-  console.log(`Running ${CHECK}: reusing ${captures?.length ?? 0} supplied views, rendering the rest, then one review call.\nRun folder: ${display(runDir)}`);
+  console.log(`Running ${VISUAL_CHECKS.join(", ")}: reusing ${captures?.length ?? 0} supplied views, rendering the rest, then one model call per review.\nRun folder: ${display(runDir)}`);
   try {
-    const result = await validate(input, { checks: [CHECK], captures, services, signal: controller.signal });
+    const result = await validate(input, { checks: VISUAL_CHECKS, captures, services, signal: controller.signal });
     const index = await writeRun(runDir, result, thumbnail);
     printSummary(result, index);
-    const row = result.checks[0];
-    const dryRunCompleted = args.noAi && row?.status === "errored" && Boolean(row.skipReason?.includes(DRY_RUN_REASON));
-    process.exitCode = row?.status === "passed" || dryRunCompleted ? 0 : 1;
+    const dryRunCompleted = args.noAi && result.checks.every((row) => row.status === "passed" || (row.status === "errored" && Boolean(row.skipReason?.includes(DRY_RUN_REASON))));
+    process.exitCode = result.checks.every((row) => row.status === "passed") || dryRunCompleted ? 0 : 1;
   } finally {
     process.removeListener("SIGINT", abort);
     process.removeListener("SIGTERM", abort);

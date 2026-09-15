@@ -291,7 +291,7 @@ describe("thumbnail-honesty prompt", () => {
     const camelCase = (name: string): string => name.replace(/-(\w)/g, (_match, letter: string) => letter.toUpperCase());
     const blocks = manifest as unknown as Record<string, { promptVersion?: number } | undefined>;
     const withPrompt = registry.filter((check) => check.prompt);
-    assert.deepEqual(withPrompt.map((check) => check.name), ["thumbnail-honesty"]);
+    assert.deepEqual(withPrompt.map((check) => check.name), ["thumbnail-honesty", "visual-quality", "emote-quality"]);
     for (const check of withPrompt) {
       assert.equal(check.group, "rendering", check.name);
       assert.equal(check.prompt?.version, blocks[camelCase(check.name)]?.promptVersion, check.name);

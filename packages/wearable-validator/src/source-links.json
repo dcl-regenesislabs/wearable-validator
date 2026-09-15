@@ -139,6 +139,10 @@
     "file": "src/checks/model/triangle-count/index.ts",
     "line": 8
   },
+  "emote-quality": {
+    "file": "src/checks/rendering/emote-quality/index.ts",
+    "line": 12
+  },
   "render-valid": {
     "file": "src/checks/rendering/render-valid/index.ts",
     "line": 7
@@ -146,5 +150,9 @@
   "thumbnail-honesty": {
     "file": "src/checks/rendering/thumbnail-honesty/index.ts",
     "line": 27
+  },
+  "visual-quality": {
+    "file": "src/checks/rendering/visual-quality/index.ts",
+    "line": 12
   }
 }

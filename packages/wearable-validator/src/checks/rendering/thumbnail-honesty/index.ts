@@ -6,13 +6,13 @@
 import { decode as decodePng } from "fast-png";
 import { imageSize } from "image-size";
 import { decode as decodeJpeg } from "jpeg-js";
-import { captureRequest, digestJson, inputDigest, rendererBuild, resolveCaptures } from "../../../logic/captures.js";
+import { captureLabel, recipeRequests, rendererBuild, resolveCaptures } from "../../../logic/captures.js";
+import { askReviewer, errored, isExecution, skipped } from "../../../logic/review.js";
 import { emptyCaptures } from "../render-valid/index.js";
 import { isJpegBytes, isPngBytes } from "../../../logic/images.js";
 import { manifest } from "../../../manifest/index.js";
 import {
   finding,
-  type CaptureRequest,
   type CheckContext,
   type CheckDefinition,
   type CheckExecution,
@@ -151,66 +151,7 @@ function readThumbnail(ctx: CheckContext): ReviewImage | string {
   }
 }
 
-// bodyShapes × views × (fractions) × azimuths; 180° added after rear artwork was mistaken for the front
-async function captureRequests(ctx: CheckContext, build: string): Promise<CaptureRequest[] | string> {
-  const recipe = ctx.manifest.thumbnailHonesty;
-  const representations = ctx.item.representations;
-  if (!ctx.category || !representations?.length) {
-    return "Provide the item's category and declared body-shape representations to capture thumbnail evidence.";
-  }
-  for (const path of new Set(representations.flatMap((rep) => rep.contents))) {
-    if (!ctx.files.has(path)) return `Add the declared file "${path}" before comparing its thumbnail.`;
-  }
-  const digest = await inputDigest(ctx);
-  const views = recipe.views[ctx.itemType];
-  const azimuths = recipe.azimuthDegrees[ctx.itemType];
-  const fractions = ctx.itemType === "emote" ? recipe.emoteFractions : [undefined];
-  const requests: CaptureRequest[] = [];
-  const seen = new Set<string>();
-  for (const rep of representations) {
-    if (!rep.contents.includes(rep.mainFile) || !rep.bodyShapes.length) {
-      return "Each representation needs a body shape and its main file in contents.";
-    }
-    for (const bodyShape of rep.bodyShapes) {
-      if (!ctx.manifest.rendering.bodyShapes.includes(bodyShape) || seen.has(bodyShape)) {
-        return "Declare each supported body shape once, with its own representation.";
-      }
-      seen.add(bodyShape);
-      for (const view of views)
-        for (const timeFraction of fractions)
-          for (const azimuthDegrees of azimuths) {
-            requests.push(await captureRequest(ctx, {
-              inputDigest: digest,
-              rendererBuild: build,
-              recipeVersion: ctx.manifest.rendering.recipeVersion,
-              bodyShape,
-              mainFile: rep.mainFile,
-              view,
-              azimuthDegrees,
-              ...(timeFraction === undefined ? {} : { timeFraction }),
-              size: ctx.manifest.rendering.imageSizePx
-            }));
-          }
-    }
-  }
-  if (requests.length > recipe.maxCaptures) return "The thumbnail capture recipe exceeds its image budget.";
-  return requests;
-}
 
-/** The label the model reads beside each image id: "BaseMale: avatar, azimuth 90 degrees[, clip fraction 0.5]". */
-function imageLabel(request: CaptureRequest): string {
-  const shape = request.bodyShape.split(":").pop() ?? request.bodyShape;
-  const pose = request.timeFraction === undefined ? "" : `, clip fraction ${request.timeFraction}`;
-  return `${shape}: ${request.view}, azimuth ${request.azimuthDegrees} degrees${pose}`;
-}
-
-function skipped(reason: string): CheckExecution {
-  return { status: "skipped", coverage: "missing", findings: [], reason };
-}
-
-function errored(reason: string, review: ReviewMetadata): CheckExecution {
-  return { status: "errored", coverage: "missing", findings: [], reason, review };
-}
 
 export const thumbnailHonesty: CheckDefinition = {
   ...meta,
@@ -230,7 +171,7 @@ export const thumbnailHonesty: CheckDefinition = {
     if (ctx.parseError) return skipped(`Fix the model before capturing thumbnail evidence: ${ctx.parseError}`);
     const build = rendererBuild(ctx);
     if (!build) return skipped("Supply captures from one renderer build, or configure services.renderer to take the required views.");
-    const requests = await captureRequests(ctx, build);
+    const requests = await recipeRequests(ctx, build);
     if (typeof requests === "string") return skipped(requests);
     // captures resolve before the reviewer is consulted: Result.captures is populated even on a --no-ai or reviewer-less run
     const captures = await resolveCaptures(ctx, requests);
@@ -238,22 +179,14 @@ export const thumbnailHonesty: CheckDefinition = {
     // the model is never asked about an empty render — render-valid reports that one
     const empty = emptyCaptures(ctx, captures.filter((capture) => capture.request.azimuthDegrees === 0 && capture.request.view === (ctx.itemType === "wearable" ? "wearable" : "avatar")));
     if (empty.length) return skipped(`The item renders as nothing visible (${empty.map(({ capture }) => capture.request.id).join(", ")}); see render-valid.`);
-    const reviewer = ctx.services?.reviewer;
-    if (!reviewer) return skipped("Configure services.reviewer to compare the thumbnail. Use the optional /ai adapter for Pi with OAuth.");
-
     const images: ReviewImage[] = [
-      ...captures.map((capture) => ({ id: capture.request.id, label: imageLabel(capture.request), bytes: capture.bytes, mimeType: "image/png" as const })),
+      ...captures.map((capture) => ({ id: capture.request.id, label: captureLabel(capture.request), bytes: capture.bytes, mimeType: "image/png" as const })),
       thumbnail
     ];
-    const request: ReviewRequest = { check: meta.name, prompt: thumbnailPrompt, promptDigest: await digestJson(thumbnailPrompt), images };
-    const result = await reviewer.review(request, ctx.signal);
-    ctx.signal?.throwIfAborted();
-    if (!result.ok) return errored(result.reason || "The reviewer did not answer.", result.metadata);
-    const { metadata } = result;
-    if (metadata.promptDigest !== request.promptDigest || metadata.promptVersion !== thumbnailPrompt.version || !metadata.model || !metadata.provider) {
-      return errored("The reviewer answered for a different prompt or omitted its model identity. Run the review again.", metadata);
-    }
-    const answer = parseThumbnailAnswer(result.answer, images.map((image) => image.id), {
+    const outcome = await askReviewer(ctx, meta.name, thumbnailPrompt, images);
+    if (isExecution(outcome)) return outcome;
+    const metadata = outcome.metadata;
+    const answer = parseThumbnailAnswer(outcome.answer, images.map((image) => image.id), {
       maxFindings: ctx.manifest.thumbnailHonesty.maxFindings,
       maxTextLength: ctx.manifest.ai.maxTextLength
     });

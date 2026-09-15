@@ -1,7 +1,7 @@
 # wearable-validator
 
 The Decentraland wearable/emote rule book as code (DAO proposal e2a13c58). npm monorepo:
-`packages/wearable-validator` (published package: 35 deterministic checks + the first visual check, manifest, CLI) ·
+`packages/wearable-validator` (published package: 35 deterministic checks + 4 visual checks, manifest, CLI) ·
 `packages/debug-ui` (the website — validation runs fully in-browser) ·
 `tools` (catalyst runner, sample generator; `tools/corpus/` holds downloaded catalyst data, blobs gitignored).
 

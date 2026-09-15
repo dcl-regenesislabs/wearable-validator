@@ -160,6 +160,32 @@
       "urn:decentraland:off-chain:base-avatars:BaseMale",
       "urn:decentraland:off-chain:base-avatars:BaseFemale"
     ],
+    "views": {
+      "wearable": [
+        "avatar",
+        "wearable"
+      ],
+      "emote": [
+        "avatar"
+      ]
+    },
+    "azimuthDegrees": {
+      "wearable": [
+        0,
+        90,
+        180
+      ],
+      "emote": [
+        0,
+        90
+      ]
+    },
+    "emoteFractions": [
+      0,
+      0.5,
+      1
+    ],
+    "maxCaptures": 12,
     "profile": "default1",
     "background": "444444",
     "skin": "e8b89a",
@@ -208,32 +234,14 @@
   },
   "thumbnailHonesty": {
     "promptVersion": 4,
-    "views": {
-      "wearable": [
-        "avatar",
-        "wearable"
-      ],
-      "emote": [
-        "avatar"
-      ]
-    },
-    "azimuthDegrees": {
-      "wearable": [
-        0,
-        90,
-        180
-      ],
-      "emote": [
-        0,
-        90
-      ]
-    },
-    "emoteFractions": [
-      0,
-      0.5,
-      1
-    ],
-    "maxCaptures": 12,
+    "maxFindings": 8
+  },
+  "visualQuality": {
+    "promptVersion": 1,
+    "maxFindings": 12
+  },
+  "emoteQuality": {
+    "promptVersion": 1,
     "maxFindings": 8
   },
   "receipts": {

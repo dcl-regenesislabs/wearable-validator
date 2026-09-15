@@ -365,9 +365,10 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
 }
 
 /** Announces the prompt before the model call and the answer after it, on top of the recording wrapper. */
-export function liveReviewer(reviewer: Reviewer, run: RunSink, check: string): Reviewer {
+export function liveReviewer(reviewer: Reviewer, run: RunSink): Reviewer {
   return {
     async review(request, signal) {
+      const check = request.check;
       run.emit("review", {
         check,
         phase: "request",
@@ -424,7 +425,7 @@ async function main(): Promise<void> {
     services: async (run) => {
       const renderer = buildDirectory ? await createRenderer({ buildDirectory, onCapture: (capture) => void run.capture(capture) }) : undefined;
       const base = auth ? createPiReviewer({ credentials: fileCredentials(auth) }) : dryRunReviewer();
-      const reviewer = liveReviewer(recordingReviewer(base, run.dir, VISUAL_CHECKS[0]), run, VISUAL_CHECKS[0]);
+      const reviewer = liveReviewer(recordingReviewer(base, run.dir), run);
       return { renderer, reviewer, stop: () => renderer?.stop() ?? Promise.resolve() };
     }
   });

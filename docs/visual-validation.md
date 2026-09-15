@@ -1,6 +1,6 @@
 # Visual validation (Phase 4)
 
-**Status.** V-05 `thumbnail-honesty` is built and runnable; V-01..V-04, V-06 and V-07 are not. The rule is one file (`packages/wearable-validator/src/checks/rendering/thumbnail-honesty/index.ts`); the renderer and the vision call are one optional entry each (`src/adapters/rendering.ts`, `src/adapters/ai.ts`); the shared evidence helper is `src/logic/captures.ts`; the local runner is `tools/src/visual-review.ts`. Every run writes a folder you can open (§3). Proof on file (2026-09-11, local PR #10053 build, SwiftShader): all 12 captures of the bundled shirt are byte-identical across fresh runs; `--no-ai` writes the prompt without spend; `--from <run> --answer` replays a saved answer with zero network; one real Sonnet 4.5 call passed the matching thumbnail ($0.074) and flagged a foreign one ($0.071). `manifest.version` moved to 0.2.0 with the new rule.
+**Status.** Four visual checks are built and share one capture recipe: `render-valid` (V-01, deterministic pixels), `thumbnail-honesty` (V-05), `visual-quality` (V-02 clipping, V-03 skinning, V-04 textures, V-06 scale in one model call, findings tagged with the rule they map to) and `emote-quality` (V-07). Every rule is one folder under `src/checks/rendering/`; the renderer (`src/adapters/rendering.ts`), the model call (`src/adapters/ai.ts`), the capture helper (`src/logic/captures.ts`) and the review round-trip (`src/logic/review.ts`) are shared. A wearable costs twelve captures rendered once and two model calls; an emote the same. The local runner is `tools/src/visual-review.ts`; the run server `tools/src/serve.ts` streams it into the website. Every run writes a folder you can open (§3).
 
 **Item-alone framing.** The previewer fits its camera to the item when an item-alone view loads after a worn view of the same body shape, and that fit depends on session history, so those views used to come out framed differently between runs. The renderer now orders every session item-alone views first (both shapes), then worn views (`sessionOrder` in `adapters/rendering.ts`); with that order two fresh runs of the shirt produce 12 byte-identical captures (2026-09-15).
 
@@ -247,20 +247,10 @@ AI (`packages/wearable-validator/src/adapters/ai.ts` unless noted):
 
 ---
 
-## 6. How V-01..V-07 slot in — no new layers
+## 6. What is still open
 
-A visual rule is one folder `src/checks/rendering/<name>/` (index.ts + index.test.ts) in the same order as V-05 (`<name>Prompt` if it needs the model → `parse<Name>Answer` → input readers → `captureRequests` → `CheckDefinition`), one flat manifest block named after the check, one registry line, four registry-surface entries. `rendering.ts`, `captures.ts`, `ai.ts` and the CLI do not change per rule.
-
-| Rule | Recipe (from the plan) | Reuses as-is | Adds |
-|---|---|---|---|
-| `render-valid` V-01 | front/side subject vs baseline avatar, deterministic | `captureRequest`, `resolveCaptures`, fast-png on `CaptureRecord.bytes`; no `prompt`, no reviewer | `renderValid: { views, azimuthDegrees, minSubjectPixelRatio }` |
-| `clipping` V-02 | normal + chroma turntables, pixels then AI | everything | optional `CaptureRequest.skin` (one field → one line in the `update` options → a new key and an id suffix); `clipping: { chromaSkin, … }` |
-| `skinning-quality` V-03 | posed frames | `timeFraction` already exists | optional `CaptureRequest.pose` (avatar clip name) → one line in the update options |
-| `texture-integrity` V-04 | worn + item-alone close views | everything | optional `CaptureRequest.zoom` → one `scene.changeZoom` request in `captureAll` |
-| `scale-sanity` V-06 | fixed-camera front/side with avatar reference | V-05's recipe verbatim | its own prompt + `scaleSanity` block |
-| `emote-visual-quality` V-07 | timed front/side frames + loop metadata | V-05's emote recipe | its own prompt + `emoteVisualQuality` block, `appliesTo: emote only` |
-
-Shared automatically: ids and keys (V-01, V-02 and V-05 asking for `BaseMale-avatar-000` render it once per `validate()` via `ctx.captures`, and across calls via `options.captures`), the reviewer, the budget, the run folder (`writeRun` writes one `<check>/` folder per rendering row; captures stay shared at the top level), the gallery, the registry test "every check with `prompt` matches its manifest version". Pixel-only rules skip the reviewer and return `Finding[]` with `measured`/`limit`. Contact sheets, if ever measured worthwhile, are a pure function inside the rule that needs them. Aggregation/policy stays in the host; `rendering` joins `CORE_GROUPS` in one line once all seven exist.
-
----
-
+- The Rule Book's larger recipe — 8-step turntable, six animation clips, outfit combinations, the chroma-key clipping pass, contact sheets — is not built. The renderer already accepts `pose` on a capture request, so animated poses are a recipe change plus a prompt bump when a labeled fixture set shows rest-pose views miss real clipping.
+- Accuracy is measured on two items only. A labeled set of known-good and known-bad items is the next thing to build before any finding can become more than advisory.
+- Aggregation and policy (`Result.identity`, shadow / advisory / review / block profiles) do not exist; `passed` stays null for every visual run.
+- The run API has no authentication; ADR-44 signed fetch before any shared deployment.
+- The Unity build with camera control and item-only view (unity-explorer PR #10053) is not upstream yet.

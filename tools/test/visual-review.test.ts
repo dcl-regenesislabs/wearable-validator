@@ -152,7 +152,7 @@ describe("run folder", () => {
           return { ok: true, answer: { verdict: "matches" }, metadata: { provider: "test", model: "fake", promptVersion: 4, promptDigest: "digest-current" } };
         }
       };
-      const result = await recordingReviewer(inner, directory, "thumbnail-honesty").review(reviewRequest());
+      const result = await recordingReviewer(inner, directory).review(reviewRequest());
       assert.equal(result.ok, true);
       assert.equal(promptExistedDuringCall, true);
       const prompt = await readFile(join(folder, "1-prompt.md"), "utf8");
@@ -171,7 +171,7 @@ describe("run folder", () => {
       assert.equal(dry.metadata.promptDigest, "digest-current");
 
       const stale = { ...reviewRequest(), promptDigest: "digest-next" };
-      const replayed = await replayReviewer(join(folder, "3-answer.json")).review(stale);
+      const replayed = await replayReviewer(directory).review(stale);
       assert.equal(replayed.ok, true);
       assert.equal(replayed.metadata.promptDigest, "digest-next");
     } finally {
