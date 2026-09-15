@@ -94,13 +94,14 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
     }
   }, [bytes, name, codeResult]);
 
-  // a run server is there and a zip is loaded: render right away, the photos are the point
+  // a run server is there and the code checks passed: render right away. With code errors the creator has
+  // things to fix first, so rendering and the model call wait for an explicit click.
   const latestStart = useRef(start);
   latestStart.current = start;
   const serverKnown = capabilities !== null;
   useEffect(() => {
     setState(EMPTY);
-    if (serverKnown && bytes && codeResult) void latestStart.current();
+    if (serverKnown && bytes && codeResult?.passed === true) void latestStart.current();
   }, [serverKnown, bytes, codeResult]);
 
   if (!capabilities || !bytes) return null;
@@ -126,7 +127,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
               <button className="visual-btn" onClick={() => void start()}>
                 {codeResult?.passed === true ? "Render and review" : "Render and review anyway"}
               </button>
-              {codeResult?.passed !== true && <span className="visual-note">The code checks did not pass, so this runs standalone.</span>}
+              {codeResult?.passed !== true && <span className="visual-note">The code checks did not pass. Fix those first; this renders and asks the model anyway.</span>}
             </div>
           </div>
         )}

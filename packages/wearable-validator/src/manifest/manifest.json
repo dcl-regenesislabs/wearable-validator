@@ -155,6 +155,7 @@
   },
   "rendering": {
     "imageSizePx": 1024,
+    "recipeVersion": 1,
     "bodyShapes": [
       "urn:decentraland:off-chain:base-avatars:BaseMale",
       "urn:decentraland:off-chain:base-avatars:BaseFemale"
@@ -201,9 +202,12 @@
     "textCharactersPerToken": 3,
     "maxTextLength": 1200
   },
+  "renderValid": {
+    "minSubjectRatio": 0.02,
+    "backgroundTolerance": 24
+  },
   "thumbnailHonesty": {
     "promptVersion": 4,
-    "recipeVersion": 1,
     "views": {
       "wearable": [
         "avatar",

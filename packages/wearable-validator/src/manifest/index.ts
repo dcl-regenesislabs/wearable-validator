@@ -34,7 +34,10 @@ export interface Manifest {
   thumbnail: { minTransparentPixelRatio: number; alphaThreshold: number };
   /** The headless renderer, shared by every visual rule — read by /rendering and captures.ts. */
   rendering: {
-    imageSizePx: number; bodyShapes: string[];
+    imageSizePx: number;
+    /** Bumped when the capture recipe (views, poses, scene) changes; part of every capture key. */
+    recipeVersion: number;
+    bodyShapes: string[];
     profile: string; background: string; skin: string;
     wearablePose: string; wearablePoseFraction: number;
     navigationTimeoutMs: number; loadTimeoutMs: number; commandTimeoutMs: number; timeoutMs: number;
@@ -52,9 +55,11 @@ export interface Manifest {
     model: string; maxOutputTokens: number; maxInputTokens: number; maxImages: number; timeoutMs: number; maxRetries: number;
     thinkingBudgetTokens: number; imagePixelsPerToken: number; textCharactersPerToken: number; maxTextLength: number;
   };
+  /** V-01: how much of a capture must be something drawn. */
+  renderValid: { minSubjectRatio: number; backgroundTolerance: number };
   /** V-05 only. */
   thumbnailHonesty: {
-    promptVersion: number; recipeVersion: number;
+    promptVersion: number;
     views: { wearable: ("avatar" | "wearable")[]; emote: ("avatar" | "wearable")[] };
     azimuthDegrees: { wearable: number[]; emote: number[] };
     emoteFractions: number[];

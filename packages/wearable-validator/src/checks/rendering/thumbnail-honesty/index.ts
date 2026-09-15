@@ -7,6 +7,7 @@ import { decode as decodePng } from "fast-png";
 import { imageSize } from "image-size";
 import { decode as decodeJpeg } from "jpeg-js";
 import { captureRequest, digestJson, inputDigest, rendererBuild, resolveCaptures } from "../../../logic/captures.js";
+import { emptyCaptures } from "../render-valid/index.js";
 import { isJpegBytes, isPngBytes } from "../../../logic/images.js";
 import { manifest } from "../../../manifest/index.js";
 import {
@@ -181,7 +182,7 @@ async function captureRequests(ctx: CheckContext, build: string): Promise<Captur
             requests.push(await captureRequest(ctx, {
               inputDigest: digest,
               rendererBuild: build,
-              recipeVersion: recipe.recipeVersion,
+              recipeVersion: ctx.manifest.rendering.recipeVersion,
               bodyShape,
               mainFile: rep.mainFile,
               view,
@@ -234,6 +235,9 @@ export const thumbnailHonesty: CheckDefinition = {
     // captures resolve before the reviewer is consulted: Result.captures is populated even on a --no-ai or reviewer-less run
     const captures = await resolveCaptures(ctx, requests);
     if (typeof captures === "string") return skipped(captures);
+    // the model is never asked about an empty render — render-valid reports that one
+    const empty = emptyCaptures(ctx, captures.filter((capture) => capture.request.azimuthDegrees === 0 && capture.request.view === (ctx.itemType === "wearable" ? "wearable" : "avatar")));
+    if (empty.length) return skipped(`The item renders as nothing visible (${empty.map(({ capture }) => capture.request.id).join(", ")}); see render-valid.`);
     const reviewer = ctx.services?.reviewer;
     if (!reviewer) return skipped("Configure services.reviewer to compare the thumbnail. Use the optional /ai adapter for Pi with OAuth.");
 

@@ -7,6 +7,7 @@ import { manifest } from "../../../manifest/index.js";
 import { registry } from "../../../registry.js";
 import type { Renderer, Reviewer, ReviewRequest, ReviewResult } from "../../../types.js";
 import { pngBytes, syntheticGlb, syntheticZip } from "#test/helpers/synthetic.js";
+import { renderedFrame } from "#test/helpers/frames.js";
 
 const CHECK = { checks: ["thumbnail-honesty"] };
 
@@ -27,7 +28,7 @@ function services(answer: (request: ReviewRequest) => ReviewResult = matches) {
   const rendered: number[] = [];
   const reviews: ReviewRequest[] = [];
   const size = manifest.rendering.imageSizePx;
-  const bytes = pngBytes(size, size);
+  const bytes = renderedFrame(size); // something drawn, or the empty-render guard skips the review
   const renderer: Renderer = {
     buildId: "test-renderer",
     capture: async (_input, requests) => {
