@@ -29,15 +29,30 @@ npm run catalyst -w wearable-validator-tools -- --wearables 15 --emotes 10
 
 | | |
 |---|---|
-| `packages/wearable-validator` | the published package: 35 deterministic checks (files · model · emote · content), rules manifest, CLI. Isomorphic — the website runs it fully in the browser, nothing is uploaded |
+| `packages/wearable-validator` | the published package: 35 deterministic checks (files · model · emote · content) plus four visual checks (render-valid, thumbnail-honesty, visual-quality, emote-quality), rules manifest, CLI. One folder per check under `src/checks/<group>/<name>/` (algorithm, creator-facing text and tests together); shared algorithms in `src/logic/`; Node-only adapters in `src/adapters/` (`/rendering`, `/ai`). The root entry is isomorphic — the website runs it fully in the browser |
 | `packages/debug-ui` | the website: upload → filterable per-rule results with separate values, requirements, and colored status labels (including on mobile), inspectable metadata fields, plain explanations, concrete how-to-fix steps, exact-section docs links, and a live 3D preview |
-| `tools` | catalyst runner (validate published items), sample generator, and `tools/corpus/` — downloaded catalyst content (blobs are a gitignored cache) + validation reports |
+| `tools` | catalyst runner (validate published items), sample generator, the visual review runner and the renderer probe; run evidence lands in gitignored `tools/artifacts/` |
 
 Requirement labels are formatted in the debug UI; the package owns the manifest values and category-dependent limit calculations.
 
 Every check carries a rule-book ID (`M-01`…), a plain-language explanation, fix guidance, and a docs link — all exported from the package (`checks`, `explanations`, `fixes`) so no surface can drift from the code.
 
-Rendering checks (headless renderer) and AI checks (IP/policy screening) land later as optional entries (`/rendering`, `/ai`); the design docs live in the project's planning workspace.
+To add or change a rule, follow [docs/adding-a-check.md](docs/adding-a-check.md): one folder per check, numbers in the manifest, tests beside the code.
+
+Visual validation (Phase 4): the item is rendered headlessly on both body shapes once, then pinned vision calls judge the thumbnail, clipping, skinning, textures and scale (wearables) or pose, grounding, ending and motion (emotes). Every run writes a folder you can open — screenshots, the prompt, the exact context sent to the model, the raw answer and the finding. See [docs/visual-validation.md](docs/visual-validation.md).
+
+```sh
+npx playwright-core install chromium --no-shell
+# once: put the Unity build from unity-explorer PR #10053 in tools/renderer-build/ (see docs/visual-validation.md)
+# the website with live visual review: builds the site and serves it with the run server at http://127.0.0.1:4180
+npm run serve -- --auth .auth.json              # drop a zip → "Render and review" streams every screenshot, the prompt and the answer
+# or from the terminal
+npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip --no-ai   # renders + writes the prompt, no spend
+npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip \
+  --from tools/artifacts/visual-upper_body-XXXXXX --auth .auth.json      # reuses the renders, one model call
+```
+
+Leave out `--auth` and the server renders and writes the prompt without calling the model. The terminal shows one line per event (run accepted, code gate, each capture, the model request, the answer with tokens and cost); when hosted, the same process is configured with `PORT`, `HOST`, `AUTH_FILE`, `RENDERER_BUILD`, `ARTIFACTS_DIR` and logs JSON lines — see [docs/visual-validation.md](docs/visual-validation.md).
 
 ```ts
 import { validate } from "@dcl-regenesislabs/wearable-validator";

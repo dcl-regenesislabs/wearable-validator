@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "triangles": {
     "default": 1500,
     "perCategory": {
@@ -153,6 +153,97 @@
     "minTransparentPixelRatio": 0.01,
     "alphaThreshold": 8
   },
+  "rendering": {
+    "imageSizePx": 1024,
+    "recipeVersion": 1,
+    "bodyShapes": [
+      "urn:decentraland:off-chain:base-avatars:BaseMale",
+      "urn:decentraland:off-chain:base-avatars:BaseFemale"
+    ],
+    "views": {
+      "wearable": [
+        "avatar",
+        "wearable"
+      ],
+      "emote": [
+        "avatar"
+      ]
+    },
+    "azimuthDegrees": {
+      "wearable": [
+        0,
+        90,
+        180
+      ],
+      "emote": [
+        0,
+        90
+      ]
+    },
+    "emoteFractions": [
+      0,
+      0.5,
+      1
+    ],
+    "maxCaptures": 12,
+    "profile": "default1",
+    "background": "444444",
+    "skin": "e8b89a",
+    "wearablePose": "fist-pump",
+    "wearablePoseFraction": 0,
+    "navigationTimeoutMs": 60000,
+    "loadTimeoutMs": 180000,
+    "commandTimeoutMs": 15000,
+    "timeoutMs": 360000,
+    "settleMs": 300,
+    "stabilityMs": 250,
+    "maxStabilityAttempts": 8,
+    "maxCaptureBytes": 8388608,
+    "probe": {
+      "pausedObservationMs": 1000,
+      "poseFractions": [
+        0.25,
+        0.75
+      ],
+      "cameraSideRadians": 1.5707963267948966,
+      "cameraElevationRadians": 0.5235987755982988,
+      "cameraZoomWorldUnits": 0.5,
+      "cameraPanTarget": {
+        "x": 0.25,
+        "y": 0,
+        "z": 0
+      },
+      "chromaSkin": "00ff00"
+    }
+  },
+  "ai": {
+    "model": "claude-sonnet-4-5-20250929",
+    "maxOutputTokens": 4096,
+    "maxInputTokens": 40000,
+    "maxImages": 13,
+    "timeoutMs": 120000,
+    "maxRetries": 0,
+    "thinkingBudgetTokens": 1024,
+    "imagePixelsPerToken": 750,
+    "textCharactersPerToken": 3,
+    "maxTextLength": 1200
+  },
+  "renderValid": {
+    "minSubjectRatio": 0.02,
+    "backgroundTolerance": 24
+  },
+  "thumbnailHonesty": {
+    "promptVersion": 4,
+    "maxFindings": 8
+  },
+  "visualQuality": {
+    "promptVersion": 1,
+    "maxFindings": 12
+  },
+  "emoteQuality": {
+    "promptVersion": 1,
+    "maxFindings": 8
+  },
   "receipts": {
     "trianglesAndBones": "builder src/lib/glbValidation/constants.ts",
     "fileSizes": "ADR-246 via core-libs content-validator ADR51.ts constants",
@@ -166,11 +257,11 @@
     },
     {
       "topic": "self hide/replace (M-12)",
-      "note": "Downgraded to warning 2026-09-09: committee-approved items (e.g. 0xae473ded\u2026:0) carry self-referencing hides/replaces and work in-world \u2014 the engine ignores them (replaces deprecated by ADR-239)."
+      "note": "Downgraded to warning 2026-09-09: committee-approved items (e.g. 0xae473ded…:0) carry self-referencing hides/replaces and work in-world — the engine ignores them (replaces deprecated by ADR-239)."
     },
     {
       "topic": "animations/shape keys in wearable GLBs (M-13)",
-      "note": "Downgraded to warning 2026-09-09: approved items ship leftover clips (Mixamo 'Take 001') and work in-world \u2014 the engine ignores non-emote animations; docs phrase this as export hygiene."
+      "note": "Downgraded to warning 2026-09-09: approved items ship leftover clips (Mixamo 'Take 001') and work in-world — the engine ignores non-emote animations; docs phrase this as export hygiene."
     }
   ]
 }

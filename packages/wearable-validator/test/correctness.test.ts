@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BodyShape, EmoteCategory, Rarity } from "@dcl/schemas";
 import { validate } from "../src/index.js";
-import { syntheticGlb, syntheticZip } from "./helpers/synthetic.js";
+import { syntheticGlb, syntheticZip } from "#test/helpers/synthetic.js";
 
 for (const mode of ["builder", "entity"] as const) {
   test(`${mode} metadata rejects unknown rarity and body shape`, async () => {

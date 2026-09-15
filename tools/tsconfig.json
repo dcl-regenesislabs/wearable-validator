@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src/log.ts",
+    "src/visual-review.ts",
+    "src/renderer-probe.ts",
+    "src/serve.ts",
+    "test/*.test.ts"
+  ]
+}

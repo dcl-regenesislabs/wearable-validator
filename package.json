@@ -15,6 +15,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
     "catalyst": "npm run catalyst -w wearable-validator-tools --",
-    "samples": "npm run samples -w wearable-validator-tools"
+    "samples": "npm run samples -w wearable-validator-tools",
+    "serve": "npm run build -w wearable-validator-debug-ui && npm run serve -w wearable-validator-tools --"
   }
 }
