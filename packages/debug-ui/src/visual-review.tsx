@@ -117,7 +117,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
       <div className="group-head">
         <h2>Visual review</h2>
         <span className="tally">
-          {capabilities.renderer ? "local renderer" : "no renderer"} · {capabilities.reviewer === "pi" ? "one model call per run" : "model: dry run"}
+          {capabilities.renderer ? "local renderer" : "no renderer"} · {capabilities.reviewer === "pi" ? "two model calls per run" : "model: dry run"}
         </span>
       </div>
       <div className="visual-body">
@@ -226,7 +226,15 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
         })}
         {rows.filter((row) => !state.reviews[row.check]).map((row) => (
           <div className="visual-result check-body" key={row.check}>
-            <p className="explain"><b>{checkRegistry[row.check]?.title ?? row.check}</b> — {row.measured ?? row.skipReason}</p>
+            <p className="explain">
+              <b>{checkRegistry[row.check]?.title ?? row.check}</b> —{" "}
+              {row.measured ??
+                (checkRegistry[row.check]?.prompt && row.status === "skipped"
+                  ? codeResult?.passed === true
+                    ? "the model was not asked (the run server has no reviewer configured — start it with --auth)"
+                    : "the model was not asked because the code checks failed. Fix those, or press Ask the model anyway."
+                  : row.skipReason)}
+            </p>
             {(state.result?.findings ?? []).filter((finding) => finding.check === row.check).map((f, i) => (
               <div className={`finding ${f.severity}`} key={i}><p className="msg">{f.message}</p></div>
             ))}
