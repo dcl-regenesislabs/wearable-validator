@@ -301,11 +301,13 @@ export const GPU_ARGS: Record<Gpu, string[]> = {
 
 export function launchChromium(options: { gpu: Gpu; headed?: boolean; executablePath?: string }): Promise<Browser> {
   // channel "chromium" full headless: the headless shell gives WebGPU errors and screenshot timeouts (install with --no-shell)
+  // CHROMIUM_ARGS is an operator knob for platform-specific flags (Linux containers need Vulkan-backed SwiftShader); it never changes the pixels' provenance, which is why it is not part of buildId
+  const extra = (process.env.CHROMIUM_ARGS ?? "").split(/\s+/).filter(Boolean);
   return chromium.launch({
     channel: "chromium",
     headless: !options.headed,
     executablePath: options.executablePath,
-    args: GPU_ARGS[options.gpu]
+    args: [...GPU_ARGS[options.gpu], ...extra]
   });
 }
 

@@ -7,7 +7,8 @@ import type { AddressInfo } from "node:net";
 import { digest } from "../../packages/wearable-validator/src/logic/captures.js";
 import { manifest } from "../../packages/wearable-validator/src/manifest/index.js";
 import type { CaptureRecord, Renderer, Reviewer } from "../../packages/wearable-validator/src/types.js";
-import { pngBytes, syntheticGlb, syntheticZip } from "../../packages/wearable-validator/test/helpers/synthetic.js";
+import { syntheticGlb, syntheticZip } from "../../packages/wearable-validator/test/helpers/synthetic.js";
+import { renderedFrame } from "../../packages/wearable-validator/test/helpers/frames.js";
 import { createRunServer, liveReviewer, type RunSink } from "../src/serve.js";
 import { recordingReviewer } from "../src/visual-review.js";
 
@@ -35,7 +36,7 @@ function fakeServices(calls: { services: number; rendered: number[] }) {
   return async (run: RunSink) => {
     calls.services++;
     const size = manifest.rendering.imageSizePx;
-    const bytes = pngBytes(size, size);
+    const bytes = renderedFrame(size);
     const renderer: Renderer = {
       buildId: "fake-build",
       capture: async (_input, requests) => {
@@ -84,7 +85,7 @@ describe("run server", () => {
   it("reports its capabilities", async () => {
     const health = (await (await fetch(`${base}/api/health`)).json()) as { visual: { renderer: boolean }; checks: string[] };
     assert.equal(health.visual.renderer, true);
-    assert.deepEqual(health.checks, ["thumbnail-honesty"]);
+    assert.deepEqual(health.checks, ["render-valid", "thumbnail-honesty"]);
   });
 
   it("stops at the code gate without building any adapter when the item fails code checks", async () => {
@@ -105,13 +106,13 @@ describe("run server", () => {
     const events = await readEvents(`${base}/api/runs/${started.id}/events`);
     const captures = events.filter((e) => e.type === "capture");
     assert.equal(captures.length, 12);
-    assert.equal(captures[0].data.id, "BaseMale-avatar-000");
+    assert.equal(captures[0].data.id, "BaseMale-wearable-000"); // render-valid takes the item-alone front view first
     const reviews = events.filter((e) => e.type === "review").map((e) => e.data.phase);
     assert.deepEqual(reviews, ["request", "answer"]);
     const done = events.at(-1)!;
     assert.equal(done.type, "done");
     const result = done.data.result as { checks: { check: string; status: string }[]; captures: { url: string }[] };
-    assert.equal(result.checks[0].status, "passed");
+    assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:passed"]);
     assert.equal(result.captures.length, 12);
     const image = await fetch(`${base}${captures[3].data.url}`);
     assert.equal(image.status, 200);
