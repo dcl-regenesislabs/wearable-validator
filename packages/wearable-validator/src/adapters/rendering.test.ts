@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { manifest } from "../manifest/index.js";
 import {
-  captureAll,
+  captureAll, sessionOrder,
   createRenderer,
   previewItem,
   previewUrl,
@@ -265,14 +265,15 @@ describe("createRenderer", () => {
         ["pause", stabilityMs], ["scene.getScreenshot", [SIZE, SIZE]]
       ];
       const views = AZIMUTHS.flatMap((azimuth, index) => view(azimuth - (AZIMUTHS[index - 1] ?? 0)));
-      const expected = [MALE, FEMALE].flatMap((bodyShape) => [
-        ...setup(bodyShape, "avatar"), ...views,
-        ...setup(bodyShape, "wearable"), ...views
-      ]);
+      // item-alone views first (both shapes), then worn views — the order that keeps item-alone framing repeatable
+      const expected = [
+        ...[MALE, FEMALE].flatMap((bodyShape) => [...setup(bodyShape, "wearable"), ...views]),
+        ...[MALE, FEMALE].flatMap((bodyShape) => [...setup(bodyShape, "avatar"), ...views])
+      ];
       assert.deepEqual(wire.log, expected);
 
       assert.equal(captures.length, requests.length);
-      assert.deepEqual(captures.map((capture) => capture.request.id), requests.map((request) => request.id));
+      assert.deepEqual(new Set(captures.map((capture) => capture.request.id)), new Set(requests.map((request) => request.id)));
       assert.ok(captures.every((capture) => capture.width === SIZE && capture.height === SIZE && capture.sha256.length === 64));
       assert.equal(wire.closed, 1);
     });
@@ -432,7 +433,7 @@ describe("captureAll", () => {
     const requests = recipe("build");
     const seen: string[] = [];
     const captures = await captureAll(wire.session, input, requests, new AbortController().signal, (capture) => seen.push(capture.request.id));
-    assert.deepEqual(seen, requests.map((request) => request.id));
+    assert.deepEqual(seen, sessionOrder(requests).map((request) => request.id));
     assert.equal(captures.length, seen.length);
   });
 });

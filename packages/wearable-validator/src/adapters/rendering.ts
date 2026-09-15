@@ -445,7 +445,24 @@ async function seekEmote(session: PreviewSession, fraction: number): Promise<voi
   await session.request("emote", "goTo", [duration * fraction]);
 }
 
-/** Requests in recipe order: bodyShapes × views × (fractions) × azimuths, so one update serves every azimuth of a view. */
+/**
+ * Item-alone views before worn views, body shapes in manifest order, request order otherwise.
+ * The previewer fits its camera to the item when an item-alone view loads after a worn view of the same shape,
+ * and that fit depends on session history; loaded first, the framing is identical across sessions and machines.
+ */
+export function sessionOrder(requests: CaptureRequest[]): CaptureRequest[] {
+  const shapes = manifest.rendering.bodyShapes;
+  return requests
+    .map((request, index) => ({ request, index }))
+    .sort((a, b) =>
+      (a.request.view === "wearable" ? 0 : 1) - (b.request.view === "wearable" ? 0 : 1) ||
+      shapes.indexOf(a.request.bodyShape) - shapes.indexOf(b.request.bodyShape) ||
+      a.index - b.index
+    )
+    .map(({ request }) => request);
+}
+
+/** One update serves every azimuth of a view; see sessionOrder for why item-alone views go first. */
 export async function captureAll(
   session: PreviewSession,
   input: RenderInput,
@@ -460,7 +477,7 @@ export async function captureAll(
   let azimuth = 0;
   let front: string | undefined;
   let seeked: number | undefined;
-  for (const request of requests) {
+  for (const request of sessionOrder(requests)) {
     signal.throwIfAborted();
     const pose = input.itemType === "wearable" ? request.pose ?? settings.wearablePose : undefined;
     const nextSetup = `${request.bodyShape}:${request.view}:${pose ?? ""}`;
