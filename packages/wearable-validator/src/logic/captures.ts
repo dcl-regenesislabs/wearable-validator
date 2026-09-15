@@ -55,8 +55,9 @@ export function rendererBuild(ctx: CheckContext): string | undefined {
 export async function captureRequest(ctx: CheckContext, fields: Omit<CaptureRequest, "id" | "key">): Promise<CaptureRequest> {
   const { profile, background, skin, wearablePose, wearablePoseFraction } = ctx.manifest.rendering;
   const shape = fields.bodyShape.split(":").pop() ?? fields.bodyShape;
+  const pose = fields.pose ? `-${fields.pose}` : "";
   const time = fields.timeFraction === undefined ? "" : `-t${fields.timeFraction}`;
-  const id = `${shape}-${fields.view}-${String(fields.azimuthDegrees).padStart(3, "0")}${time}`;
+  const id = `${shape}-${fields.view}${pose}-${String(fields.azimuthDegrees).padStart(3, "0")}${time}`;
   const key = await digestJson({ ...fields, scene: { profile, background, skin, wearablePose, wearablePoseFraction } });
   return { id, key, ...fields };
 }

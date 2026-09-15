@@ -201,7 +201,9 @@ export interface CaptureRequest {
   /** avatar = worn on the body shape; wearable = the item alone. */
   view: "avatar" | "wearable";
   azimuthDegrees: number;
-  /** Emotes: fraction of the clip to scrub to. */
+  /** Wearables: the previewer's avatar clip to pose with (idle, walk, run, jump, …); default is the manifest rest pose. */
+  pose?: string;
+  /** Fraction of the clip to scrub to — the emote's own clip, or the wearable's pose clip. */
   timeFraction?: number;
   size: number;
 }

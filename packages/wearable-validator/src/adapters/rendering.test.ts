@@ -285,7 +285,7 @@ describe("createRenderer", () => {
       const emote: RenderInput = { ...input, itemType: "emote", category: "fun" };
       const fraction = manifest.thumbnailHonesty.emoteFractions[1];
       await engine.capture(emote, [request(engine.buildId, { id: "t", key: "t", timeFraction: fraction })]);
-      const [update, pause, , length, goTo] = wire.log;
+      const [update, pause, length, goTo] = wire.log; // the settle pause now follows the seek
       assert.equal((update[1] as Record<string, unknown>).emote, undefined);
       assert.deepEqual(pause, ["emote.pause", []]);
       assert.deepEqual(length, ["emote.getLength", []]);
@@ -411,6 +411,20 @@ describe("captureAll", () => {
     await captureAll(wire.session, input, requests, new AbortController().signal);
     const updates = wire.log.filter(([name]) => name === "update");
     assert.equal(updates.length, 4);
+  });
+
+  it("poses a wearable with the requested clip and fraction, one update per pose", async () => {
+    const wire = scripted();
+    const requests = [
+      request("build", { bodyShape: MALE, view: "avatar", azimuthDegrees: 0 }),
+      request("build", { bodyShape: MALE, view: "avatar", azimuthDegrees: 0, pose: "run", timeFraction: 0.5 }),
+      request("build", { bodyShape: MALE, view: "avatar", azimuthDegrees: 90, pose: "run", timeFraction: 0.5 })
+    ];
+    await captureAll(wire.session, input, requests, new AbortController().signal);
+    const updates = wire.log.filter(([name]) => name === "update").map(([, options]) => (options as { emote?: string }).emote);
+    assert.deepEqual(updates, [manifest.rendering.wearablePose, "run"]);
+    const seeks = wire.log.filter(([name]) => name === "emote.goTo").map(([, params]) => (params as number[])[0]);
+    assert.deepEqual(seeks, [0, 0.5 * LENGTH]);
   });
 
   it("hands each capture to onCapture the moment it lands, in request order", async () => {

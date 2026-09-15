@@ -459,25 +459,27 @@ export async function captureAll(
   let setup = "";
   let azimuth = 0;
   let front: string | undefined;
+  let seeked: number | undefined;
   for (const request of requests) {
     signal.throwIfAborted();
-    const nextSetup = `${request.bodyShape}:${request.view}`;
+    const pose = input.itemType === "wearable" ? request.pose ?? settings.wearablePose : undefined;
+    const nextSetup = `${request.bodyShape}:${request.view}:${pose ?? ""}`;
     if (nextSetup !== setup) {
-      await session.update(item, {
-        bodyShape: request.bodyShape,
-        type: request.view,
-        profile: settings.profile,
-        emote: input.itemType === "wearable" ? settings.wearablePose : undefined
-      });
-      // idle ignores emote.pause: wearables play fist-pump, pause, seek fraction 0, then settle
+      await session.update(item, { bodyShape: request.bodyShape, type: request.view, profile: settings.profile, emote: pose });
+      // idle ignores emote.pause: wearables play a clip (rest pose by default), pause, seek, then settle
       await session.request("emote", "pause", []);
-      if (input.itemType === "wearable") await seekEmote(session, settings.wearablePoseFraction);
-      await session.pause(settings.settleMs);
       setup = nextSetup;
       azimuth = 0;
       front = undefined;
+      seeked = undefined;
     }
-    if (request.timeFraction !== undefined) await seekEmote(session, request.timeFraction);
+    // seek only when the fraction changes: wearables default to the manifest rest fraction, emotes to what the request says
+    const fraction = input.itemType === "wearable" ? request.timeFraction ?? settings.wearablePoseFraction : request.timeFraction;
+    if (fraction !== undefined && fraction !== seeked) {
+      await seekEmote(session, fraction);
+      seeked = fraction;
+      await session.pause(settings.settleMs);
+    }
     // changeCameraPosition is RELATIVE radians: track the azimuth and send the delta (beta 0, radius 0)
     const alpha = ((request.azimuthDegrees - azimuth) * Math.PI) / 180;
     await session.request("scene", "changeCameraPosition", [{ alpha, beta: 0, radius: 0 }]);
