@@ -70,6 +70,7 @@ async function main(): Promise<void> {
     out,
     host,
     publicHosts,
+    maxConcurrentRuns: Number(env.MAX_CONCURRENT_RUNS ?? 1),
     identify: identity.identify,
     logger: log,
     capabilities: { renderer: Boolean(buildDirectory), reviewer: reviewerKind },
@@ -84,7 +85,7 @@ async function main(): Promise<void> {
   server.listen(port, host, () => {
     log.info("run server listening", {
       url: `http://${host}:${port}`, renderer: buildDirectory ? "local Unity build" : "none", reviewer: reviewerKind,
-      model: credentials ? manifest.ai.model : undefined, auth: setupToken ? "setup token" : "none", identity: identity.kind, rules: manifest.version, artifacts: out,
+      model: credentials ? manifest.ai.model : undefined, auth: setupToken ? "setup token" : "none", identity: identity.kind, concurrentRuns: Number(env.MAX_CONCURRENT_RUNS ?? 1), rules: manifest.version, artifacts: out,
       site: siteExists ? `http://${host}:${port}/` : "not built (run npm run build -w wearable-validator-web, or use the Vite dev server)"
     });
   });
