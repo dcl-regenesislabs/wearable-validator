@@ -57,7 +57,7 @@ Leave out the token and the server renders and writes the prompt without calling
 
 ## Deploy
 
-Push to `main` deploys the public website (code checks only) to wearable-validator.dclregenesislabs.xyz through Cloudflare Workers Builds. The curators' site at review.wearable-validator.dclregenesislabs.xyz is the same Worker in the `curators` env behind Cloudflare Access; it forwards `/api/*` to the run server, one container on DigitalOcean App Platform at api.wearable-validator.dclregenesislabs.xyz. Setup steps, environment variables and the smoke test: [docs/deployment.md](docs/deployment.md).
+Push to `main` deploys the website to wearable-validator.dclregenesislabs.xyz through Cloudflare Workers Builds, behind Cloudflare Access (curators sign in with their email). The Worker forwards `/api/*` to the run server, one container on DigitalOcean App Platform at api.wearable-validator.dclregenesislabs.xyz. Steps in [docs/deployment.md](docs/deployment.md).
 
 ```ts
 import { validate } from "@dcl-regenesislabs/wearable-validator";
