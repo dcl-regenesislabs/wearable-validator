@@ -1,6 +1,6 @@
-// Cloudflare Workers Builds config: the validator website, with /api/* forwarded to the run server by packages/web/worker.ts.
-// Dashboard build command: "npm ci && npm run build -w wearable-validator-web"; deploy: "npx wrangler deploy" (public site) and
-// "npx wrangler deploy --env curators" (review site: API_ORIGIN set, behind Cloudflare Access). The public site keeps no API_ORIGIN.
+// Cloudflare Workers Builds config: the validator website at wearable-validator.dclregenesislabs.xyz, behind Cloudflare Access,
+// with /api/* forwarded to the run server by packages/web/worker.ts.
+// Dashboard build command: "npm ci && npm run build -w wearable-validator-web"; deploy command: "npx wrangler deploy".
 {
   "name": "wearable-validator",
   "main": "packages/web/worker.ts",
@@ -11,11 +11,5 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  "env": {
-    "curators": {
-      "name": "wearable-validator-curators",
-      "vars": { "API_ORIGIN": "https://api.wearable-validator.dclregenesislabs.xyz" },
-      "routes": [{ "pattern": "review.wearable-validator.dclregenesislabs.xyz", "custom_domain": true }]
-    }
-  }
+  "vars": { "API_ORIGIN": "https://api.wearable-validator.dclregenesislabs.xyz" }
 }
