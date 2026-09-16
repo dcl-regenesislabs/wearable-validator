@@ -237,9 +237,10 @@ function logEvent(log: Logger, run: Run, type: string, data: unknown): void {
   const ms = Date.now() - run.startedAt;
   switch (type) {
     case "check": {
-      const event = d as { type: string; check?: string; result?: { check: string; status: string; measured?: string } };
+      const event = d as { type: string; check?: string; result?: { check: string; status: string; measured?: string; skipReason?: string } };
       if (event.type === "check-finished" && event.result && event.result.status !== "passed") {
-        log.info("check finished", { run: run.id, check: event.result.check, status: event.result.status, measured: event.result.measured });
+        // the reason is what an operator needs when a render errors: the row on the site shows the same text
+        log.info("check finished", { run: run.id, check: event.result.check, status: event.result.status, measured: event.result.measured, reason: clean(event.result.skipReason, 300) || undefined, ms });
       }
       return;
     }
