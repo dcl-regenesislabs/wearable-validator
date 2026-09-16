@@ -114,9 +114,9 @@ npx tsx src/cli.ts checks | grep my-check
 
 ## 7. Optional surfaces
 
-- **Website requirement label**: `packages/debug-ui/src/limits.ts` formats the enforced value per check name; add a case when there is a number to show.
-- **Samples**: `npm run samples -w wearable-validator-tools` regenerates the website's example zips if the check needs a new example.
-- **Catalyst regression**: `npm run catalyst -w wearable-validator-tools -- --wearables 15 --emotes 10` runs published items; a new rule that fails many committee-approved items is a warning candidate, not an error.
+- **Website requirement label**: `packages/web/src/limits.ts` formats the enforced value per check name; add a case when there is a number to show.
+- **Samples**: `npm run samples` (repo root) regenerates the website's example zips if the check needs a new example.
+- **Catalyst regression**: `npm run catalyst -- --wearables 15 --emotes 10` (repo root) runs published items; a new rule that fails many committee-approved items is a warning candidate, not an error.
 
 ## Visual checks (`rendering` group)
 

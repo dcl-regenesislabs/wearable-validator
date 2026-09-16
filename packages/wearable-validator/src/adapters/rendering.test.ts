@@ -428,6 +428,35 @@ describe("captureAll", () => {
     assert.deepEqual(seeks, [0, 0.5 * LENGTH]);
   });
 
+  it("retries a view whose previewer command timed out, from a fresh update, and gives up after the manifest's retries", async () => {
+    const flaky = scripted();
+    const inner = flaky.session.request;
+    let failures = 1;
+    flaky.session.request = async (namespace, method, params) => {
+      if (method === "pause" && failures-- > 0) throw Object.assign(new Error("page.waitForFunction: Timeout 15000ms exceeded."), { name: "TimeoutError" });
+      return inner(namespace, method, params);
+    };
+    const requests = recipe("build");
+    const captures = await captureAll(flaky.session, input, requests, new AbortController().signal);
+    assert.equal(captures.length, requests.length);
+    assert.equal(flaky.log.filter(([name]) => name === "update").length, 5);
+
+    const stuck = scripted();
+    stuck.session.request = async (_namespace, method) => {
+      if (method === "pause") throw Object.assign(new Error("Timeout 15000ms exceeded."), { name: "TimeoutError" });
+      return null;
+    };
+    await assert.rejects(captureAll(stuck.session, input, requests, new AbortController().signal), /Timeout/);
+    assert.equal(stuck.log.filter(([name]) => name === "update").length, 1 + manifest.rendering.captureRetries);
+
+    const broken = scripted();
+    broken.session.request = async () => {
+      throw new Error("The previewer rejected scene.changeCameraPosition.");
+    };
+    await assert.rejects(captureAll(broken.session, input, requests, new AbortController().signal), /rejected/);
+    assert.equal(broken.log.filter(([name]) => name === "update").length, 1);
+  });
+
   it("hands each capture to onCapture the moment it lands, in request order", async () => {
     const wire = scripted();
     const requests = recipe("build");

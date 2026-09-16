@@ -1,27 +1,20 @@
 /**
- * Local run server: the website POSTs a zip, subscribes to a Server-Sent Events stream and watches the
+ * Run server: the website POSTs a zip, subscribes to a Server-Sent Events stream and watches the
  * visual review happen — code gate, each check, every screenshot as it lands, the prompt, the answer.
- * Previous hop: packages/debug-ui (POST /api/runs, EventSource /api/runs/:id/events).
+ * Every run belongs to the identity that started it (identity.ts); other callers cannot tell it exists.
+ * Previous hop: main.ts wires the adapters and listens; the web app calls in (POST /api/runs, EventSource /api/runs/:id/events).
  * Next hop: validate() with the renderer/reviewer adapters; the run folder on disk is the same one
- * tools/src/visual-review.ts writes. A hosted worker can offer this exact API later; only the storage changes.
+ * runs.ts writes for the CLI (review.ts). A hosted worker can offer this exact API later; only the storage changes.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdir, readFile, readdir, stat, writeFile, appendFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
-import { createPiReviewer } from "../../packages/wearable-validator/src/adapters/ai.js";
-import { createRenderer } from "../../packages/wearable-validator/src/adapters/rendering.js";
-import { loadInput } from "../../packages/wearable-validator/src/loader.js";
-import { manifest } from "../../packages/wearable-validator/src/manifest/index.js";
-import { registry } from "../../packages/wearable-validator/src/registry.js";
-import { validate } from "../../packages/wearable-validator/src/validate.js";
-import type { CaptureRecord, Renderer, Result, Reviewer } from "../../packages/wearable-validator/src/types.js";
+import { loadInput, manifest, registry, validate, type CaptureRecord, type Renderer, type Result, type Reviewer } from "@dcl-regenesislabs/wearable-validator";
+import type { Identify } from "./identity.js";
 import { createLogger, type Logger } from "./log.js";
-import { dryRunReviewer, readRun, recordingReviewer, tokenCredentials, writeRun } from "./visual-review.js";
+import { readRun, readRunInput, readRunResult, verdict, writeRun, writeRunInput } from "./runs.js";
 
-const ROOT = resolve(import.meta.dirname, "../..");
 const VISUAL_CHECKS = registry.filter((check) => check.group === "rendering").map((check) => check.name);
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",
@@ -51,50 +44,92 @@ export interface RunServices {
 }
 
 export interface ServeOptions {
-  /** Where run folders are written (tools/artifacts). */
+  /** Where run folders are written (packages/server/artifacts). */
   out: string;
   /** Builds the adapters for one run; called only after the code gate passes. */
   services: (run: RunSink) => Promise<RunServices>;
   /** What /api/health reports so the website knows which buttons to show. */
   capabilities: { renderer: boolean; reviewer: "pi" | "dry-run" | "none" };
+  /** Who is calling; every /api route past /health refuses requests it cannot name. */
+  identify: Identify;
   /** Built website to serve at / (optional — Vite dev proxies /api instead). */
   site?: string;
   /** The bind address; requests whose Host header names anything else are refused (DNS rebinding). */
   host?: string;
+  /** Hostnames a public deployment answers on; without them a non-loopback host skips the Host check. */
+  publicHosts?: string[];
   /** Upload cap; defaults to manifest.fileSize.maxInputBytes. */
   maxUploadBytes?: number;
+  /** Finished runs kept in memory with their events; the run folder stays the durable record. */
+  maxRunsInMemory?: number;
   logger?: Logger;
 }
 
-interface Run {
+/** What the run list shows and what survives eviction and restarts. */
+interface RunSummary {
   id: string;
+  owner: string;
   name: string;
   dir: string;
+  startedAt: number;
+  done: boolean;
+  passed: boolean | null;
+}
+
+interface Run extends RunSummary {
   events: RunEvent[];
   listeners: Set<ServerResponse>;
   controller: AbortController;
-  done: boolean;
-  startedAt: number;
 }
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
-/** Finished runs kept in memory (events replay); run folders on disk are the durable record. */
 const MAX_RUNS_IN_MEMORY = 50;
+// the upload's name becomes part of the run folder name; filesystems cap a folder name at 255 bytes
+const MAX_NAME_CHARS = 80;
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1"]);
 // model text reaches the operator's terminal before any parser sees it: never let it carry escape sequences
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 const clean = (value: unknown, max: number): string => String(value ?? "").replace(CONTROL, " ").slice(0, max);
+const bareHost = (host: string): string => host.replace(/^\[|\]$/g, "").toLowerCase();
+
+export function isLoopback(host: string): boolean {
+  return LOOPBACK.has(bareHost(host));
+}
 
 /** A page that DNS-rebinds its hostname to this address is same-origin with us; the Host header still names the attacker. */
-export function hostAllowed(header: string | undefined, configured?: string): boolean {
+export function hostAllowed(header: string | undefined, configured?: string, publicHosts: string[] = []): boolean {
   if (!header) return false;
   try {
     const { hostname } = new URL(`http://${header}`);
-    const bare = hostname.replace(/^\[|\]$/g, "");
-    return LOOPBACK.has(bare) || (configured !== undefined && bare === configured.replace(/^\[|\]$/g, ""));
+    const bare = bareHost(hostname);
+    return LOOPBACK.has(bare) || (configured !== undefined && bare === bareHost(configured)) || publicHosts.some((host) => bareHost(host) === bare);
   } catch {
     return false;
   }
+}
+
+/** Browsers stamp cross-site requests; a cookie-riding call from another site never starts or cancels a run. */
+function crossSite(req: IncomingMessage): boolean {
+  const site = req.headers["sec-fetch-site"];
+  return site !== undefined && site !== "same-origin" && site !== "none";
+}
+
+/** Forms and no-cors fetches cannot send this type, so a browser too old to stamp Sec-Fetch-Site still cannot start a run from another site. */
+function isZipUpload(req: IncomingMessage): boolean {
+  return req.headers["content-type"]?.split(";")[0].trim().toLowerCase() === "application/zip";
+}
+
+/** The upload's name as the browser URL-encoded it, made safe for a folder name; undefined when it does not decode. */
+function fileName(header: string | string[] | undefined): string | undefined {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(header?.toString() ?? "item.zip");
+  } catch {
+    return undefined;
+  }
+  const safe = basename(decoded).replace(/[^\w.-]/g, "_");
+  const ext = extname(safe);
+  return safe.length > MAX_NAME_CHARS ? safe.slice(0, MAX_NAME_CHARS - ext.length) + ext : safe;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -140,22 +175,28 @@ async function sendFile(res: ServerResponse, root: string, relativePath: string)
   }
 }
 
-/** Run folders remember which zip they came from (input.json); the newest per zip wins. */
-async function indexPreviousRuns(out: string, previous: Map<string, string>): Promise<void> {
+/**
+ * Run folders remember which zip they came from and who started them (input.json): the newest per zip offers its
+ * captures to the next run of the same file, and every owned folder is listed and served again after a restart.
+ */
+async function indexRunFolders(out: string, previous: Map<string, string>, index: Map<string, RunSummary>): Promise<void> {
   const entries = await readdir(out).catch(() => [] as string[]);
-  const found: { sha256: string; dir: string; mtime: number }[] = [];
+  const reusable: { sha256: string; dir: string; mtime: number }[] = [];
   for (const entry of entries) {
     if (!entry.startsWith("visual-")) continue;
     const dir = join(out, entry);
-    try {
-      const input = JSON.parse(await readFile(join(dir, "input.json"), "utf8")) as { sha256?: string };
-      const info = await stat(join(dir, "captures", "captures.json"));
-      if (input.sha256) found.push({ sha256: input.sha256, dir, mtime: info.mtimeMs });
-    } catch {
-      // not a run folder with reusable captures
+    const input = await readRunInput(dir);
+    if (!input) continue;
+    if (input.sha256) {
+      const info = await stat(join(dir, "captures", "captures.json")).catch(() => undefined);
+      if (info) reusable.push({ sha256: input.sha256, dir, mtime: info.mtimeMs });
+    }
+    if (input.id && input.owner) {
+      const result = await readRunResult(dir);
+      index.set(input.id, { id: input.id, owner: input.owner, name: input.name ?? entry, dir, startedAt: input.startedAt ?? 0, done: true, passed: result ? verdict(result) : null });
     }
   }
-  for (const item of found.sort((a, b) => a.mtime - b.mtime)) previous.set(item.sha256, item.dir);
+  for (const item of reusable.sort((a, b) => a.mtime - b.mtime)) previous.set(item.sha256, item.dir);
 }
 
 /** What a run's event means in one log line — the same stream the browser sees, with the noise left out. */
@@ -212,18 +253,36 @@ function logEvent(log: Logger, run: Run, type: string, data: unknown): void {
   }
 }
 
+const captureUrl = (runId: string, captureId: string): string => `/api/runs/${runId}/captures/${captureId}.png`;
+
 /** Result for the wire: capture bytes become URLs the page can load. */
 function serializeResult(run: Run, result: Result): unknown {
-  return { ...result, captures: result.captures.map(({ bytes, ...capture }) => ({ ...capture, url: `/api/runs/${run.id}/captures/${capture.request.id}.png` })) };
+  return { ...result, captures: result.captures.map(({ bytes, ...capture }) => ({ ...capture, url: captureUrl(run.id, capture.request.id) })) };
 }
+
+/** An evicted or pre-restart run comes back from its folder as one `done` event: the same shape the live stream ended with. */
+async function loadFinishedRun(summary: RunSummary): Promise<Run> {
+  const stored = await readRunResult(summary.dir);
+  const data = stored
+    ? { result: { ...stored, captures: stored.captures.map(({ file, ...capture }) => ({ ...capture, url: captureUrl(summary.id, capture.request.id) })) }, name: summary.name }
+    : { skipped: true, message: "This run finished without a saved result." };
+  return { ...summary, done: true, events: [{ id: 1, type: "done", data }], listeners: new Set(), controller: new AbortController() };
+}
+
+const summarize = ({ id, owner, name, dir, startedAt, done, passed }: RunSummary): RunSummary => ({ id, owner, name, dir, startedAt, done, passed });
 
 export function createRunServer(options: ServeOptions): { server: Server; close(): Promise<void> } {
   const runs = new Map<string, Run>();
+  // every run this server has ever seen, by id; live runs are in `runs` too, the rest come back from disk on demand
+  const index = new Map<string, RunSummary>();
   // latest run folder per uploaded zip (sha256) — its captures are offered to the next run of the same file
   const previous = new Map<string, string>();
   const log = options.logger ?? createLogger();
+  const maxRunsInMemory = options.maxRunsInMemory ?? MAX_RUNS_IN_MEMORY;
+  const checkHost = options.host === undefined || isLoopback(options.host) || (options.publicHosts?.length ?? 0) > 0;
+  if (!checkHost) log.warn("Host header check skipped: set PUBLIC_HOSTS to the hostnames this server answers on", { host: options.host });
   let active = 0;
-  void indexPreviousRuns(options.out, previous);
+  const indexed = indexRunFolders(options.out, previous, index).catch((error) => log.warn("could not index earlier runs", { error: error instanceof Error ? error.message : String(error) }));
 
   function emit(run: Run, type: string, data: unknown): void {
     const event: RunEvent = { id: run.events.length + 1, type, data };
@@ -234,6 +293,11 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
     void appendFile(join(run.dir, "events.jsonl"), JSON.stringify(event) + "\n").catch(() => {});
   }
 
+  function finish(run: Run, data: { result?: Result; skipped?: boolean; message?: string }, wire: unknown = data): void {
+    run.passed = data.result ? verdict(data.result) : null;
+    emit(run, "done", wire);
+  }
+
   async function execute(run: Run, bytes: Uint8Array, name: string, mode: { model: boolean; standalone: boolean }): Promise<void> {
     let services: RunServices | undefined;
     try {
@@ -241,7 +305,7 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       const code = await validate(bytes, { signal: run.controller.signal, onProgress: (event) => emit(run, "check", event) });
       emit(run, "gate", { result: code, passed: code.passed });
       if (code.passed !== true && !mode.standalone) {
-        emit(run, "done", { skipped: true, result: code, message: "Visual review was not started: fix the code checks first, or press Render and review anyway." });
+        finish(run, { skipped: true, result: code, message: "Visual review was not started: fix the code checks first, or press Render and review anyway." });
         return;
       }
       const askModel = mode.model;
@@ -249,7 +313,7 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       const thumbnail = loaded.ctx?.files.get(loaded.ctx.item.thumbnailPath ?? "thumbnail.png");
       if (thumbnail) await writeFile(join(run.dir, "thumbnail.png"), thumbnail);
       const inputSha = createHash("sha256").update(bytes).digest("hex");
-      await writeFile(join(run.dir, "input.json"), JSON.stringify({ name, sha256: inputSha }));
+      await writeRunInput(run.dir, { id: run.id, owner: run.owner, name, startedAt: run.startedAt, sha256: inputSha });
       // an earlier run of the same file: show its photos now; only stale or missing views get rendered again
       const earlier = previous.get(inputSha);
       const captures = earlier && earlier !== run.dir ? await readRun(earlier).catch(() => []) : [];
@@ -262,7 +326,7 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       emit(run, "stage", { text: "Starting the renderer" });
       services = await options.services(io);
       if (!services.renderer && !services.reviewer) {
-        emit(run, "done", { skipped: true, message: "This server has no renderer or reviewer configured (start it with --renderer-build and ANTHROPIC_OAUTH_SETUP_TOKEN)." });
+        finish(run, { skipped: true, message: "This server has no renderer or reviewer configured (start it with --renderer-build and ANTHROPIC_OAUTH_SETUP_TOKEN)." });
         return;
       }
       emit(run, "stage", { text: "Rendering the item on both body shapes" });
@@ -274,12 +338,13 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
         onProgress: (event) => emit(run, "check", event)
       });
       await writeRun(run.dir, result, thumbnail);
-      emit(run, "done", { result: serializeResult(run, result), name });
+      finish(run, { result }, { result: serializeResult(run, result), name });
     } catch (error) {
       const message = run.controller.signal.aborted ? "The run was cancelled." : error instanceof Error ? error.message : "The run failed.";
       emit(run, "error", { message });
     } finally {
       run.done = true;
+      index.set(run.id, summarize(run));
       active--;
       for (const listener of run.listeners) listener.end();
       run.listeners.clear();
@@ -297,18 +362,36 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
         if (!/^[\w.-]+$/.test(id)) throw new Error(`Capture id "${id}" is not a safe file stem.`);
         await mkdir(join(run.dir, "captures"), { recursive: true });
         await writeFile(join(run.dir, "captures", `${id}.png`), capture.bytes);
-        emit(run, "capture", { id, request: capture.request, sha256: capture.sha256, url: `/api/runs/${run.id}/captures/${id}.png` });
+        emit(run, "capture", { id, request: capture.request, sha256: capture.sha256, url: captureUrl(run.id, id) });
       }
     };
   }
 
+  function listRuns(owner: string): Omit<RunSummary, "owner" | "dir">[] {
+    return [...index.values()]
+      .filter((run) => run.owner === owner)
+      .sort((a, b) => b.startedAt - a.startedAt)
+      .map(({ id, name, startedAt, done, passed }) => ({ id, name, startedAt, done, passed }));
+  }
+
+  /** Someone else's run is indistinguishable from no run at all. */
+  async function findRun(id: string | undefined, owner: string): Promise<Run | undefined> {
+    if (!id) return undefined;
+    const live = runs.get(id);
+    if (live) return live.owner === owner ? live : undefined;
+    const summary = index.get(id);
+    return summary?.owner === owner ? loadFinishedRun(summary) : undefined;
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!hostAllowed(req.headers.host, options.host)) {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const parts = url.pathname.split("/").filter(Boolean);
+    const health = parts[0] === "api" && parts[1] === "health" && parts.length === 2;
+
+    if (!health && checkHost && !hostAllowed(req.headers.host, options.host, options.publicHosts)) {
       log.warn("request refused, unexpected Host header", { host: clean(req.headers.host, 100) });
       return json(res, 403, { message: "This server only answers requests addressed to its own host." });
     }
-    const url = new URL(req.url ?? "/", "http://localhost");
-    const parts = url.pathname.split("/").filter(Boolean);
 
     if (parts[0] !== "api") {
       if (!options.site) return json(res, 404, { message: "No website is served here. Run the Vite dev server, or start with --site." });
@@ -316,48 +399,70 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       return sendFile(res, options.site, path);
     }
 
-    if (parts[1] === "health" && req.method === "GET") {
-      return json(res, 200, { ok: true, visual: options.capabilities, checks: VISUAL_CHECKS, rulesVersion: manifest.version });
+    if (health && req.method === "GET") {
+      const identity = await options.identify(req).catch(() => undefined);
+      return json(res, 200, { ok: true, visual: options.capabilities, checks: VISUAL_CHECKS, rulesVersion: manifest.version, owner: identity?.owner ?? null });
     }
 
+    const identity = await options.identify(req);
+    if (!identity) {
+      log.warn("request refused, no identity", { method: req.method, path: clean(url.pathname, 200) });
+      return json(res, 401, { message: "Sign in to use the run server." });
+    }
+    await indexed;
+
+    if (parts[1] === "runs" && parts.length === 2 && req.method === "GET") return json(res, 200, { runs: listRuns(identity.owner) });
+
     if (parts[1] === "runs" && parts.length === 2 && req.method === "POST") {
+      if (crossSite(req)) return json(res, 403, { message: "Cross-site requests cannot start a run." });
+      if (!isZipUpload(req)) return json(res, 415, { message: "Send the zip bytes with content-type: application/zip." });
+      const name = fileName(req.headers["x-file-name"]);
+      if (name === undefined) return json(res, 400, { message: "x-file-name must be a URL-encoded file name." });
       if (active > 0) {
         log.warn("run refused, another is active");
         return json(res, 409, { message: "A run is already in progress. Wait for it to finish." });
       }
       // the lock is taken before the first await so two uploads arriving together cannot both start
       active++;
-      const limit = options.maxUploadBytes ?? manifest.fileSize.maxInputBytes;
-      const bytes = await readBody(req, limit).catch(() => undefined);
-      if (!bytes) {
+      try {
+        const limit = options.maxUploadBytes ?? manifest.fileSize.maxInputBytes;
+        const bytes = await readBody(req, limit).catch(() => undefined);
+        if (!bytes) {
+          active--;
+          return json(res, 413, { message: `The file is larger than ${limit} bytes.` });
+        }
+        if (bytes.length === 0) {
+          active--;
+          return json(res, 400, { message: "Send the zip bytes as the request body." });
+        }
+        const id = randomBytes(16).toString("hex");
+        const dir = join(options.out, `visual-${name.replace(/\.zip$/i, "")}-${id}`);
+        await mkdir(dir, { recursive: true });
+        const run: Run = { id, owner: identity.owner, name, dir, events: [], listeners: new Set(), controller: new AbortController(), done: false, passed: null, startedAt: Date.now() };
+        await writeRunInput(dir, { id, owner: run.owner, name, startedAt: run.startedAt });
+        runs.set(id, run);
+        index.set(id, summarize(run));
+        for (const [oldId, old] of runs) {
+          if (runs.size <= maxRunsInMemory) break;
+          if (old.done) runs.delete(oldId);
+        }
+        log.info("run accepted", { run: id, owner: identity.owner, file: name, bytes: bytes.length, model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1", dir });
+        json(res, 201, { id, events: `/api/runs/${id}/events` });
+        void execute(run, bytes, name, { model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1" });
+      } catch (error) {
+        // execute() releases the lock itself once it has started; anything that fails before that must not keep it
         active--;
-        return json(res, 413, { message: `The file is larger than ${limit} bytes.` });
+        throw error;
       }
-      if (bytes.length === 0) {
-        active--;
-        return json(res, 400, { message: "Send the zip bytes as the request body." });
-      }
-      const name = basename(decodeURIComponent(req.headers["x-file-name"]?.toString() ?? "item.zip")).replace(/[^\w.-]/g, "_");
-      const id = randomBytes(4).toString("hex");
-      const dir = join(options.out, `visual-${name.replace(/\.zip$/i, "")}-${id}`);
-      await mkdir(dir, { recursive: true });
-      const run: Run = { id, name, dir, events: [], listeners: new Set(), controller: new AbortController(), done: false, startedAt: Date.now() };
-      runs.set(id, run);
-      for (const [oldId, old] of runs) {
-        if (runs.size <= MAX_RUNS_IN_MEMORY) break;
-        if (old.done) runs.delete(oldId);
-      }
-      log.info("run accepted", { run: id, file: name, bytes: bytes.length, model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1", dir });
-      json(res, 201, { id, events: `/api/runs/${id}/events` });
-      void execute(run, bytes, name, { model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1" });
       return;
     }
 
-    const run = parts[1] === "runs" ? runs.get(parts[2] ?? "") : undefined;
+    const run = parts[1] === "runs" ? await findRun(parts[2], identity.owner) : undefined;
     if (!run) return json(res, 404, { message: "Unknown run." });
 
     if (parts.length === 3 && req.method === "GET") return json(res, 200, { id: run.id, name: run.name, done: run.done, events: run.events });
     if (parts.length === 3 && req.method === "DELETE") {
+      if (crossSite(req)) return json(res, 403, { message: "Cross-site requests cannot cancel a run." });
       log.info("run cancelled by the client", { run: run.id });
       run.controller.abort();
       return json(res, 202, { id: run.id, cancelled: true });
@@ -388,8 +493,10 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
 
   const server = createServer((req, res) => {
     handle(req, res).catch((error) => {
-      log.error("request failed", { method: req.method, url: req.url, error: error instanceof Error ? error.message : String(error) });
-      if (!res.headersSent) json(res, 500, { message: error instanceof Error ? error.message : "Request failed." });
+      // the reason (paths, upstream URLs) stays in the log; the client gets a reference to find it by
+      const reference = randomBytes(4).toString("hex");
+      log.error("request failed", { reference, method: req.method, url: req.url, error: error instanceof Error ? error.message : String(error) });
+      if (!res.headersSent) json(res, 500, { message: "Request failed.", reference });
       else res.end();
     });
   });
@@ -404,94 +511,4 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
         server.close(() => resolvePromise());
       })
   };
-}
-
-/** Announces the prompt before the model call and the answer after it, on top of the recording wrapper. */
-export function liveReviewer(reviewer: Reviewer, run: RunSink): Reviewer {
-  return {
-    async review(request, signal) {
-      const check = request.check;
-      run.emit("review", {
-        check,
-        phase: "request",
-        promptVersion: request.prompt.version,
-        promptDigest: request.promptDigest,
-        images: request.images.map((image) => ({ id: image.id, label: image.label })),
-        promptUrl: `/api/runs/${run.id}/${check}/1-prompt.md`
-      });
-      const result = await reviewer.review(request, signal);
-      run.emit("review", { check, phase: "answer", ...result });
-      return result;
-    }
-  };
-}
-
-/** Flags win over environment variables; the environment is how a hosted process is configured. */
-async function main(): Promise<void> {
-  const { values } = parseArgs({
-    options: {
-      port: { type: "string" },
-      host: { type: "string" },
-      "renderer-build": { type: "string" },
-      "no-ai": { type: "boolean", default: false },
-      site: { type: "string" },
-      out: { type: "string" }
-    }
-  });
-  const env = process.env;
-  const cwd = env.INIT_CWD ?? process.cwd();
-  const log = createLogger();
-  // tools/renderer-build is the gitignored home for the PR #10053 Unity build, so the flag is optional once it is there
-  const defaultBuild = join(ROOT, "tools/renderer-build");
-  const buildFlag = values["renderer-build"] ?? env.RENDERER_BUILD;
-  const buildDirectory = buildFlag
-    ? resolve(cwd, buildFlag)
-    : await stat(join(defaultBuild, "avatar-preview-renderer.wasm")).then(() => defaultBuild).catch(() => undefined);
-  // the only credential is the year-long `claude setup-token` from the environment: no session file, nothing to refresh or persist
-  const setupToken = values["no-ai"] ? undefined : env.ANTHROPIC_OAUTH_SETUP_TOKEN;
-  const credentials = setupToken ? tokenCredentials(setupToken) : undefined;
-  const out = resolve(cwd, values.out ?? env.ARTIFACTS_DIR ?? join(ROOT, "tools/artifacts"));
-  const site = resolve(cwd, values.site ?? env.SITE_DIR ?? join(ROOT, "packages/debug-ui/dist"));
-  const siteExists = await stat(join(site, "index.html")).then(() => true).catch(() => false);
-  const port = Number(values.port ?? env.PORT ?? 4180);
-  const host = values.host ?? env.HOST ?? "127.0.0.1";
-  const reviewerKind = credentials ? "pi" : "dry-run";
-  if (!credentials) log.warn("no OAuth session: reviews render and write the prompt without calling the model (set ANTHROPIC_OAUTH_SETUP_TOKEN to a claude setup-token)");
-  if (!buildDirectory) log.warn("no Unity build found: visual runs will skip rendering (put the PR #10053 build in tools/renderer-build or pass --renderer-build)");
-
-  const { server, close } = createRunServer({
-    out,
-    host,
-    logger: log,
-    capabilities: { renderer: Boolean(buildDirectory), reviewer: reviewerKind },
-    site: siteExists ? site : undefined,
-    services: async (run) => {
-      const renderer = buildDirectory ? await createRenderer({ buildDirectory, onCapture: (capture) => void run.capture(capture) }) : undefined;
-      const base = credentials ? createPiReviewer({ credentials }) : dryRunReviewer();
-      const reviewer = liveReviewer(recordingReviewer(base, run.dir), run);
-      return { renderer, reviewer, stop: () => renderer?.stop() ?? Promise.resolve() };
-    }
-  });
-  server.listen(port, host, () => {
-    log.info("run server listening", {
-      url: `http://${host}:${port}`, renderer: buildDirectory ? "local Unity build" : "none", reviewer: reviewerKind,
-      model: credentials ? manifest.ai.model : undefined, auth: setupToken ? "setup token" : "none", rules: manifest.version, artifacts: out,
-      site: siteExists ? `http://${host}:${port}/` : "not built (run npm run build -w wearable-validator-debug-ui, or use the Vite dev server)"
-    });
-  });
-  // a hosted process gets SIGTERM on deploy: stop accepting, abort what is running, close the browser, then exit
-  const shutdown = (signal: string) => {
-    log.info("shutting down", { signal });
-    void close().then(() => process.exit(0));
-    setTimeout(() => process.exit(1), 10000).unref();
-  };
-  process.once("SIGTERM", () => shutdown("SIGTERM"));
-  process.once("SIGINT", () => shutdown("SIGINT"));
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  await main().catch((error) => {
-    console.error(error instanceof Error ? error.message : "The run server failed to start.");
-    process.exitCode = 1;
-  });
 }

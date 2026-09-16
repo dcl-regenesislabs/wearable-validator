@@ -1,7 +1,7 @@
 /**
  * The /ai entry: one Anthropic vision call over OAuth through pi-ai — node-only.
  * Previous hop: checks/<rule>.ts builds a ReviewRequest (prompt + labeled images).
- * Next hop: the check maps the ReviewResult to a row; tools/src/visual-review.ts
+ * Next hop: the check maps the ReviewResult to a row; packages/server/src/reviewers.ts
  * records reviewMessages() as 2-context.json and the result as 3-answer.json.
  * Reads top to bottom in call order: gate → budget → build → send → parse → fail soft.
  */
