@@ -194,6 +194,7 @@
     "navigationTimeoutMs": 60000,
     "loadTimeoutMs": 180000,
     "commandTimeoutMs": 15000,
+    "captureRetries": 1,
     "timeoutMs": 360000,
     "settleMs": 300,
     "stabilityMs": 250,

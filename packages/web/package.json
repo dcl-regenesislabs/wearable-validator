@@ -1,5 +1,5 @@
 {
-  "name": "wearable-validator-debug-ui",
+  "name": "wearable-validator-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
     "test:browser:build": "vite build test --config vite.config.ts --outDir ../dist/browser-test",
     "test:browser": "npm run test:browser:build && vite preview test --outDir ../dist/browser-test --host 127.0.0.1 --port 4174"
   },
@@ -17,9 +18,11 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.20.0",
     "typescript": "^5.9.3",
     "vite": "^6.0.0",
     "vite-plugin-node-polyfills": "0.28.0"

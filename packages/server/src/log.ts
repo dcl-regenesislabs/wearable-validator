@@ -1,6 +1,7 @@
 /**
  * One-line structured logs for the run server: pretty on a terminal, JSON lines when piped or LOG_FORMAT=json,
- * so a hosted process (Render, Docker) ships them to its log collector unchanged. Never logs tokens or file contents.
+ * so a hosted process (the Docker image on App Platform) ships them to its log collector unchanged.
+ * Previous hop: main.ts creates one logger; server.ts turns run events into lines. Never logs tokens or file contents.
  */
 export type LogLevel = "info" | "warn" | "error";
 

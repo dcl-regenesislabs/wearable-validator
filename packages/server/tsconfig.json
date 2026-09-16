@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "@dcl-regenesislabs/wearable-validator": ["../wearable-validator/src/index.ts"],
+      "@dcl-regenesislabs/wearable-validator/rendering": ["../wearable-validator/src/adapters/rendering.ts"],
+      "@dcl-regenesislabs/wearable-validator/ai": ["../wearable-validator/src/adapters/ai.ts"]
+    }
+  },
+  "include": [
+    "src",
+    "test"
+  ]
+}
