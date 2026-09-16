@@ -1,5 +1,6 @@
 # Run server image: Playwright's Chromium (full headless, SwiftShader WebGPU) + the Unity build + the server.
-# Build from the repo root:  docker build -f packages/server/Dockerfile -t wearable-validator-server .
+# Build from the repo root:  docker build -t wearable-validator-server .
+# Lives at the root so DigitalOcean App Platform detects it; the build context is the whole repo.
 # Run:  docker run --rm --shm-size=1g --memory=4g -p 4180:4180 -e ANTHROPIC_OAUTH_SETUP_TOKEN=... \
 #         -e CF_ACCESS_TEAM_DOMAIN=... -e CF_ACCESS_AUD=... wearable-validator-server
 FROM mcr.microsoft.com/playwright:v1.63.0-noble

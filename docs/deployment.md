@@ -2,7 +2,7 @@
 
 - **Web** — wearable-validator.dclregenesislabs.xyz, Cloudflare Workers (`wrangler.jsonc`), behind Cloudflare Access: curators sign in with their email, then the site runs the code checks in the browser and the visual review through the run server.
 - **Worker** — `packages/web/worker.ts` forwards `/api/*` to `API_ORIGIN` = api.wearable-validator.dclregenesislabs.xyz, headers and streamed body intact (SSE included).
-- **Backend** — one container (`packages/server/Dockerfile`) on DigitalOcean App Platform, proxied through Cloudflare.
+- **Backend** — one container (the root `Dockerfile`) on DigitalOcean App Platform, proxied through Cloudflare.
 - **Identity** — the server verifies the Access JWT the Worker forwards (`packages/server/src/access.ts`); every run belongs to the email that started it, and the API only ever shows a caller their own runs.
 
 ## One-time setup
@@ -18,7 +18,7 @@ gh release create renderer-build-1 tools/artifacts/renderer-build.tar.gz \
   --notes "Unity Web build of unity-explorer PR #10053 (avatar-preview-renderer). sha256 f5667806f56cfd5d7dc927540a29dcbb3ef21ad89a2ec3693673746472109fbf"
 ```
 
-To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.tar.gz -C <Build dir> avatar-preview-renderer.loader.js avatar-preview-renderer.framework.js avatar-preview-renderer.wasm avatar-preview-renderer.data` (the four files at the tarball's top level and nothing else: without `COPYFILE_DISABLE` macOS adds `._*` metadata entries that GNU tar unpacks as junk files), `shasum -a 256 renderer-build.tar.gz`, create release `renderer-build-2` the same way, then update the two `ARG` defaults (`RENDERER_BUILD_URL`, `RENDERER_BUILD_SHA256`) in `packages/server/Dockerfile`.
+To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.tar.gz -C <Build dir> avatar-preview-renderer.loader.js avatar-preview-renderer.framework.js avatar-preview-renderer.wasm avatar-preview-renderer.data` (the four files at the tarball's top level and nothing else: without `COPYFILE_DISABLE` macOS adds `._*` metadata entries that GNU tar unpacks as junk files), `shasum -a 256 renderer-build.tar.gz`, create release `renderer-build-2` the same way, then update the two `ARG` defaults (`RENDERER_BUILD_URL`, `RENDERER_BUILD_SHA256`) in the root `Dockerfile`.
 
 ### 2. Cloudflare Zero Trust (Access)
 
@@ -30,9 +30,9 @@ To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.t
 
 ### 3. DigitalOcean App Platform (the run server)
 
-1. Create App → GitHub → this repo, branch `main`, **Autodeploy on push**.
-2. Resource type Web Service, **Dockerfile path** `packages/server/Dockerfile`, HTTP port `4180`.
-3. One instance with **4 GB RAM** (a render peaks at ~1.7 GB plus Chromium and Node; the server admits one run at a time. Measured in Docker with `--memory=2g`: a run completes at a 1.84 GiB peak, too tight to recommend).
+1. Create App → GitHub → this repo, branch `main`, source directory empty, **Autodeploy on push**. App Platform detects the root `Dockerfile` (that is why it lives there) and builds with it; no build or run command.
+2. Resource type Web Service, HTTP port `4180`.
+3. One instance with **4 GB RAM and 2 dedicated vCPUs** (rendering is software-only and CPU-bound; 1 vCPU risks command timeouts) (a render peaks at ~1.7 GB plus Chromium and Node; the server admits one run at a time. Measured in Docker with `--memory=2g`: a run completes at a 1.84 GiB peak, too tight to recommend).
 4. Health check: HTTP, path `/api/health`.
 5. Environment variables:
 
@@ -70,8 +70,8 @@ Workers & Pages → `wearable-validator` → Settings → Build: build command `
 ANTHROPIC_OAUTH_SETUP_TOKEN=<claude setup-token> npm run serve
 
 # the image itself (defaults: the pinned release asset; to test another build pass BOTH args, the sha256 check has no bypass)
-docker build -f packages/server/Dockerfile -t wearable-validator-server .
-docker build -f packages/server/Dockerfile --build-arg RENDERER_BUILD_URL=<url> --build-arg RENDERER_BUILD_SHA256=<sha256 of that tarball> -t wearable-validator-server .
+docker build -t wearable-validator-server .
+docker build --build-arg RENDERER_BUILD_URL=<url> --build-arg RENDERER_BUILD_SHA256=<sha256 of that tarball> -t wearable-validator-server .
 docker run --rm --shm-size=1g --memory=4g -p 4180:4180 -e INSECURE_ANONYMOUS=1 wearable-validator-server
 ```
 
