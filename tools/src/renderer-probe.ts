@@ -163,8 +163,8 @@ async function main(): Promise<void> {
       return `${image.width}×${image.height} decoded PNG.`;
     });
     if (!screenshotsWork) return;
-    const wearable = await readFixture(join(root, "packages/debug-ui/public/samples/upper_body.zip"));
-    const emote = await readFixture(join(root, "packages/debug-ui/public/samples/emote.zip"));
+    const wearable = await readFixture(join(root, "packages/web/public/samples/upper_body.zip"));
+    const emote = await readFixture(join(root, "packages/web/public/samples/emote.zip"));
     fixtureDigests = { wearable: wearable.sha256, emote: emote.sha256 };
     await writeFile(join(out, "fixture-metadata.json"), JSON.stringify([wearable.item, emote.item], (key, value: unknown) => key === "base64" ? "[local bytes omitted]" : value, 2));
     for (const [index, bodyShape] of wearable.shapes.entries()) {

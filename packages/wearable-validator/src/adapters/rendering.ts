@@ -462,6 +462,11 @@ export function sessionOrder(requests: CaptureRequest[]): CaptureRequest[] {
     .map(({ request }) => request);
 }
 
+/** A previewer command that ran out of time (cold SwiftShader still compiling shaders) is retried from a fresh update. */
+function timedOut(error: unknown): boolean {
+  return error instanceof Error && (error.name === "TimeoutError" || /Timeout \d+ms exceeded/.test(error.message));
+}
+
 /** One update serves every azimuth of a view; see sessionOrder for why item-alone views go first. */
 export async function captureAll(
   session: PreviewSession,
@@ -477,8 +482,8 @@ export async function captureAll(
   let azimuth = 0;
   let front: string | undefined;
   let seeked: number | undefined;
-  for (const request of sessionOrder(requests)) {
-    signal.throwIfAborted();
+
+  async function captureOne(request: CaptureRequest): Promise<CaptureRecord> {
     const pose = input.itemType === "wearable" ? request.pose ?? settings.wearablePose : undefined;
     const nextSetup = `${request.bodyShape}:${request.view}:${pose ?? ""}`;
     if (nextSetup !== setup) {
@@ -510,9 +515,24 @@ export async function captureAll(
         front = undefined;
       }
     }
-    const capture = { request, bytes, sha256: await digest(bytes), width: request.size, height: request.size };
-    captures.push(capture);
-    onCapture?.(capture);
+    return { request, bytes, sha256: await digest(bytes), width: request.size, height: request.size };
+  }
+
+  for (const request of sessionOrder(requests)) {
+    let attempts = 0;
+    for (;;) {
+      signal.throwIfAborted();
+      try {
+        const capture = await captureOne(request);
+        captures.push(capture);
+        onCapture?.(capture);
+        break;
+      } catch (error) {
+        if (!timedOut(error) || attempts++ >= settings.captureRetries) throw error;
+        // the session state after a timeout is unknown: the next attempt starts from a fresh update
+        setup = "";
+      }
+    }
   }
   return captures;
 }

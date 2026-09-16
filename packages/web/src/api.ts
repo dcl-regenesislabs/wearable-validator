@@ -1,12 +1,53 @@
 /**
- * The run server's API (tools/src/serve.ts): start a run, follow it over Server-Sent Events.
+ * The run server's API (packages/server): start a run, follow it over Server-Sent Events, list your runs.
  * In dev, Vite proxies /api to it; on the static site there is no server and every call fails soft.
  */
-import type { CaptureRequest, CheckResult, Finding, ProgressEvent, Result, ReviewMetadata } from "@dcl-regenesislabs/wearable-validator";
+import type { CaptureRecord, CaptureRequest, CheckResult, Finding, ProgressEvent, Result, ReviewMetadata } from "@dcl-regenesislabs/wearable-validator";
 
 export interface VisualCapabilities {
   renderer: boolean;
   reviewer: "pi" | "dry-run" | "none";
+}
+
+export interface VisualHealth {
+  visual: VisualCapabilities;
+  checks: string[];
+  /** Who the server thinks is calling: "local" without sign-in, an email behind Cloudflare Access. */
+  owner: string | null;
+}
+
+/** One of the caller's runs, as GET /api/runs lists them. */
+export interface RunSummary {
+  id: string;
+  name: string;
+  startedAt: number;
+  done: boolean;
+  passed: boolean | null;
+  queued?: boolean;
+}
+
+/** What a waiting run is told as the line moves; position 0 means it is running. */
+export interface QueuePosition {
+  position: number;
+  ahead: number;
+  running: number;
+  averageRunMs: number | null;
+  etaMs: number | null;
+}
+
+export interface QueueEntry {
+  position: number;
+  mine: boolean;
+  id?: string;
+  name?: string;
+  since: number;
+}
+
+export interface QueueState {
+  running: QueueEntry[];
+  waiting: QueueEntry[];
+  averageRunMs: number | null;
+  maxConcurrentRuns: number;
 }
 
 export interface CaptureEvent {
@@ -22,12 +63,13 @@ export type ReviewEvent =
   | { check: string; phase: "answer"; ok: false; reason: string; metadata: ReviewMetadata };
 
 /** Result as the server sends it: capture bytes replaced by URLs. */
-export type WireResult = Omit<Result, "captures"> & { captures: { request: CaptureRequest; url: string }[] };
+export type WireResult = Omit<Result, "captures"> & { captures: (Omit<CaptureRecord, "bytes"> & { url: string })[] };
 
 export type RunEvent =
   | { type: "check"; data: ProgressEvent }
   | { type: "gate"; data: { result: Result; passed: boolean | null } }
   | { type: "stage"; data: { text: string } }
+  | { type: "queue"; data: QueuePosition }
   | { type: "capture"; data: CaptureEvent }
   | { type: "review"; data: ReviewEvent }
   | { type: "done"; data: { result?: WireResult; skipped?: boolean; message?: string } }
@@ -35,13 +77,31 @@ export type RunEvent =
 
 export type CheckRow = CheckResult & { findings: Finding[] };
 
-export async function visualHealth(): Promise<{ visual: VisualCapabilities; checks: string[] } | null> {
+export async function visualHealth(): Promise<VisualHealth | null> {
   try {
     const res = await fetch("/api/health", { headers: { accept: "application/json" } });
     if (!res.ok || !res.headers.get("content-type")?.includes("json")) return null;
-    return (await res.json()) as { visual: VisualCapabilities; checks: string[] };
+    const body = (await res.json()) as { visual: VisualCapabilities; checks: string[]; owner?: string | null };
+    return { visual: body.visual, checks: body.checks, owner: body.owner ?? null };
   } catch {
     return null;
+  }
+}
+
+/** The caller's runs, newest first. Fails soft: no server, not signed in, or an older server without the route → []. */
+export async function listRuns(): Promise<RunSummary[]> {
+  try {
+    const res = await fetch("/api/runs", { headers: { accept: "application/json" } });
+    if (!res.ok || !res.headers.get("content-type")?.includes("json")) return [];
+    const body = (await res.json()) as { runs?: { id: string; name: string; startedAt: number | string; done: boolean; passed: boolean | null }[] };
+    return (body.runs ?? [])
+      .map((run) => {
+        const startedAt = new Date(run.startedAt).getTime();
+        return { ...run, startedAt: Number.isFinite(startedAt) ? startedAt : 0 };
+      })
+      .sort((a, b) => b.startedAt - a.startedAt);
+  } catch {
+    return [];
   }
 }
 
@@ -59,7 +119,7 @@ export async function startRun(bytes: Uint8Array, name: string, options: { model
   return { id: body.id };
 }
 
-const EVENT_TYPES: RunEvent["type"][] = ["check", "gate", "stage", "capture", "review", "done", "error"];
+const EVENT_TYPES: RunEvent["type"][] = ["check", "gate", "stage", "queue", "capture", "review", "done", "error"];
 
 /** Follows a run; the stream closes itself after `done` or `error`. Returns a stop function. */
 export function followRun(id: string, onEvent: (event: RunEvent) => void): () => void {
@@ -76,6 +136,17 @@ export function followRun(id: string, onEvent: (event: RunEvent) => void): () =>
     if (source.readyState === EventSource.CLOSED) return;
   };
   return () => source.close();
+}
+
+/** Who is rendering and who is waiting; other curators' items are unnamed. Null when the server is away. */
+export async function queueState(): Promise<QueueState | null> {
+  try {
+    const res = await fetch("/api/queue", { headers: { accept: "application/json" } });
+    if (!res.ok) return null;
+    return (await res.json()) as QueueState;
+  } catch {
+    return null;
+  }
 }
 
 export async function cancelRun(id: string): Promise<void> {

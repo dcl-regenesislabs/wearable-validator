@@ -1,6 +1,9 @@
 node_modules
 **/node_modules
 **/dist
-tools/artifacts
-tools/corpus
+packages/web
+tools
+packages/server/artifacts
+packages/server/renderer-build
+**/renderer-build.tar.gz
 .git
