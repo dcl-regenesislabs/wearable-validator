@@ -1,7 +1,7 @@
 /**
  * Cloudflare Worker in front of the built site (root wrangler.jsonc). Static files come from the ASSETS binding;
  * `/api/*` is forwarded as-is to the run server named by API_ORIGIN, so the Access JWT, cookies and the streamed
- * upload body reach it and its SSE responses stream back. Without API_ORIGIN (the public site) every /api call is a 404.
+ * upload body reach it and its SSE responses stream back. Without API_ORIGIN (a preview without a run server) every /api call is a 404.
  */
 export type Fetch = (request: Request) => Promise<Response>;
 

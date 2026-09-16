@@ -1,7 +1,6 @@
 # Deployment
 
-- **Public web** — wearable-validator.dclregenesislabs.xyz, Cloudflare Workers, unchanged: code checks only, `/api/*` answers 404.
-- **Curators web** — review.wearable-validator.dclregenesislabs.xyz, the same Worker in env `curators` (`wrangler.jsonc`), behind Cloudflare Access.
+- **Web** — wearable-validator.dclregenesislabs.xyz, Cloudflare Workers (`wrangler.jsonc`), behind Cloudflare Access: curators sign in with their email, then the site runs the code checks in the browser and the visual review through the run server.
 - **Worker** — `packages/web/worker.ts` forwards `/api/*` to `API_ORIGIN` = api.wearable-validator.dclregenesislabs.xyz, headers and streamed body intact (SSE included).
 - **Backend** — one container (`packages/server/Dockerfile`) on DigitalOcean App Platform, proxied through Cloudflare.
 - **Identity** — the server verifies the Access JWT the Worker forwards (`packages/server/src/access.ts`); every run belongs to the email that started it, and the API only ever shows a caller their own runs.
@@ -24,7 +23,7 @@ To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.t
 ### 2. Cloudflare Zero Trust (Access)
 
 1. Zero Trust → Access → Applications → **Add an application** → Self-hosted.
-2. Application domain: `review.wearable-validator.dclregenesislabs.xyz`.
+2. Application domain: `wearable-validator.dclregenesislabs.xyz`.
 3. Policy: Allow, include the curators' emails (or the Workspace domain).
 4. Save, then copy from the application's overview the **Application Audience (AUD) tag** → `CF_ACCESS_AUD`. The team domain is the slug before `.cloudflareaccess.com` (e.g. `dclregenesislabs`) → `CF_ACCESS_TEAM_DOMAIN`.
 5. Settings → Cookie settings → **SameSite attribute: Lax**, so the Access cookie never rides on a request another site starts (the server also refuses cross-site and non-`application/zip` uploads; this is the second lock).
@@ -54,18 +53,11 @@ The server refuses to start on a non-loopback `HOST` without the two Access vari
 
 ### 4. Workers
 
-1. Workers & Pages → `wearable-validator` → Settings → Build: build command `npm ci && npm run build -w wearable-validator-web`, deploy command `npx wrangler deploy` (public site; keep no `API_ORIGIN` there).
-2. Deploy the curators site (route and custom domain come from `wrangler.jsonc`):
-
-```sh
-npm ci && npm run build -w wearable-validator-web && npx wrangler deploy --env curators
-```
-
-Either add a second Workers Builds project for the same repo with that deploy command, or run it by hand after each merge (wrangler uploads `packages/web/dist`, which only the build produces). By hand this needs `npx wrangler login` (or `CLOUDFLARE_API_TOKEN`) first.
+Workers & Pages → `wearable-validator` → Settings → Build: build command `npm ci && npm run build -w wearable-validator-web`, deploy command `npx wrangler deploy`. Every push to `main` redeploys the site; `API_ORIGIN` is in `wrangler.jsonc`, nothing to set in the dashboard. Until the Access application (step 2) exists the site is public and the run server answers 401 to everyone; the Access login is what makes the visual review work.
 
 ### 5. Smoke test
 
-1. Two curators sign in at review.wearable-validator.dclregenesislabs.xyz (Access login). The Visual review panel header says **Signed in as <email>**.
+1. Two curators sign in at wearable-validator.dclregenesislabs.xyz (Access login). The Visual review panel header says **Signed in as <email>**.
 2. Each drops a zip and gets a streamed run.
 3. Each sees only their own run under **Your runs** (`GET /api/runs`).
 4. Paste the other person's run URL (`/api/runs/<id>/events`) into the browser: `404 { "message": "Unknown run." }`.
