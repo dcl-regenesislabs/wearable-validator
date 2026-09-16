@@ -23,9 +23,10 @@ COPY tsconfig.base.json ./
 COPY packages/wearable-validator ./packages/wearable-validator
 COPY packages/server ./packages/server
 ENV RENDERER_BUILD=/app/packages/server/renderer-build
-# Linux Chromium reaches SwiftShader WebGPU only through Vulkan; without these two flags pipeline creation fails.
-# CHROMIUM_ARGS is an operator-trusted knob spliced straight into the launch arguments.
-ENV CHROMIUM_ARGS="--enable-features=Vulkan --use-vulkan=swiftshader"
+# Linux Chromium reaches SwiftShader WebGPU only through Vulkan; without those two flags pipeline creation fails.
+# Hosted containers (App Platform) give /dev/shm 64 MB, far too small for this page: --disable-dev-shm-usage moves
+# Chromium's shared memory to /tmp. CHROMIUM_ARGS is an operator-trusted knob spliced straight into the launch arguments.
+ENV CHROMIUM_ARGS="--enable-features=Vulkan --use-vulkan=swiftshader --disable-dev-shm-usage"
 ENV LOG_FORMAT=json
 ENV HOST=0.0.0.0
 # Chromium loads creator-supplied models: never as root. pwuser ships with the Playwright image.
