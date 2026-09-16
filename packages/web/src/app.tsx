@@ -269,7 +269,12 @@ export function App() {
         </div>
       </header>
 
-      {!loaded && !fetching && <Dropzone dragging={dragging} onFile={onFile} samples={samples} onSample={onSample} onReference={onReference} />}
+      {!loaded && !fetching && (
+        <>
+          <Dropzone dragging={dragging} onFile={onFile} samples={samples} onSample={onSample} onReference={onReference} />
+          <div className="landing-runs"><VisualReview name="" codeResult={null} /></div>
+        </>
+      )}
       {fetching && (
         <div style={{ textAlign: "center" }}>
           <div className="spin" role="status" aria-label="fetching" />
@@ -538,7 +543,7 @@ function Dropzone({
         <span className="chip">.glb — your model</span>
         <span className="chip">.zip — Builder export also supported</span>
       </div>
-      <p className="privacy">runs 100% in your browser — nothing is uploaded</p>
+      <p className="privacy">code checks run 100% in your browser — only the visual review uploads the zip to the run server</p>
     </label>
     <details className="published-example">
       <summary>Explore a published example</summary>

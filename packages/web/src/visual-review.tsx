@@ -330,6 +330,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
       if (!alive) return;
       setQueue(q);
       setNow(Date.now());
+      if (q && (q.running.length > 0 || q.waiting.length > 0)) refreshRuns();
     });
     read();
     const timer = setInterval(read, QUEUE_POLL_MS);
@@ -337,7 +338,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
       alive = false;
       clearInterval(timer);
     };
-  }, [serverKnown]);
+  }, [serverKnown, refreshRuns]);
 
   const start = useCallback(async () => {
     if (!bytes) return;
@@ -360,9 +361,9 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
 
   /** Another run opens on top; the one on screen keeps streaming underneath. The run on screen itself is not reopened. */
   const follow = useCallback((run: RunSummary) => {
-    if (run.id === state.id) return;
+    if (bytes && run.id === state.id) return;
     setOpened(run);
-  }, [state.id]);
+  }, [bytes, state.id]);
 
   // the list is a mirror of the server: re-read it whenever our run changes state (queued, running, done, failed)
   const phase = state.phase;
@@ -381,18 +382,19 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
     if (serverKnown && bytes && codeResult?.passed === true) void latestStart.current();
   }, [serverKnown, bytes, codeResult]);
 
-  if (!capabilities || !bytes) return null;
+  if (!capabilities) return null;
+  if (!bytes && runs.length === 0 && !(queue && (queue.running.length > 0 || queue.waiting.length > 0))) return null;
   const rows: CheckResult[] = (state.result?.checks ?? [...state.rows.values()]).filter((row) => checkRegistry[row.check]?.group === "rendering");
   const passed = rows.filter((row) => row.status === "passed").length;
   const modelKnown = capabilities.reviewer === "pi";
 
   return (
-    <section className="group visual" aria-live="polite">
+    <section className={`group visual${bytes ? "" : " landing"}`} aria-live="polite">
       <div className="group-head">
-        <h2>Visual review</h2>
+        <h2>{bytes ? "Visual review" : "Your visual reviews"}</h2>
         <span className="tally">
-          {rows.length > 0 ? `${passed}/${rows.length} passed · ` : ""}
-          {capabilities.renderer ? "local renderer" : "no renderer"} · {modelKnown ? "two model calls per run" : "model: dry run"}
+          {bytes && rows.length > 0 ? `${passed}/${rows.length} passed · ` : ""}
+          {bytes ? `${capabilities.renderer ? "local renderer" : "no renderer"} · ${modelKnown ? "two model calls per run" : "model: dry run"}` : "open one to see its photos and findings"}
           {owner && owner !== "local" ? ` · Signed in as ${owner}` : ""}
         </span>
       </div>
@@ -450,7 +452,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
           </ul>
         </nav>
       )}
-      <div className="visual-body">
+      {bytes && <div className="visual-body">
         {state.phase === "idle" && (
           <div className="visual-actions">
             <button className="visual-btn" onClick={() => void start()}>Render and review anyway</button>
@@ -460,8 +462,8 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
           </div>
         )}
 
-      </div>
-      <RunView state={state} modelKnown={modelKnown} onCancel={state.id ? () => void cancelRun(state.id!) : undefined} onRunAgain={() => void start()} />
+      </div>}
+      {bytes && <RunView state={state} modelKnown={modelKnown} onCancel={state.id ? () => void cancelRun(state.id!) : undefined} onRunAgain={() => void start()} />}
       {opened && <RunModal run={opened} modelKnown={modelKnown} onClose={() => setOpened(null)} />}
     </section>
   );
