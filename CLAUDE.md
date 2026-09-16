@@ -2,17 +2,21 @@
 
 The Decentraland wearable/emote rule book as code (DAO proposal e2a13c58). npm monorepo:
 `packages/wearable-validator` (published package: 35 deterministic checks + 4 visual checks, manifest, CLI) ·
-`packages/debug-ui` (the website — validation runs fully in-browser) ·
-`tools` (catalyst runner, sample generator; `tools/corpus/` holds downloaded catalyst data, blobs gitignored).
+`packages/server` (the run server: renders, calls the model, streams SSE, owner-scoped runs; Docker image) ·
+`packages/web` (the website — code checks run fully in-browser; the Visual review panel talks to the server; `worker.ts` is the Cloudflare Worker) ·
+`tools` (catalyst runner, sample generator, renderer probe; `tools/corpus/` holds downloaded catalyst data, blobs gitignored).
+Boundary: server and web import the library only by package name (`@dcl-regenesislabs/wearable-validator`, `/rendering`, `/ai`) — never a relative path into its `src/`. Their tests may import the library's fixtures relatively (`../../wearable-validator/test/helpers/...`): those are not a published surface.
 
 ## Commands
 
-- `npm test` / `npm run typecheck` — full suite (node:test) + tsc
-- `npm run dev -w wearable-validator-debug-ui` — the website (Vite); with `ANTHROPIC_OAUTH_SETUP_TOKEN=… npm run serve -w wearable-validator-tools` running, the site streams visual reviews live over SSE
+- `npm test` / `npm run typecheck` — full suite (node:test) + tsc, every workspace
+- `npm run dev` — the website (Vite); with `ANTHROPIC_OAUTH_SETUP_TOKEN=… npm start -w wearable-validator-server` running, the site streams visual reviews live over SSE
+- `npm run serve` — build the site and serve it with the run server at http://127.0.0.1:4180 (single local owner, no sign-in)
+- `npm run review -- <item.zip> [--no-ai] [--from <run dir>]` — visual review from the terminal; run folders in `packages/server/artifacts/`
 - `npx tsx src/cli.ts validate <file> [--checks triangle-count] [--groups model]` (from packages/wearable-validator)
-- `npm run catalyst -w wearable-validator-tools -- --wearables 15 --emotes 10` — validate real published items
-- `npm run samples -w wearable-validator-tools` — regenerate the website's example zips
-- Deploy: push to main → Cloudflare Workers Builds → wearable-validator.dclregenesislabs.xyz (`wrangler.jsonc` at root)
+- `npm run catalyst -- --wearables 15 --emotes 10` — validate real published items
+- `npm run samples` — regenerate the website's example zips
+- Deploy: push to main → Cloudflare Workers Builds → wearable-validator.dclregenesislabs.xyz (`wrangler.jsonc` at root); curators site + run server: `docs/deployment.md`
 
 ## Hard rules
 
@@ -25,7 +29,7 @@ The Decentraland wearable/emote rule book as code (DAO proposal e2a13c58). npm m
 
 ## Style
 
-ESM (`type: module`, `.js`-suffixed relative imports, `node:` builtins), strict minimal tsconfig, kebab-case modules, no barrels beyond a group's `index.ts`, `interface` + string-literal unions, plain `new Error("actionable sentence")`, node:test colocated as `index.test.ts` next to each check (cross-cutting suites stay in `test/`, fixtures in `test/helpers/` imported as `#test/helpers/...`), exact-pin risky deps with a why-comment. The website uses dcl-editor's design tokens verbatim (see packages/debug-ui/src/styles.css header).
+ESM (`type: module`, `.js`-suffixed relative imports, `node:` builtins), strict minimal tsconfig, kebab-case modules, no barrels beyond a group's `index.ts`, `interface` + string-literal unions, plain `new Error("actionable sentence")`, node:test colocated as `index.test.ts` next to each check (cross-cutting suites stay in `test/`, fixtures in `test/helpers/` imported as `#test/helpers/...`), exact-pin risky deps with a why-comment. The website uses dcl-editor's design tokens verbatim (see packages/web/src/styles.css header).
 
 ## Reference docs
 

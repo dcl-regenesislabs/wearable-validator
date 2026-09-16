@@ -1,0 +1,22 @@
+{
+  "name": "wearable-validator-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "review": "tsx src/review.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@dcl-regenesislabs/wearable-validator": "*",
+    "@earendil-works/pi-ai": "0.84.1",
+    "playwright-core": "1.63.0",
+    "tsx": "^4.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3"
+  }
+}

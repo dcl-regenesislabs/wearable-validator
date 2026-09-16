@@ -1,12 +1,28 @@
 /**
- * The run server's API (tools/src/serve.ts): start a run, follow it over Server-Sent Events.
+ * The run server's API (packages/server): start a run, follow it over Server-Sent Events, list your runs.
  * In dev, Vite proxies /api to it; on the static site there is no server and every call fails soft.
  */
-import type { CaptureRequest, CheckResult, Finding, ProgressEvent, Result, ReviewMetadata } from "@dcl-regenesislabs/wearable-validator";
+import type { CaptureRecord, CaptureRequest, CheckResult, Finding, ProgressEvent, Result, ReviewMetadata } from "@dcl-regenesislabs/wearable-validator";
 
 export interface VisualCapabilities {
   renderer: boolean;
   reviewer: "pi" | "dry-run" | "none";
+}
+
+export interface VisualHealth {
+  visual: VisualCapabilities;
+  checks: string[];
+  /** Who the server thinks is calling: "local" without sign-in, an email behind Cloudflare Access. */
+  owner: string | null;
+}
+
+/** One of the caller's runs, as GET /api/runs lists them. */
+export interface RunSummary {
+  id: string;
+  name: string;
+  startedAt: number;
+  done: boolean;
+  passed: boolean | null;
 }
 
 export interface CaptureEvent {
@@ -22,7 +38,7 @@ export type ReviewEvent =
   | { check: string; phase: "answer"; ok: false; reason: string; metadata: ReviewMetadata };
 
 /** Result as the server sends it: capture bytes replaced by URLs. */
-export type WireResult = Omit<Result, "captures"> & { captures: { request: CaptureRequest; url: string }[] };
+export type WireResult = Omit<Result, "captures"> & { captures: (Omit<CaptureRecord, "bytes"> & { url: string })[] };
 
 export type RunEvent =
   | { type: "check"; data: ProgressEvent }
@@ -35,13 +51,31 @@ export type RunEvent =
 
 export type CheckRow = CheckResult & { findings: Finding[] };
 
-export async function visualHealth(): Promise<{ visual: VisualCapabilities; checks: string[] } | null> {
+export async function visualHealth(): Promise<VisualHealth | null> {
   try {
     const res = await fetch("/api/health", { headers: { accept: "application/json" } });
     if (!res.ok || !res.headers.get("content-type")?.includes("json")) return null;
-    return (await res.json()) as { visual: VisualCapabilities; checks: string[] };
+    const body = (await res.json()) as { visual: VisualCapabilities; checks: string[]; owner?: string | null };
+    return { visual: body.visual, checks: body.checks, owner: body.owner ?? null };
   } catch {
     return null;
+  }
+}
+
+/** The caller's runs, newest first. Fails soft: no server, not signed in, or an older server without the route → []. */
+export async function listRuns(): Promise<RunSummary[]> {
+  try {
+    const res = await fetch("/api/runs", { headers: { accept: "application/json" } });
+    if (!res.ok || !res.headers.get("content-type")?.includes("json")) return [];
+    const body = (await res.json()) as { runs?: { id: string; name: string; startedAt: number | string; done: boolean; passed: boolean | null }[] };
+    return (body.runs ?? [])
+      .map((run) => {
+        const startedAt = new Date(run.startedAt).getTime();
+        return { ...run, startedAt: Number.isFinite(startedAt) ? startedAt : 0 };
+      })
+      .sort((a, b) => b.startedAt - a.startedAt);
+  } catch {
+    return [];
   }
 }
 

@@ -45,7 +45,7 @@ export interface Manifest {
     maxCaptures: number;
     profile: string; background: string; skin: string;
     wearablePose: string; wearablePoseFraction: number;
-    navigationTimeoutMs: number; loadTimeoutMs: number; commandTimeoutMs: number; timeoutMs: number;
+    navigationTimeoutMs: number; loadTimeoutMs: number; commandTimeoutMs: number; captureRetries: number; timeoutMs: number;
     settleMs: number; stabilityMs: number; maxStabilityAttempts: number;
     maxCaptureBytes: number;
     /** Phase-0 lab parameters, read only by tools/src/renderer-probe.ts. */

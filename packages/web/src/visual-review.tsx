@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { checks as checkRegistry, docsUrl, sourceLinks, type CheckResult, type CheckStatus, type Finding, type Result } from "@dcl-regenesislabs/wearable-validator";
-import { cancelRun, followRun, startRun, visualHealth, type CaptureEvent, type CheckRow, type ReviewEvent, type RunEvent, type VisualCapabilities, type WireResult } from "./api.js";
+import { cancelRun, followRun, listRuns, startRun, visualHealth, type CaptureEvent, type CheckRow, type ReviewEvent, type RunEvent, type RunSummary, type VisualCapabilities, type WireResult } from "./api.js";
+import { runChip } from "./run-list.js";
 
 /**
  * Live view of a visual review: the run server renders the item, streams every screenshot as it lands, asks the
@@ -27,6 +28,19 @@ const EMPTY: RunState = { phase: "idle", stage: "", captures: [], reviews: {}, r
 const GLYPHS: Record<CheckStatus, string> = { passed: "✓", failed: "✕", warning: "!", skipped: "○", errored: "‼" };
 const STATUS_LABELS: Record<CheckStatus, string> = { passed: "Passed", failed: "Needs fixing", warning: "Review", skipped: "Not checked", errored: "Check error" };
 const MAX_CAPTURES = 12;
+const MAX_LISTED_RUNS = 20;
+const RELATIVE_TIME = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+const TIME_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [["day", 86_400_000], ["hour", 3_600_000], ["minute", 60_000]];
+
+/** "3 minutes ago", "yesterday": the largest unit that fits, "now" under a minute. */
+function relativeTime(startedAt: number, now: number): string {
+  if (startedAt <= 0) return "earlier";
+  const elapsed = now - startedAt;
+  for (const [unit, ms] of TIME_UNITS) {
+    if (elapsed >= ms) return RELATIVE_TIME.format(-Math.round(elapsed / ms), unit);
+  }
+  return RELATIVE_TIME.format(0, "second");
+}
 
 /** "BaseMale · avatar · 90°" from a capture request — the same words the model was given. */
 function captionFor(capture: CaptureEvent): string {
@@ -61,8 +75,14 @@ function reduce(state: RunState, event: RunEvent): RunState {
         ? { ...state, phase: "reviewing", stage: `Asking the model: ${title}`, reviews }
         : { ...state, stage: event.data.ok ? `Answer received: ${title}` : event.data.reason, reviews };
     }
-    case "done":
-      return { ...state, phase: "done", stage: event.data.message ?? "Finished", result: event.data.result, message: event.data.message };
+    case "done": {
+      // a finished run loaded from disk replays only this event, so its photos arrive inside the result
+      const known = new Set(state.captures.map((capture) => capture.id));
+      const replayed = (event.data.result?.captures ?? [])
+        .filter(({ request }) => !known.has(request.id))
+        .map(({ request, sha256, url }): CaptureEvent => ({ id: request.id, request, sha256, url }));
+      return { ...state, phase: "done", stage: event.data.message ?? "Finished", captures: [...state.captures, ...replayed], result: event.data.result, message: event.data.message };
+    }
     case "error":
       return { ...state, phase: "failed", stage: event.data.message, message: event.data.message };
   }
@@ -82,18 +102,40 @@ function valueFor(row: CheckResult, review: RunState["reviews"][string] | undefi
 
 export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; name: string; codeResult: Result | null }) {
   const [capabilities, setCapabilities] = useState<VisualCapabilities | null>(null);
+  const [owner, setOwner] = useState<string | null>(null);
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [now, setNow] = useState(() => Date.now());
   const [state, setState] = useState<RunState>(EMPTY);
   const [highlight, setHighlight] = useState<string | null>(null);
   const stop = useRef<(() => void) | null>(null);
 
+  const refreshRuns = useCallback(() => {
+    void listRuns().then((list) => {
+      setRuns(list.slice(0, MAX_LISTED_RUNS));
+      setNow(Date.now());
+    });
+  }, []);
+
   useEffect(() => {
     let alive = true;
-    void visualHealth().then((health) => alive && setCapabilities(health?.visual ?? null));
+    void visualHealth().then((health) => {
+      if (!alive) return;
+      setCapabilities(health?.visual ?? null);
+      setOwner(health?.owner ?? null);
+      if (health) refreshRuns();
+    });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [refreshRuns]);
   useEffect(() => () => stop.current?.(), []);
+
+  // keep "3 minutes ago" honest while the list is on screen
+  useEffect(() => {
+    if (runs.length === 0) return;
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [runs.length]);
 
   const start = useCallback(async () => {
     if (!bytes) return;
@@ -102,15 +144,30 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
     try {
       // the server may have been restarted with other flags since the panel mounted
       const health = await visualHealth();
-      if (!health) throw new Error("The run server is not reachable. Start it with npm run serve -w wearable-validator-tools.");
+      if (!health) throw new Error("The run server is not reachable. Start it with npm run serve at the repo root.");
       setCapabilities((current) => (JSON.stringify(current) === JSON.stringify(health.visual) ? current : health.visual));
+      setOwner(health.owner);
       const { id } = await startRun(bytes, name, { model: true, standalone: codeResult?.passed !== true });
       setState((s) => ({ ...s, id, stage: "Running the code checks" }));
       stop.current = followRun(id, (event) => setState((s) => reduce(s, event)));
+      refreshRuns();
     } catch (error) {
       setState({ ...EMPTY, phase: "failed", stage: error instanceof Error ? error.message : "Could not start the run." });
     }
-  }, [bytes, name, codeResult]);
+  }, [bytes, name, codeResult, refreshRuns]);
+
+  /** Shows an earlier run: its stream replays every event (a finished one straight from disk) and nothing is uploaded. */
+  const follow = useCallback((run: RunSummary) => {
+    stop.current?.();
+    setState({ ...EMPTY, phase: "starting", id: run.id, stage: `Loading ${run.name}` });
+    stop.current = followRun(run.id, (event) => setState((s) => reduce(s, event)));
+  }, []);
+
+  // the list is a mirror of the server: re-read it whenever a run reaches an end state
+  const phase = state.phase;
+  useEffect(() => {
+    if (phase === "done" || phase === "failed") refreshRuns();
+  }, [phase, refreshRuns]);
 
   // clean code checks: render and ask right away. Code errors: the creator has things to fix first, so nothing
   // runs (no 60 s of screenshots nobody will use) until they press the button.
@@ -136,8 +193,31 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
         <span className="tally">
           {rows.length > 0 ? `${passed}/${rows.length} passed · ` : ""}
           {capabilities.renderer ? "local renderer" : "no renderer"} · {modelKnown ? "two model calls per run" : "model: dry run"}
+          {owner && owner !== "local" ? ` · Signed in as ${owner}` : ""}
         </span>
       </div>
+      {runs.length > 0 && (
+        <nav className="visual-runs" aria-label="Your runs">
+          <span className="visual-runs-head">Your runs</span>
+          <ul className="visual-runs-list">
+            {runs.map((run) => {
+              const chip = runChip(run);
+              return (
+                <li key={run.id}>
+                  <button className="visual-runs-row" aria-current={state.id === run.id ? "true" : undefined} onClick={() => follow(run)}>
+                    <span className="visual-runs-name">{run.name}</span>
+                    <time className="visual-runs-time" dateTime={run.startedAt > 0 ? new Date(run.startedAt).toISOString() : undefined}>{relativeTime(run.startedAt, now)}</time>
+                    <span className={`rule-status ${chip.status}`}>
+                      {!run.done && <span className="spin-inline" aria-hidden="true" />}
+                      {chip.label}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      )}
       <div className="visual-body">
         {state.phase === "idle" && (
           <div className="visual-actions">

@@ -1,5 +1,8 @@
 node_modules/
 dist/
 tools/corpus/blobs/
+# renderer-probe (tools) still writes its observation runs here
 tools/artifacts/
-tools/renderer-build/
+packages/server/artifacts/
+packages/server/renderer-build/
+.wrangler/

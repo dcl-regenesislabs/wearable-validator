@@ -5,11 +5,10 @@ import { promisify } from "node:util";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { pngBytes, syntheticGlb, syntheticZip } from "../../packages/wearable-validator/test/helpers/synthetic.js";
-import { digest } from "../../packages/wearable-validator/src/logic/captures.js";
-import type { CaptureRecord, Result } from "../../packages/wearable-validator/src/types.js";
-import type { ReviewRequest, ReviewResult } from "../../packages/wearable-validator/src/types.js";
-import { dryRunReviewer, readRun, recordingReviewer, replayReviewer, tokenCredentials, writeRun } from "../src/visual-review.js";
+import { digest, type CaptureRecord, type Result, type ReviewRequest, type ReviewResult } from "@dcl-regenesislabs/wearable-validator";
+import { pngBytes, syntheticGlb, syntheticZip } from "../../wearable-validator/test/helpers/synthetic.js";
+import { dryRunReviewer, recordingReviewer, replayReviewer, tokenCredentials } from "../src/reviewers.js";
+import { readRun, writeRun } from "../src/runs.js";
 
 function reviewRequest(): ReviewRequest {
   return {
@@ -25,11 +24,11 @@ function reviewRequest(): ReviewRequest {
 
 describe("code gate", () => {
   it("stops on code failures before opening renderer binaries or OAuth", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "visual-review-gate-"));
+    const directory = await mkdtemp(join(tmpdir(), "run-folder-gate-"));
     try {
       const file = join(directory, "invalid.zip");
       await writeFile(file, await syntheticZip({ glb: await syntheticGlb({ triangles: 2000 }) }));
-      const script = resolve(import.meta.dirname, "../src/visual-review.ts");
+      const script = resolve(import.meta.dirname, "../src/review.ts");
       await assert.rejects(
         promisify(execFile)(process.execPath, [
           "--import", "tsx", script, file,
@@ -53,7 +52,7 @@ describe("code gate", () => {
 
 describe("run folder", () => {
   it("writeRun → readRun round-trips captures byte-for-byte", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "visual-review-run-"));
+    const directory = await mkdtemp(join(tmpdir(), "run-folder-run-"));
     try {
       const captures: CaptureRecord[] = [];
       for (const [id, azimuthDegrees] of [["BaseMale-avatar-000", 0], ["BaseMale-avatar-090", 90]] as const) {
@@ -105,7 +104,7 @@ describe("run folder", () => {
   });
 
   it("records the prompt and context before the call and the answer after it", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "visual-review-tap-"));
+    const directory = await mkdtemp(join(tmpdir(), "run-folder-tap-"));
     try {
       const folder = join(directory, "thumbnail-honesty");
       let promptExistedDuringCall = false;
@@ -143,7 +142,7 @@ describe("run folder", () => {
   });
 
   it("readRun refuses a folder without captures.json", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "visual-review-empty-"));
+    const directory = await mkdtemp(join(tmpdir(), "run-folder-empty-"));
     try {
       await assert.rejects(readRun(directory), /ENOENT/);
     } finally {
@@ -175,7 +174,7 @@ describe("run folder edge cases", () => {
   }
 
   it("readRun treats a deleted PNG as a missing view instead of failing the run", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "visual-review-missing-"));
+    const directory = await mkdtemp(join(tmpdir(), "run-folder-missing-"));
     try {
       const captures = [await capture("BaseMale-avatar-000", "k0", 0), await capture("BaseMale-avatar-090", "k90", 90)];
       await writeRun(directory, resultWith(captures));
@@ -188,7 +187,7 @@ describe("run folder edge cases", () => {
   });
 
   it("writeRun refuses two captures that would share one file name", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "visual-review-dup-"));
+    const directory = await mkdtemp(join(tmpdir(), "run-folder-dup-"));
     try {
       const captures = [await capture("BaseMale-avatar-000", "k0", 0), await capture("BaseMale-avatar-000", "k0-other-build", 0)];
       await assert.rejects(writeRun(directory, resultWith(captures)), /share the id/);

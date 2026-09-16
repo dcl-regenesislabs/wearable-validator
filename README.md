@@ -12,7 +12,7 @@ Mandated by [DAO proposal e2a13c58](https://decentraland.org/governance/proposal
 npm install
 
 # the website: drop a GLB and choose its type/category to check its limits
-npm run dev -w wearable-validator-debug-ui
+npm run dev
 
 # the CLI
 cd packages/wearable-validator
@@ -22,7 +22,7 @@ npx tsx src/cli.ts validate my-wearable.zip --checks triangle-count,skeleton
 npx tsx src/cli.ts checks        # list all checks with plain-language explanations
 
 # validate real published catalyst items
-npm run catalyst -w wearable-validator-tools -- --wearables 15 --emotes 10
+npm run catalyst -- --wearables 15 --emotes 10
 ```
 
 ## What's here
@@ -30,10 +30,11 @@ npm run catalyst -w wearable-validator-tools -- --wearables 15 --emotes 10
 | | |
 |---|---|
 | `packages/wearable-validator` | the published package: 35 deterministic checks (files · model · emote · content) plus four visual checks (render-valid, thumbnail-honesty, visual-quality, emote-quality), rules manifest, CLI. One folder per check under `src/checks/<group>/<name>/` (algorithm, creator-facing text and tests together); shared algorithms in `src/logic/`; Node-only adapters in `src/adapters/` (`/rendering`, `/ai`). The root entry is isomorphic — the website runs it fully in the browser |
-| `packages/debug-ui` | the website: upload → filterable per-rule results with separate values, requirements, and colored status labels (including on mobile), inspectable metadata fields, plain explanations, concrete how-to-fix steps, exact-section docs links, and a live 3D preview |
-| `tools` | catalyst runner (validate published items), sample generator, the visual review runner and the renderer probe; run evidence lands in gitignored `tools/artifacts/` |
+| `packages/server` | the run server (`wearable-validator-server`): renders the item with the Unity build in headless Chromium, calls the vision model, streams every step over SSE and keeps one folder per run (owner-scoped); the terminal runner `npm run review`; the Docker image (`Dockerfile`). Run folders land in gitignored `packages/server/artifacts/` |
+| `packages/web` | the website (`wearable-validator-web`): upload → filterable per-rule results with separate values, requirements, and colored status labels (including on mobile), inspectable metadata fields, plain explanations, concrete how-to-fix steps, exact-section docs links, a live 3D preview, and the Visual review panel when a run server answers `/api`; `worker.ts` is the Cloudflare Worker that serves it and forwards `/api/*` |
+| `tools` | catalyst runner (validate published items), sample generator, renderer probe |
 
-Requirement labels are formatted in the debug UI; the package owns the manifest values and category-dependent limit calculations.
+Server and web import the library only by package name (`@dcl-regenesislabs/wearable-validator`, `/rendering`, `/ai`). Requirement labels are formatted in the website; the package owns the manifest values and category-dependent limit calculations.
 
 Every check carries a rule-book ID (`M-01`…), a plain-language explanation, fix guidance, and a docs link — all exported from the package (`checks`, `explanations`, `fixes`) so no surface can drift from the code.
 
@@ -43,16 +44,20 @@ Visual validation (Phase 4): the item is rendered headlessly on both body shapes
 
 ```sh
 npx playwright-core install chromium --no-shell
-# once: put the Unity build from unity-explorer PR #10053 in tools/renderer-build/ (see docs/visual-validation.md)
+# once: put the Unity build from unity-explorer PR #10053 in packages/server/renderer-build/ (see docs/visual-validation.md)
 # the website with live visual review: builds the site and serves it with the run server at http://127.0.0.1:4180
 ANTHROPIC_OAUTH_SETUP_TOKEN=<claude setup-token> npm run serve   # drop a zip → when the code checks pass, screenshots and the two model answers stream in on their own; with errors, press "Render and review anyway"
 # or from the terminal
-npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip --no-ai   # renders + writes the prompt, no spend
-npm run visual:review -w wearable-validator-tools -- packages/debug-ui/public/samples/upper_body.zip \
-  --from tools/artifacts/visual-upper_body-XXXXXX                        # with the token set: reuses the renders, two model calls
+npm run review -- packages/web/public/samples/upper_body.zip --no-ai   # renders + writes the prompt, no spend
+npm run review -- packages/web/public/samples/upper_body.zip \
+  --from packages/server/artifacts/visual-upper_body-XXXXXX            # with the token set: reuses the renders, two model calls
 ```
 
-Leave out the token and the server renders and writes the prompt without calling the model. The terminal shows one line per event (run accepted, code gate, each capture, the model request, the answer with tokens and cost); when hosted, the same process is configured with `PORT`, `HOST`, `ANTHROPIC_OAUTH_SETUP_TOKEN` (a year-long `claude setup-token`, no session file needed), `RENDERER_BUILD`, `ARTIFACTS_DIR` and logs JSON lines — see [docs/visual-validation.md](docs/visual-validation.md).
+Leave out the token and the server renders and writes the prompt without calling the model. The terminal shows one line per event (run accepted, code gate, each capture, the model request, the answer with tokens and cost); when hosted, the same process is configured with `PORT`, `HOST`, `ANTHROPIC_OAUTH_SETUP_TOKEN` (a year-long `claude setup-token`, no session file needed), `RENDERER_BUILD`, `ARTIFACTS_DIR`, the Cloudflare Access variables and logs JSON lines — see [docs/visual-validation.md](docs/visual-validation.md).
+
+## Deploy
+
+Push to `main` deploys the public website (code checks only) to wearable-validator.dclregenesislabs.xyz through Cloudflare Workers Builds. The curators' site at review.wearable-validator.dclregenesislabs.xyz is the same Worker in the `curators` env behind Cloudflare Access; it forwards `/api/*` to the run server, one container on DigitalOcean App Platform at api.wearable-validator.dclregenesislabs.xyz. Setup steps, environment variables and the smoke test: [docs/deployment.md](docs/deployment.md).
 
 ```ts
 import { validate } from "@dcl-regenesislabs/wearable-validator";
@@ -64,7 +69,7 @@ result.findings;  // every problem at once: message, where, measured vs limit, f
 
 ## Browser content-integrity regression
 
-Run `npm run test:browser -w wearable-validator-debug-ui`, then open
+Run `npm run test:browser -w wearable-validator-web`, then open
 http://127.0.0.1:4174. The production-bundled scene must show `PASS`: a known
 content hash matches, and altered bytes produce a mismatch instead of a crashed
 check. This scene reproduced the browser hashing failure before the fix.
@@ -72,14 +77,14 @@ check. This scene reproduced the browser hashing failure before the fix.
 Content hashes support both legacy Decentraland `Qm…` whole-file hashes and
 UnixFS CIDv1 hashes, using `@dcl/hashing` and the format declared for each file.
 `@dcl/hashing` is pinned to keep the verified hash outputs and module format stable.
-The debug UI supplies Node crypto and its supporting browser polyfills through
+The website supplies Node crypto and its supporting browser polyfills through
 Vite. Other browser integrations must provide equivalent polyfills; Node needs
 no extra configuration. Regression fixtures cover empty files, chunk boundaries,
 and multi-chunk files in Node and the production browser bundle.
 
 ## Emote playback regression
 
-Run `npm run dev -w wearable-validator-debug-ui` and open
+Run `npm run dev` and open
 http://localhost:5173/test/emote-playback.html. With internet access, the scene
 loads the bundled emote in the hosted previewer and must show `PASS` after testing
 Pause, Play, and Restart from a paused position. It checks actual playback events

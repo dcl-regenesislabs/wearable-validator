@@ -1,6 +1,6 @@
 /**
  * Builds one sample zip per category from real published catalyst items, for
- * the webview's "try an example" strip: packages/debug-ui/public/samples/<key>.zip
+ * the webview's "try an example" strip: packages/web/public/samples/<key>.zip
  * (a Builder-style zip: wearable.json/emote.json + the entity's files).
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -10,7 +10,7 @@ import JSZip from "jszip";
 
 const SUBGRAPH = "https://subgraph.decentraland.org/collections-matic-mainnet";
 const PEER = "https://peer.decentraland.org";
-const OUT = join(import.meta.dirname, "..", "..", "packages", "debug-ui", "public", "samples");
+const OUT = join(import.meta.dirname, "..", "..", "packages", "web", "public", "samples");
 const CACHE = join(import.meta.dirname, "..", "corpus", "blobs");
 const MAX_BYTES = 4 * 1048576; // keep the repo lean — skip oversized candidates
 
