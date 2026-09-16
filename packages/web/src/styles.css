@@ -449,3 +449,24 @@ footer.foot {
 @media (max-width: 1100px) {
   .visual-runs-row .rule-status { min-width: 0; }
 }
+
+/* the shared line: who is rendering and who waits, your own items named */
+.visual-queue { border-bottom: 1px solid var(--divider); padding: var(--space-2) var(--space-4); display: grid; gap: var(--space-1); }
+.visual-queue-head { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; }
+.visual-queue-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.visual-queue-list li { display: flex; align-items: center; gap: var(--space-2); font-size: var(--fs-sm); color: var(--ink-85); min-height: 24px; }
+.visual-queue-list li.mine .visual-queue-name { color: var(--text-1); font-weight: 600; }
+.visual-queue-pos { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); min-width: 2ch; }
+.visual-queue-time { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); }
+.visual-queue-you { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--brand-hover); border: 1px solid var(--brand-hover); border-radius: 3px; padding: 0 4px; line-height: 16px; }
+.visual-queue-empty { color: var(--text-3); font-size: var(--fs-2xs); }
+
+/* an earlier run opened from the list, over the live one */
+.visual-modal {
+  width: min(1100px, 94vw); max-height: 90vh; padding: 0; border: 1px solid var(--divider); border-radius: var(--r-panel);
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow-panel); overflow: auto;
+}
+.visual-modal::backdrop { background: rgba(0, 0, 0, 0.6); }
+.visual-modal-head { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); height: var(--head-h); border-bottom: 1px solid var(--divider); position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.visual-modal-title { font-weight: 600; color: var(--text); }
+.visual-modal-time { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { checks as checkRegistry, docsUrl, sourceLinks, type CheckResult, type CheckStatus, type Finding, type Result } from "@dcl-regenesislabs/wearable-validator";
-import { cancelRun, followRun, listRuns, startRun, visualHealth, type CaptureEvent, type CheckRow, type ReviewEvent, type RunEvent, type RunSummary, type VisualCapabilities, type WireResult } from "./api.js";
+import { cancelRun, followRun, listRuns, queueState, startRun, visualHealth, type CaptureEvent, type CheckRow, type QueuePosition, type QueueState, type ReviewEvent, type RunEvent, type RunSummary, type VisualCapabilities, type WireResult } from "./api.js";
 import { runChip } from "./run-list.js";
 
 /**
@@ -10,7 +10,7 @@ import { runChip } from "./run-list.js";
  * together: with code errors nothing runs until the creator presses the button.
  */
 
-type Phase = "idle" | "starting" | "gate" | "rendering" | "reviewing" | "done" | "failed";
+type Phase = "idle" | "starting" | "gate" | "queued" | "rendering" | "reviewing" | "done" | "failed";
 
 interface RunState {
   phase: Phase;
@@ -22,6 +22,7 @@ interface RunState {
   rows: Map<string, CheckRow>;
   result?: WireResult;
   message?: string;
+  queue?: QueuePosition;
 }
 
 const EMPTY: RunState = { phase: "idle", stage: "", captures: [], reviews: {}, rows: new Map() };
@@ -31,6 +32,21 @@ const MAX_CAPTURES = 12;
 const MAX_LISTED_RUNS = 20;
 const RELATIVE_TIME = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 const TIME_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [["day", 86_400_000], ["hour", 3_600_000], ["minute", 60_000]];
+const QUEUE_POLL_MS = 4000;
+const MAX_LISTED_QUEUE = 6;
+
+/** "about 2 min", "under a minute": the wait estimate the server derives from its last renders. */
+function waitText(etaMs: number | null): string {
+  if (etaMs === null) return "";
+  if (etaMs < 60_000) return " · under a minute";
+  return ` · about ${Math.max(1, Math.round(etaMs / 60_000))} min`;
+}
+
+/** "40 s" / "3 min" for how long an item has been in its state. */
+function elapsedText(since: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - since) / 1000));
+  return seconds < 60 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
+}
 
 /** "3 minutes ago", "yesterday": the largest unit that fits, "now" under a minute. */
 function relativeTime(startedAt: number, now: number): string {
@@ -61,6 +77,12 @@ function reduce(state: RunState, event: RunEvent): RunState {
     }
     case "gate":
       return { ...state, gate: event.data.result };
+    case "queue": {
+      const place = event.data;
+      if (place.position === 0) return { ...state, phase: "rendering", stage: "Your turn: starting the render", queue: place };
+      const ahead = place.ahead === 1 ? "1 item ahead of you" : `${place.ahead} items ahead of you`;
+      return { ...state, phase: "queued", stage: `Waiting in line: ${ahead}${waitText(place.etaMs)}`, queue: place };
+    }
     case "stage":
       return { ...state, phase: "rendering", stage: event.data.text };
     case "capture": {
@@ -100,153 +122,39 @@ function valueFor(row: CheckResult, review: RunState["reviews"][string] | undefi
   return row.measured;
 }
 
-export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; name: string; codeResult: Result | null }) {
-  const [capabilities, setCapabilities] = useState<VisualCapabilities | null>(null);
-  const [owner, setOwner] = useState<string | null>(null);
-  const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [now, setNow] = useState(() => Date.now());
-  const [state, setState] = useState<RunState>(EMPTY);
+
+/** One run on screen: its stage line, photos and rule rows. The live run and any run opened from the list share it. */
+function RunView({ state, modelKnown, onCancel, onRunAgain }: { state: RunState; modelKnown: boolean; onCancel?: () => void; onRunAgain?: () => void }) {
   const [highlight, setHighlight] = useState<string | null>(null);
-  const stop = useRef<(() => void) | null>(null);
-
-  const refreshRuns = useCallback(() => {
-    void listRuns().then((list) => {
-      setRuns(list.slice(0, MAX_LISTED_RUNS));
-      setNow(Date.now());
-    });
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    void visualHealth().then((health) => {
-      if (!alive) return;
-      setCapabilities(health?.visual ?? null);
-      setOwner(health?.owner ?? null);
-      if (health) refreshRuns();
-    });
-    return () => {
-      alive = false;
-    };
-  }, [refreshRuns]);
-  useEffect(() => () => stop.current?.(), []);
-
-  // keep "3 minutes ago" honest while the list is on screen
-  useEffect(() => {
-    if (runs.length === 0) return;
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, [runs.length]);
-
-  const start = useCallback(async () => {
-    if (!bytes) return;
-    stop.current?.();
-    setState({ ...EMPTY, phase: "starting", stage: "Uploading to the run server" });
-    try {
-      // the server may have been restarted with other flags since the panel mounted
-      const health = await visualHealth();
-      if (!health) throw new Error("The run server is not reachable. Start it with npm run serve at the repo root.");
-      setCapabilities((current) => (JSON.stringify(current) === JSON.stringify(health.visual) ? current : health.visual));
-      setOwner(health.owner);
-      const { id } = await startRun(bytes, name, { model: true, standalone: codeResult?.passed !== true });
-      setState((s) => ({ ...s, id, stage: "Running the code checks" }));
-      stop.current = followRun(id, (event) => setState((s) => reduce(s, event)));
-      refreshRuns();
-    } catch (error) {
-      setState({ ...EMPTY, phase: "failed", stage: error instanceof Error ? error.message : "Could not start the run." });
-    }
-  }, [bytes, name, codeResult, refreshRuns]);
-
-  /** Shows an earlier run: its stream replays every event (a finished one straight from disk) and nothing is uploaded. */
-  const follow = useCallback((run: RunSummary) => {
-    stop.current?.();
-    setState({ ...EMPTY, phase: "starting", id: run.id, stage: `Loading ${run.name}` });
-    stop.current = followRun(run.id, (event) => setState((s) => reduce(s, event)));
-  }, []);
-
-  // the list is a mirror of the server: re-read it whenever a run reaches an end state
-  const phase = state.phase;
-  useEffect(() => {
-    if (phase === "done" || phase === "failed") refreshRuns();
-  }, [phase, refreshRuns]);
-
-  // clean code checks: render and ask right away. Code errors: the creator has things to fix first, so nothing
-  // runs (no 60 s of screenshots nobody will use) until they press the button.
-  const latestStart = useRef(start);
-  latestStart.current = start;
-  const serverKnown = capabilities !== null;
-  useEffect(() => {
-    setState(EMPTY);
-    if (serverKnown && bytes && codeResult?.passed === true) void latestStart.current();
-  }, [serverKnown, bytes, codeResult]);
-
-  if (!capabilities || !bytes) return null;
+  const root = useRef<HTMLDivElement>(null);
   const running = state.phase !== "idle" && state.phase !== "done" && state.phase !== "failed";
-  const rows: CheckResult[] = state.result?.checks ?? [...state.rows.values()];
-  const allFindings: Finding[] = state.result?.findings ?? [...state.rows.values()].flatMap((row) => row.findings);
-  const passed = rows.filter((row) => row.status === "passed").length;
-  const modelKnown = capabilities.reviewer === "pi";
-
+  // a run that stopped at the code gate carries the code result: only the rendering rows belong in this panel
+  const visual = (check: string) => checkRegistry[check]?.group === "rendering";
+  const rows: CheckResult[] = (state.result?.checks ?? [...state.rows.values()]).filter((row) => visual(row.check));
+  const allFindings: Finding[] = (state.result?.findings ?? [...state.rows.values()].flatMap((row) => row.findings)).filter((finding) => visual(finding.check));
+  const reveal = (captureId: string) => root.current?.querySelector(`[data-capture="${captureId}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   return (
-    <section className="group visual" aria-live="polite">
-      <div className="group-head">
-        <h2>Visual review</h2>
-        <span className="tally">
-          {rows.length > 0 ? `${passed}/${rows.length} passed · ` : ""}
-          {capabilities.renderer ? "local renderer" : "no renderer"} · {modelKnown ? "two model calls per run" : "model: dry run"}
-          {owner && owner !== "local" ? ` · Signed in as ${owner}` : ""}
-        </span>
-      </div>
-      {runs.length > 0 && (
-        <nav className="visual-runs" aria-label="Your runs">
-          <span className="visual-runs-head">Your runs</span>
-          <ul className="visual-runs-list">
-            {runs.map((run) => {
-              const chip = runChip(run);
-              return (
-                <li key={run.id}>
-                  <button className="visual-runs-row" aria-current={state.id === run.id ? "true" : undefined} onClick={() => follow(run)}>
-                    <span className="visual-runs-name">{run.name}</span>
-                    <time className="visual-runs-time" dateTime={run.startedAt > 0 ? new Date(run.startedAt).toISOString() : undefined}>{relativeTime(run.startedAt, now)}</time>
-                    <span className={`rule-status ${chip.status}`}>
-                      {!run.done && <span className="spin-inline" aria-hidden="true" />}
-                      {chip.label}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-      )}
+    <div ref={root} className="visual-run">
       <div className="visual-body">
-        {state.phase === "idle" && (
-          <div className="visual-actions">
-            <button className="visual-btn" onClick={() => void start()}>Render and review anyway</button>
-            <span className="visual-note">
-              {codeResult?.passed === true ? "Waiting for the run server." : "The code checks did not pass. Fix those first, or render the item and ask the model anyway (about a minute and two model calls)."}
-            </span>
-          </div>
-        )}
-
         {state.phase !== "idle" && (
           <div className={`visual-stage ${state.phase}`}>
             {running && <span className="spin-inline" aria-hidden="true" />}
             <span className="visual-stage-text">{state.stage}</span>
-            {running && state.id && <button className="visual-cancel" onClick={() => void cancelRun(state.id!)}>Cancel</button>}
-            {!running && <button className="visual-cancel" onClick={() => void start()}>Run again</button>}
+            {running && onCancel && <button className="visual-cancel" onClick={onCancel}>Cancel</button>}
+            {!running && onRunAgain && <button className="visual-cancel" onClick={onRunAgain}>Run again</button>}
           </div>
         )}
 
         {(state.captures.length > 0 || state.phase === "rendering") && (
           <div className="visual-grid">
             {state.id && (
-              <figure className={`visual-figure${highlight === "thumbnail" ? " lit" : ""}`} id="capture-thumbnail">
+              <figure className={`visual-figure${highlight === "thumbnail" ? " lit" : ""}`} data-capture="thumbnail">
                 <img src={`/api/runs/${state.id}/thumbnail.png`} alt="original thumbnail" onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")} />
                 <figcaption>thumbnail (original)</figcaption>
               </figure>
             )}
             {state.captures.map((capture) => (
-              <figure className={`visual-figure${highlight === capture.id ? " lit" : ""}`} key={capture.id} id={`capture-${capture.id}`}>
+              <figure className={`visual-figure${highlight === capture.id ? " lit" : ""}`} key={capture.id} data-capture={capture.id}>
                 <img src={`${capture.url}?v=${capture.sha256.slice(0, 8)}`} alt={captionFor(capture)} />
                 <figcaption>{captionFor(capture)}</figcaption>
               </figure>
@@ -258,7 +166,6 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
           </div>
         )}
       </div>
-
       {rows.length > 0 && (
         <>
           <div className="rule-columns" aria-hidden="true">
@@ -307,7 +214,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
                               className="evidence-chip"
                               onMouseEnter={() => setHighlight(ref.captureId)}
                               onMouseLeave={() => setHighlight(null)}
-                              onClick={() => document.getElementById(`capture-${ref.captureId}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                              onClick={() => reveal(ref.captureId)}
                             >
                               {ref.captureId}
                             </button>
@@ -351,6 +258,211 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** An earlier run opened from the list, on top of whatever is running: its stream replays every event, nothing is uploaded. */
+function RunModal({ run, modelKnown, onClose }: { run: RunSummary; modelKnown: boolean; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [state, setState] = useState<RunState>({ ...EMPTY, phase: "starting", id: run.id, stage: `Loading ${run.name}` });
+  useEffect(() => {
+    dialog.current?.showModal();
+    const stop = followRun(run.id, (event) => setState((s) => reduce(s, event)));
+    return stop;
+  }, [run.id]);
+  return (
+    <dialog ref={dialog} className="visual-modal" onClose={onClose} onClick={(e) => e.target === dialog.current && onClose()}>
+      <div className="visual-modal-head">
+        <span className="visual-modal-title">{run.name}</span>
+        <span className="visual-modal-time">{new Date(run.startedAt).toLocaleString("en")}</span>
+        <button className="visual-cancel" onClick={onClose}>Close</button>
+      </div>
+      <RunView state={state} modelKnown={modelKnown} onCancel={() => void cancelRun(run.id)} />
+    </dialog>
+  );
+}
+
+export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; name: string; codeResult: Result | null }) {
+  const [capabilities, setCapabilities] = useState<VisualCapabilities | null>(null);
+  const [owner, setOwner] = useState<string | null>(null);
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [now, setNow] = useState(() => Date.now());
+  const [state, setState] = useState<RunState>(EMPTY);
+  const [opened, setOpened] = useState<RunSummary | null>(null);
+  const stop = useRef<(() => void) | null>(null);
+
+  const refreshRuns = useCallback(() => {
+    void listRuns().then((list) => {
+      setRuns(list.slice(0, MAX_LISTED_RUNS));
+      setNow(Date.now());
+    });
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void visualHealth().then((health) => {
+      if (!alive) return;
+      setCapabilities(health?.visual ?? null);
+      setOwner(health?.owner ?? null);
+      if (health) refreshRuns();
+    });
+    return () => {
+      alive = false;
+    };
+  }, [refreshRuns]);
+  useEffect(() => () => stop.current?.(), []);
+
+  // keep "3 minutes ago" honest while the list is on screen
+  useEffect(() => {
+    if (runs.length === 0) return;
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [runs.length]);
+
+  // the line is shared by every curator: poll it while the server is known, so the wait is visible before dropping a file
+  const [queue, setQueue] = useState<QueueState | null>(null);
+  const serverKnown = capabilities !== null;
+  useEffect(() => {
+    if (!serverKnown) return;
+    let alive = true;
+    const read = () => void queueState().then((q) => {
+      if (!alive) return;
+      setQueue(q);
+      setNow(Date.now());
+    });
+    read();
+    const timer = setInterval(read, QUEUE_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [serverKnown]);
+
+  const start = useCallback(async () => {
+    if (!bytes) return;
+    stop.current?.();
+    setState({ ...EMPTY, phase: "starting", stage: "Uploading to the run server" });
+    try {
+      // the server may have been restarted with other flags since the panel mounted
+      const health = await visualHealth();
+      if (!health) throw new Error("The run server is not reachable. Start it with npm run serve at the repo root.");
+      setCapabilities((current) => (JSON.stringify(current) === JSON.stringify(health.visual) ? current : health.visual));
+      setOwner(health.owner);
+      const { id } = await startRun(bytes, name, { model: true, standalone: codeResult?.passed !== true });
+      setState((s) => ({ ...s, id, stage: "Running the code checks" }));
+      stop.current = followRun(id, (event) => setState((s) => reduce(s, event)));
+      refreshRuns();
+    } catch (error) {
+      setState({ ...EMPTY, phase: "failed", stage: error instanceof Error ? error.message : "Could not start the run." });
+    }
+  }, [bytes, name, codeResult, refreshRuns]);
+
+  /** Another run opens on top; the one on screen keeps streaming underneath. The run on screen itself is not reopened. */
+  const follow = useCallback((run: RunSummary) => {
+    if (run.id === state.id) return;
+    setOpened(run);
+  }, [state.id]);
+
+  // the list is a mirror of the server: re-read it whenever our run changes state (queued, running, done, failed)
+  const phase = state.phase;
+  useEffect(() => {
+    if (phase === "idle" || phase === "starting") return;
+    refreshRuns();
+    void queueState().then((q) => q && setQueue(q));
+  }, [phase, refreshRuns]);
+
+  // clean code checks: render and ask right away. Code errors: the creator has things to fix first, so nothing
+  // runs (no 60 s of screenshots nobody will use) until they press the button.
+  const latestStart = useRef(start);
+  latestStart.current = start;
+  useEffect(() => {
+    setState(EMPTY);
+    if (serverKnown && bytes && codeResult?.passed === true) void latestStart.current();
+  }, [serverKnown, bytes, codeResult]);
+
+  if (!capabilities || !bytes) return null;
+  const rows: CheckResult[] = (state.result?.checks ?? [...state.rows.values()]).filter((row) => checkRegistry[row.check]?.group === "rendering");
+  const passed = rows.filter((row) => row.status === "passed").length;
+  const modelKnown = capabilities.reviewer === "pi";
+
+  return (
+    <section className="group visual" aria-live="polite">
+      <div className="group-head">
+        <h2>Visual review</h2>
+        <span className="tally">
+          {rows.length > 0 ? `${passed}/${rows.length} passed · ` : ""}
+          {capabilities.renderer ? "local renderer" : "no renderer"} · {modelKnown ? "two model calls per run" : "model: dry run"}
+          {owner && owner !== "local" ? ` · Signed in as ${owner}` : ""}
+        </span>
+      </div>
+      {queue && (queue.running.length > 0 || queue.waiting.length > 0) && (
+        <div className="visual-queue" aria-label="Server activity">
+          <span className="visual-queue-head">Rendering now</span>
+          <ul className="visual-queue-list">
+            {queue.running.map((entry, i) => (
+              <li key={entry.id ?? `running-${i}`} className={entry.mine ? "mine" : ""}>
+                <span className="spin-inline" aria-hidden="true" />
+                <span className="visual-queue-name">{entry.mine ? entry.name : "another curator's item"}</span>
+                {entry.mine && <span className="visual-queue-you">you</span>}
+                <span className="visual-queue-time">{elapsedText(entry.since, now)}</span>
+              </li>
+            ))}
+            {queue.running.length === 0 && <li className="visual-queue-empty">nothing, the next item starts right away</li>}
+          </ul>
+          {queue.waiting.length > 0 && (
+            <>
+              <span className="visual-queue-head">Waiting line · {queue.waiting.length}{waitText(queue.averageRunMs === null ? null : queue.waiting.length * queue.averageRunMs / queue.maxConcurrentRuns)}</span>
+              <ol className="visual-queue-list">
+                {queue.waiting.slice(0, MAX_LISTED_QUEUE).map((entry, i) => (
+                  <li key={entry.id ?? `waiting-${i}`} className={entry.mine ? "mine" : ""}>
+                    <span className="visual-queue-pos">#{entry.position}</span>
+                    <span className="visual-queue-name">{entry.mine ? entry.name : "another curator's item"}</span>
+                    {entry.mine && <span className="visual-queue-you">you</span>}
+                    <span className="visual-queue-time">waiting {elapsedText(entry.since, now)}</span>
+                  </li>
+                ))}
+                {queue.waiting.length > MAX_LISTED_QUEUE && <li className="visual-queue-empty">and {queue.waiting.length - MAX_LISTED_QUEUE} more</li>}
+              </ol>
+            </>
+          )}
+        </div>
+      )}
+      {runs.length > 0 && (
+        <nav className="visual-runs" aria-label="Your runs">
+          <span className="visual-runs-head">Your runs</span>
+          <ul className="visual-runs-list">
+            {runs.map((run) => {
+              const chip = runChip(run);
+              return (
+                <li key={run.id}>
+                  <button className="visual-runs-row" aria-current={state.id === run.id ? "true" : undefined} onClick={() => follow(run)}>
+                    <span className="visual-runs-name">{run.name}</span>
+                    <time className="visual-runs-time" dateTime={run.startedAt > 0 ? new Date(run.startedAt).toISOString() : undefined}>{relativeTime(run.startedAt, now)}</time>
+                    <span className={`rule-status ${chip.status}`}>
+                      {!run.done && <span className="spin-inline" aria-hidden="true" />}
+                      {chip.label}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      )}
+      <div className="visual-body">
+        {state.phase === "idle" && (
+          <div className="visual-actions">
+            <button className="visual-btn" onClick={() => void start()}>Render and review anyway</button>
+            <span className="visual-note">
+              {codeResult?.passed === true ? "Waiting for the run server." : "The code checks did not pass. Fix those first, or render the item and ask the model anyway (about a minute and two model calls)."}
+            </span>
+          </div>
+        )}
+
+      </div>
+      <RunView state={state} modelKnown={modelKnown} onCancel={state.id ? () => void cancelRun(state.id!) : undefined} onRunAgain={() => void start()} />
+      {opened && <RunModal run={opened} modelKnown={modelKnown} onClose={() => setOpened(null)} />}
     </section>
   );
 }

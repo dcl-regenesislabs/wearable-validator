@@ -62,6 +62,8 @@ export interface ServeOptions {
   maxUploadBytes?: number;
   /** Finished runs kept in memory with their events; the run folder stays the durable record. */
   maxRunsInMemory?: number;
+  /** Renders that may run at once (one per ~2 GB of RAM); every other accepted run waits in line. */
+  maxConcurrentRuns?: number;
   logger?: Logger;
 }
 
@@ -80,10 +82,40 @@ interface Run extends RunSummary {
   events: RunEvent[];
   listeners: Set<ServerResponse>;
   controller: AbortController;
+  /** When the render actually started; startedAt is when the upload was accepted. */
+  beganAt?: number;
+}
+
+/** A run that passed the code gate and is waiting for a render slot. */
+interface Pending {
+  run: Run;
+  bytes: Uint8Array;
+  name: string;
+  mode: { model: boolean; standalone: boolean };
+}
+
+/** What every waiting run is told, and what /api/queue shows: position 0 means running. */
+export interface QueuePosition {
+  position: number;
+  ahead: number;
+  running: number;
+  averageRunMs: number | null;
+  etaMs: number | null;
+}
+
+export interface QueueEntry {
+  position: number;
+  mine: boolean;
+  /** Only your own items are named; another curator's item is just "an item". */
+  id?: string;
+  name?: string;
+  since: number;
 }
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 const MAX_RUNS_IN_MEMORY = 50;
+// the wait estimate averages the last few renders; the first run of a fresh server has no estimate
+const DURATION_SAMPLES = 5;
 // the upload's name becomes part of the run folder name; filesystems cap a folder name at 255 bytes
 const MAX_NAME_CHARS = 80;
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -219,6 +251,9 @@ function logEvent(log: Logger, run: Run, type: string, data: unknown): void {
     case "stage":
       log.info(clean(d.text, 200), { run: run.id, ms });
       return;
+    case "queue":
+      log.info(d.position === 0 ? "run started" : "waiting in line", { run: run.id, position: d.position, ahead: d.ahead, etaMs: d.etaMs, ms });
+      return;
     case "capture":
       log.info("captured", { run: run.id, view: d.id, ms });
       return;
@@ -281,7 +316,10 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
   const maxRunsInMemory = options.maxRunsInMemory ?? MAX_RUNS_IN_MEMORY;
   const checkHost = options.host === undefined || isLoopback(options.host) || (options.publicHosts?.length ?? 0) > 0;
   if (!checkHost) log.warn("Host header check skipped: set PUBLIC_HOSTS to the hostnames this server answers on", { host: options.host });
-  let active = 0;
+  const maxConcurrent = Math.max(1, Math.floor(options.maxConcurrentRuns ?? 1));
+  const running = new Set<Run>();
+  const waiting: Pending[] = [];
+  const durations: number[] = [];
   const indexed = indexRunFolders(options.out, previous, index).catch((error) => log.warn("could not index earlier runs", { error: error instanceof Error ? error.message : String(error) }));
 
   function emit(run: Run, type: string, data: unknown): void {
@@ -298,16 +336,88 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
     emit(run, "done", wire);
   }
 
-  async function execute(run: Run, bytes: Uint8Array, name: string, mode: { model: boolean; standalone: boolean }): Promise<void> {
-    let services: RunServices | undefined;
+  /** The run is over, whatever the outcome: the folder is the record, the stream closes. */
+  function conclude(run: Run): void {
+    run.done = true;
+    index.set(run.id, summarize(run));
+    for (const listener of run.listeners) listener.end();
+    run.listeners.clear();
+  }
+
+  function fail(run: Run, error: unknown): void {
+    const message = run.controller.signal.aborted ? "The run was cancelled." : error instanceof Error ? error.message : "The run failed.";
+    emit(run, "error", { message });
+  }
+
+  function averageRunMs(): number | null {
+    return durations.length ? Math.round(durations.reduce((sum, ms) => sum + ms, 0) / durations.length) : null;
+  }
+
+  function positionOf(index: number): QueuePosition {
+    const average = averageRunMs();
+    return { position: index + 1, ahead: running.size + index, running: running.size, averageRunMs: average, etaMs: average === null ? null : Math.ceil((index + 1) / maxConcurrent) * average };
+  }
+
+  /** Every waiting run hears its new place whenever the line moves. */
+  function broadcastQueue(): void {
+    waiting.forEach((pending, index) => emit(pending.run, "queue", positionOf(index)));
+  }
+
+  function queueSnapshot(owner: string): { running: QueueEntry[]; waiting: QueueEntry[]; averageRunMs: number | null; maxConcurrentRuns: number } {
+    const entry = (run: Run, position: number, since: number): QueueEntry =>
+      run.owner === owner ? { position, mine: true, id: run.id, name: run.name, since } : { position, mine: false, since };
+    return {
+      running: [...running].map((run) => entry(run, 0, run.beganAt ?? run.startedAt)),
+      waiting: waiting.map((pending, index) => entry(pending.run, index + 1, pending.run.startedAt)),
+      averageRunMs: averageRunMs(),
+      maxConcurrentRuns: maxConcurrent
+    };
+  }
+
+  /** Starts renders while there are free slots, in arrival order. */
+  function pump(): void {
+    while (running.size < maxConcurrent && waiting.length) {
+      const next = waiting.shift()!;
+      running.add(next.run);
+      next.run.beganAt = Date.now();
+      emit(next.run, "queue", { position: 0, ahead: 0, running: running.size, averageRunMs: averageRunMs(), etaMs: 0 });
+      void execute(next).finally(() => {
+        running.delete(next.run);
+        if (!next.run.controller.signal.aborted) {
+          durations.push(Date.now() - next.run.beganAt!);
+          if (durations.length > DURATION_SAMPLES) durations.shift();
+        }
+        pump();
+        broadcastQueue();
+      });
+    }
+  }
+
+  /** The code gate runs at once (it costs nothing); only a run that needs the renderer joins the line. */
+  async function admit(pending: Pending): Promise<void> {
+    const { run, bytes, mode } = pending;
     try {
-      // the code gate costs nothing: with code errors nothing is rendered or asked unless the caller insists (standalone)
       const code = await validate(bytes, { signal: run.controller.signal, onProgress: (event) => emit(run, "check", event) });
       emit(run, "gate", { result: code, passed: code.passed });
       if (code.passed !== true && !mode.standalone) {
         finish(run, { skipped: true, result: code, message: "Visual review was not started: fix the code checks first, or press Render and review anyway." });
+        conclude(run);
         return;
       }
+    } catch (error) {
+      fail(run, error);
+      conclude(run);
+      return;
+    }
+    waiting.push(pending);
+    log.info("run queued", { run: run.id, position: waiting.length, running: running.size });
+    broadcastQueue();
+    pump();
+  }
+
+  async function execute({ run, bytes, name, mode }: Pending): Promise<void> {
+    let services: RunServices | undefined;
+    try {
       const askModel = mode.model;
       const loaded = await loadInput(bytes, {});
       const thumbnail = loaded.ctx?.files.get(loaded.ctx.item.thumbnailPath ?? "thumbnail.png");
@@ -340,14 +450,9 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       await writeRun(run.dir, result, thumbnail);
       finish(run, { result }, { result: serializeResult(run, result), name });
     } catch (error) {
-      const message = run.controller.signal.aborted ? "The run was cancelled." : error instanceof Error ? error.message : "The run failed.";
-      emit(run, "error", { message });
+      fail(run, error);
     } finally {
-      run.done = true;
-      index.set(run.id, summarize(run));
-      active--;
-      for (const listener of run.listeners) listener.end();
-      run.listeners.clear();
+      conclude(run);
       await services?.stop?.().catch(() => {});
     }
   }
@@ -367,11 +472,11 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
     };
   }
 
-  function listRuns(owner: string): Omit<RunSummary, "owner" | "dir">[] {
+  function listRuns(owner: string): (Omit<RunSummary, "owner" | "dir"> & { queued: boolean })[] {
     return [...index.values()]
       .filter((run) => run.owner === owner)
       .sort((a, b) => b.startedAt - a.startedAt)
-      .map(({ id, name, startedAt, done, passed }) => ({ id, name, startedAt, done, passed }));
+      .map(({ id, name, startedAt, done, passed }) => ({ id, name, startedAt, done, passed, queued: waiting.some((pending) => pending.run.id === id) }));
   }
 
   /** Someone else's run is indistinguishable from no run at all. */
@@ -412,29 +517,18 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
     await indexed;
 
     if (parts[1] === "runs" && parts.length === 2 && req.method === "GET") return json(res, 200, { runs: listRuns(identity.owner) });
+    if (parts[1] === "queue" && parts.length === 2 && req.method === "GET") return json(res, 200, queueSnapshot(identity.owner));
 
     if (parts[1] === "runs" && parts.length === 2 && req.method === "POST") {
       if (crossSite(req)) return json(res, 403, { message: "Cross-site requests cannot start a run." });
       if (!isZipUpload(req)) return json(res, 415, { message: "Send the zip bytes with content-type: application/zip." });
       const name = fileName(req.headers["x-file-name"]);
       if (name === undefined) return json(res, 400, { message: "x-file-name must be a URL-encoded file name." });
-      if (active > 0) {
-        log.warn("run refused, another is active");
-        return json(res, 409, { message: "A run is already in progress. Wait for it to finish." });
-      }
-      // the lock is taken before the first await so two uploads arriving together cannot both start
-      active++;
-      try {
+      {
         const limit = options.maxUploadBytes ?? manifest.fileSize.maxInputBytes;
         const bytes = await readBody(req, limit).catch(() => undefined);
-        if (!bytes) {
-          active--;
-          return json(res, 413, { message: `The file is larger than ${limit} bytes.` });
-        }
-        if (bytes.length === 0) {
-          active--;
-          return json(res, 400, { message: "Send the zip bytes as the request body." });
-        }
+        if (!bytes) return json(res, 413, { message: `The file is larger than ${limit} bytes.` });
+        if (bytes.length === 0) return json(res, 400, { message: "Send the zip bytes as the request body." });
         const id = randomBytes(16).toString("hex");
         const dir = join(options.out, `visual-${name.replace(/\.zip$/i, "")}-${id}`);
         await mkdir(dir, { recursive: true });
@@ -447,12 +541,8 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
           if (old.done) runs.delete(oldId);
         }
         log.info("run accepted", { run: id, owner: identity.owner, file: name, bytes: bytes.length, model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1", dir });
-        json(res, 201, { id, events: `/api/runs/${id}/events` });
-        void execute(run, bytes, name, { model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1" });
-      } catch (error) {
-        // execute() releases the lock itself once it has started; anything that fails before that must not keep it
-        active--;
-        throw error;
+        json(res, 201, { id, events: `/api/runs/${id}/events`, queue: `/api/queue` });
+        void admit({ run, bytes, name, mode: { model: url.searchParams.get("model") !== "0", standalone: url.searchParams.get("standalone") === "1" } });
       }
       return;
     }
@@ -465,6 +555,14 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       if (crossSite(req)) return json(res, 403, { message: "Cross-site requests cannot cancel a run." });
       log.info("run cancelled by the client", { run: run.id });
       run.controller.abort();
+      const place = waiting.findIndex((pending) => pending.run === run);
+      if (place >= 0) {
+        // never started: leave the line and close the stream ourselves, there is no execute() to do it
+        waiting.splice(place, 1);
+        fail(run, undefined);
+        conclude(run);
+        broadcastQueue();
+      }
       return json(res, 202, { id: run.id, cancelled: true });
     }
     if (parts[3] === "events" && req.method === "GET") {
@@ -504,6 +602,10 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
     server,
     close: () =>
       new Promise((resolvePromise) => {
+        for (const pending of waiting.splice(0)) {
+          emit(pending.run, "error", { message: "The server is restarting. Start the run again in a moment." });
+          conclude(pending.run);
+        }
         for (const run of runs.values()) {
           run.controller.abort();
           for (const listener of run.listeners) listener.end();

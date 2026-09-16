@@ -7,6 +7,7 @@ const run = (done: boolean, passed: boolean | null) => ({ id: "r", name: "item.z
 describe("your runs chip", () => {
   it("shows a failure only for a failing verdict", () => {
     assert.deepEqual(runChip(run(false, null)), { status: "skipped", label: "Running" });
+    assert.deepEqual(runChip({ ...run(false, null), queued: true }), { status: "skipped", label: "Waiting" });
     assert.deepEqual(runChip(run(true, true)), { status: "passed", label: "Passed" });
     assert.deepEqual(runChip(run(true, false)), { status: "failed", label: "Needs attention" });
     assert.deepEqual(runChip(run(true, null)), { status: "skipped", label: "No verdict" });

@@ -44,6 +44,7 @@ To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.t
 | `CF_ACCESS_TEAM_DOMAIN` | from step 2 |
 | `CF_ACCESS_AUD` | from step 2 |
 | `ANTHROPIC_OAUTH_SETUP_TOKEN` | **secret** — a `claude setup-token` (`sk-ant-oat…`, valid about a year); the only model credential |
+| `MAX_CONCURRENT_RUNS` | `1` — renders at once; raise it with RAM (one per ~2 GB). Everyone else waits in the line the site shows |
 | `LOG_FORMAT` | `json` |
 | `ARTIFACTS_DIR` | `/app/packages/server/artifacts` — the container disk is ephemeral: every run folder vanishes on redeploy or restart |
 
@@ -87,6 +88,5 @@ Leave the token out and the server renders and writes the prompt without calling
 ## What is not done yet
 
 - ADR-44 signed fetch identity for the Builder (owner = wallet address). The seam is `packages/server/src/identity.ts` (`Identify`); `localIdentity` and `accessIdentity` are the two providers today.
-- A queue: a second concurrent upload still gets `409` (busy) instead of waiting.
 - Run retention: nothing deletes old run folders, and the App Platform disk forgets them on every deploy.
 - A daily spend cap on model calls.

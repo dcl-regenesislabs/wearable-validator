@@ -311,17 +311,129 @@ describe("run server", () => {
     assert.match(((await res.json()) as { message: string }).message, /larger than/);
   });
 
-  it("lets only one of two simultaneous uploads start", async () => {
+  it("accepts two simultaneous uploads and runs them one after the other", async () => {
     const zip = body(await syntheticZip());
     const [a, b] = await Promise.all([1, 2].map(() => fetch(`${base}/api/runs?model=0`, { method: "POST", body: zip, headers: { ...zipUpload, ...alice } })));
-    assert.deepEqual([a.status, b.status].sort(), [201, 409]);
-    const started = (await (a.status === 201 ? a : b).json()) as { id: string };
-    await readEvents(`${base}/api/runs/${started.id}/events`);
+    assert.deepEqual([a.status, b.status], [201, 201]);
+    for (const res of [a, b]) {
+      const { id } = (await res.json()) as { id: string };
+      const events = await readEvents(`${base}/api/runs/${id}/events`);
+      assert.equal(events.at(-1)?.type, "done");
+      assert.ok(events.some((event) => event.type === "queue" && event.data.position === 0), "every run hears when its turn comes");
+    }
+  });
+});
+
+interface QueueView {
+  running: { position: number; mine: boolean; id?: string; name?: string; since: number }[];
+  waiting: { position: number; mine: boolean; id?: string; name?: string; since: number }[];
+  averageRunMs: number | null;
+  maxConcurrentRuns: number;
+}
+
+/** Services that do not answer until the test says so, to hold a run in the render slot. */
+function heldServices(gate: { open: Promise<void> }, calls: { services: number; rendered: number[] }) {
+  const real = fakeServices(calls);
+  return async (run: RunSink) => {
+    await gate.open;
+    return real(run);
+  };
+}
+
+async function queueAs(base: string, headers: Record<string, string>): Promise<QueueView> {
+  return (await (await fetch(`${base}/api/queue`, { headers })).json()) as QueueView;
+}
+
+async function until<T>(read: () => Promise<T>, ok: (value: T) => boolean): Promise<T> {
+  for (let i = 0; i < 200; i++) {
+    const value = await read();
+    if (ok(value)) return value;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("condition not met in time");
+}
+
+describe("the waiting line", () => {
+  it("runs in arrival order, tells each run its place, names only your own items, and lets a waiting run leave", async () => {
+    const out = await mkdtemp(join(tmpdir(), "run-server-queue-"));
+    let release!: () => void;
+    const gate = { open: new Promise<void>((resolve) => (release = resolve)) };
+    const calls = { services: 0, rendered: [] as number[] };
+    const { base, close } = await listen({ out, services: heldServices(gate, calls) });
+    try {
+      const zip = await syntheticZip();
+      const a = await startRun(base, zip, "?model=0", alice);
+      const b = await startRun(base, zip, "?model=0", bob);
+      const c = await startRun(base, zip, "?model=0", alice);
+      const view = await until(() => queueAs(base, alice), (q) => q.running.length === 1 && q.waiting.length === 2);
+      assert.deepEqual(view.running.map((entry) => [entry.mine, entry.id]), [[true, a]]);
+      assert.deepEqual(view.waiting.map((entry) => [entry.position, entry.mine, entry.id, entry.name]), [[1, false, undefined, undefined], [2, true, c, "item.zip"]]);
+      assert.equal(view.averageRunMs, null, "no estimate before the first run finishes");
+      const bobView = await queueAs(base, bob);
+      assert.deepEqual(bobView.waiting.map((entry) => [entry.position, entry.mine, entry.id]), [[1, true, b], [2, false, undefined]]);
+      assert.equal(bobView.running[0].id, undefined);
+
+      const cEvents = (await (await fetch(`${base}/api/runs/${c}`, { headers: alice })).json()) as { events: Frame[] };
+      const told = cEvents.events.filter((event) => event.type === "queue").at(-1)!.data;
+      assert.equal(told.position, 2);
+      assert.equal(told.ahead, 2);
+      const mine = (await (await fetch(`${base}/api/runs`, { headers: alice })).json()) as { runs: (RunRow & { queued: boolean })[] };
+      assert.deepEqual(mine.runs.map((run) => [run.id, run.queued]), [[c, true], [a, false]]);
+
+      const cancelled = await fetch(`${base}/api/runs/${b}`, { method: "DELETE", headers: bob });
+      assert.equal(cancelled.status, 202);
+      const bEvents = await readEvents(`${base}/api/runs/${b}/events`, bob);
+      assert.equal(bEvents.at(-1)?.type, "error");
+      assert.match(String(bEvents.at(-1)?.data.message), /cancelled/);
+      const moved = await until(() => queueAs(base, alice), (q) => q.waiting.length === 1);
+      assert.deepEqual(moved.waiting.map((entry) => [entry.position, entry.id]), [[1, c]]);
+      const cAgain = (await (await fetch(`${base}/api/runs/${c}`, { headers: alice })).json()) as { events: Frame[] };
+      assert.equal(cAgain.events.filter((event) => event.type === "queue").at(-1)!.data.position, 1);
+
+      release();
+      const aEvents = await readEvents(`${base}/api/runs/${a}/events`);
+      assert.equal(aEvents.at(-1)?.type, "done");
+      const cDone = await readEvents(`${base}/api/runs/${c}/events`);
+      assert.equal(cDone.at(-1)?.type, "done");
+      assert.deepEqual(cDone.filter((event) => event.type === "queue").map((event) => event.data.position), [2, 1, 0]);
+      const after = await queueAs(base, alice);
+      assert.deepEqual([after.running.length, after.waiting.length], [0, 0]);
+      assert.ok(typeof after.averageRunMs === "number" && after.averageRunMs >= 0);
+    } finally {
+      await close();
+      await rm(out, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a run with code errors out of the line and runs two at once when allowed", async () => {
+    const out = await mkdtemp(join(tmpdir(), "run-server-queue2-"));
+    let release!: () => void;
+    const gate = { open: new Promise<void>((resolve) => (release = resolve)) };
+    const calls = { services: 0, rendered: [] as number[] };
+    const { base, close } = await listen({ out, services: heldServices(gate, calls), maxConcurrentRuns: 2 });
+    try {
+      const zip = await syntheticZip();
+      const a = await startRun(base, zip, "?model=0", alice);
+      const b = await startRun(base, zip, "?model=0", alice);
+      const broken = await startRun(base, await syntheticZip({ glb: await syntheticGlb({ triangles: 2000 }) }), "?model=0", alice);
+      const brokenEvents = await readEvents(`${base}/api/runs/${broken}/events`);
+      assert.equal(brokenEvents.at(-1)?.type, "done");
+      assert.equal(brokenEvents.at(-1)?.data.skipped, true);
+      assert.ok(!brokenEvents.some((event) => event.type === "queue"), "never joined the line");
+      const view = await until(() => queueAs(base, alice), (q) => q.running.length === 2);
+      assert.deepEqual(view.running.map((entry) => entry.id).sort(), [a, b].sort());
+      assert.equal(view.maxConcurrentRuns, 2);
+      release();
+      for (const id of [a, b]) assert.equal((await readEvents(`${base}/api/runs/${id}/events`)).at(-1)?.type, "done");
+    } finally {
+      await close();
+      await rm(out, { recursive: true, force: true });
+    }
   });
 });
 
 describe("a run folder that cannot be created", () => {
-  it("answers 500 without the path, and frees the run slot for the next upload", async () => {
+  it("answers 500 without the path", async () => {
     const parent = await mkdtemp(join(tmpdir(), "run-server-broken-"));
     const file = join(parent, "not-a-directory");
     await writeFile(file, "");
@@ -335,7 +447,7 @@ describe("a run folder that cannot be created", () => {
       assert.equal(answer.message, "Request failed.");
       assert.match(answer.reference, /^[0-9a-f]{8}$/);
       const second = await fetch(`${base}/api/runs?model=0`, { method: "POST", body: zip, headers: { ...zipUpload, ...bob } });
-      assert.equal(second.status, 500, "not 409: the failed upload did not keep the slot");
+      assert.equal(second.status, 500, "the failed upload left nothing behind");
     } finally {
       await close();
       await rm(parent, { recursive: true, force: true });

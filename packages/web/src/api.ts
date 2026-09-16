@@ -23,6 +23,31 @@ export interface RunSummary {
   startedAt: number;
   done: boolean;
   passed: boolean | null;
+  queued?: boolean;
+}
+
+/** What a waiting run is told as the line moves; position 0 means it is running. */
+export interface QueuePosition {
+  position: number;
+  ahead: number;
+  running: number;
+  averageRunMs: number | null;
+  etaMs: number | null;
+}
+
+export interface QueueEntry {
+  position: number;
+  mine: boolean;
+  id?: string;
+  name?: string;
+  since: number;
+}
+
+export interface QueueState {
+  running: QueueEntry[];
+  waiting: QueueEntry[];
+  averageRunMs: number | null;
+  maxConcurrentRuns: number;
 }
 
 export interface CaptureEvent {
@@ -44,6 +69,7 @@ export type RunEvent =
   | { type: "check"; data: ProgressEvent }
   | { type: "gate"; data: { result: Result; passed: boolean | null } }
   | { type: "stage"; data: { text: string } }
+  | { type: "queue"; data: QueuePosition }
   | { type: "capture"; data: CaptureEvent }
   | { type: "review"; data: ReviewEvent }
   | { type: "done"; data: { result?: WireResult; skipped?: boolean; message?: string } }
@@ -93,7 +119,7 @@ export async function startRun(bytes: Uint8Array, name: string, options: { model
   return { id: body.id };
 }
 
-const EVENT_TYPES: RunEvent["type"][] = ["check", "gate", "stage", "capture", "review", "done", "error"];
+const EVENT_TYPES: RunEvent["type"][] = ["check", "gate", "stage", "queue", "capture", "review", "done", "error"];
 
 /** Follows a run; the stream closes itself after `done` or `error`. Returns a stop function. */
 export function followRun(id: string, onEvent: (event: RunEvent) => void): () => void {
@@ -110,6 +136,17 @@ export function followRun(id: string, onEvent: (event: RunEvent) => void): () =>
     if (source.readyState === EventSource.CLOSED) return;
   };
   return () => source.close();
+}
+
+/** Who is rendering and who is waiting; other curators' items are unnamed. Null when the server is away. */
+export async function queueState(): Promise<QueueState | null> {
+  try {
+    const res = await fetch("/api/queue", { headers: { accept: "application/json" } });
+    if (!res.ok) return null;
+    return (await res.json()) as QueueState;
+  } catch {
+    return null;
+  }
 }
 
 export async function cancelRun(id: string): Promise<void> {
