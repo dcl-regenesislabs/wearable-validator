@@ -1,3 +1,5 @@
 node_modules/
 dist/
 tools/corpus/blobs/
+tools/artifacts/
+tools/renderer-build/

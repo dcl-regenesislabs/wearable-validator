@@ -32,6 +32,42 @@ export interface Manifest {
   gltf: { extensionAllowlist: string[]; unknownCodeSeverity: string; severityOverrides: Record<string, string> };
   hands: { minHandWeightRatio: number };
   thumbnail: { minTransparentPixelRatio: number; alphaThreshold: number };
+  /** The headless renderer, shared by every visual rule — read by /rendering and captures.ts. */
+  rendering: {
+    imageSizePx: number;
+    /** Bumped when the capture recipe (views, poses, scene) changes; part of every capture key. */
+    recipeVersion: number;
+    bodyShapes: string[];
+    /** The capture recipe every visual rule draws from: views × azimuths per body shape, clip fractions for emotes. */
+    views: { wearable: ("avatar" | "wearable")[]; emote: ("avatar" | "wearable")[] };
+    azimuthDegrees: { wearable: number[]; emote: number[] };
+    emoteFractions: number[];
+    maxCaptures: number;
+    profile: string; background: string; skin: string;
+    wearablePose: string; wearablePoseFraction: number;
+    navigationTimeoutMs: number; loadTimeoutMs: number; commandTimeoutMs: number; timeoutMs: number;
+    settleMs: number; stabilityMs: number; maxStabilityAttempts: number;
+    maxCaptureBytes: number;
+    /** Phase-0 lab parameters, read only by tools/src/renderer-probe.ts. */
+    probe: {
+      pausedObservationMs: number; poseFractions: number[];
+      cameraSideRadians: number; cameraElevationRadians: number; cameraZoomWorldUnits: number;
+      cameraPanTarget: { x: number; y: number; z: number }; chromaSkin: string;
+    };
+  };
+  /** The one vision call, shared by every AI-backed rule — read by /ai (maxTextLength also by answer parsers). */
+  ai: {
+    model: string; maxOutputTokens: number; maxInputTokens: number; maxImages: number; timeoutMs: number; maxRetries: number;
+    thinkingBudgetTokens: number; imagePixelsPerToken: number; textCharactersPerToken: number; maxTextLength: number;
+  };
+  /** V-01: how much of a capture must be something drawn. */
+  renderValid: { minSubjectRatio: number; backgroundTolerance: number };
+  /** V-05. */
+  thumbnailHonesty: { promptVersion: number; maxFindings: number };
+  /** V-02/V-03/V-04/V-06 in one review of the wearable captures. */
+  visualQuality: { promptVersion: number; maxFindings: number };
+  /** V-07 over the emote captures. */
+  emoteQuality: { promptVersion: number; maxFindings: number };
   receipts: Record<string, string>;
 }
 

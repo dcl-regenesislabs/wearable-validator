@@ -1,142 +1,158 @@
 {
-  "duration": {
-    "file": "src/checks/emote.ts",
-    "line": 102
+  "qr-code": {
+    "file": "src/checks/content/qr-code/index.ts",
+    "line": 9
   },
   "animation-clips": {
-    "file": "src/checks/emote.ts",
-    "line": 159
-  },
-  "bone-targets": {
-    "file": "src/checks/emote.ts",
-    "line": 226
-  },
-  "loop-seam": {
-    "file": "src/checks/emote.ts",
-    "line": 283
-  },
-  "root-motion": {
-    "file": "src/checks/emote.ts",
-    "line": 335
-  },
-  "clip-names": {
-    "file": "src/checks/emote.ts",
-    "line": 410
-  },
-  "props": {
-    "file": "src/checks/emote.ts",
-    "line": 453
+    "file": "src/checks/emote/animation-clips/index.ts",
+    "line": 6
   },
   "audio": {
-    "file": "src/checks/emote.ts",
-    "line": 569
+    "file": "src/checks/emote/audio/index.ts",
+    "line": 7
+  },
+  "bone-targets": {
+    "file": "src/checks/emote/bone-targets/index.ts",
+    "line": 8
+  },
+  "clip-names": {
+    "file": "src/checks/emote/clip-names/index.ts",
+    "line": 6
+  },
+  "duration": {
+    "file": "src/checks/emote/duration/index.ts",
+    "line": 6
+  },
+  "loop-seam": {
+    "file": "src/checks/emote/loop-seam/index.ts",
+    "line": 6
+  },
+  "props": {
+    "file": "src/checks/emote/props/index.ts",
+    "line": 8
+  },
+  "root-motion": {
+    "file": "src/checks/emote/root-motion/index.ts",
+    "line": 7
   },
   "social-outcomes": {
-    "file": "src/checks/emote.ts",
-    "line": 660
-  },
-  "file-format": {
-    "file": "src/checks/files.ts",
-    "line": 101
-  },
-  "gltf-valid": {
-    "file": "src/checks/files.ts",
-    "line": 204
-  },
-  "metadata": {
-    "file": "src/checks/files.ts",
-    "line": 246
-  },
-  "representations": {
-    "file": "src/checks/files.ts",
-    "line": 312
-  },
-  "file-size": {
-    "file": "src/checks/files.ts",
-    "line": 366
-  },
-  "thumbnail": {
-    "file": "src/checks/files.ts",
-    "line": 415
-  },
-  "name-description": {
-    "file": "src/checks/files.ts",
-    "line": 485
+    "file": "src/checks/emote/social-outcomes/index.ts",
+    "line": 6
   },
   "category": {
-    "file": "src/checks/files.ts",
-    "line": 534
+    "file": "src/checks/files/category/index.ts",
+    "line": 6
   },
   "content-integrity": {
-    "file": "src/checks/files.ts",
-    "line": 571
+    "file": "src/checks/files/content-integrity/index.ts",
+    "line": 6
+  },
+  "file-format": {
+    "file": "src/checks/files/file-format/index.ts",
+    "line": 9
+  },
+  "file-size": {
+    "file": "src/checks/files/file-size/index.ts",
+    "line": 7
   },
   "gltf-hygiene": {
-    "file": "src/checks/files.ts",
-    "line": 626
+    "file": "src/checks/files/gltf-hygiene/index.ts",
+    "line": 7
+  },
+  "gltf-valid": {
+    "file": "src/checks/files/gltf-valid/index.ts",
+    "line": 8
+  },
+  "metadata": {
+    "file": "src/checks/files/metadata/index.ts",
+    "line": 7
+  },
+  "name-description": {
+    "file": "src/checks/files/name-description/index.ts",
+    "line": 5
+  },
+  "representations": {
+    "file": "src/checks/files/representations/index.ts",
+    "line": 6
   },
   "smart-wearable": {
-    "file": "src/checks/files.ts",
-    "line": 723
+    "file": "src/checks/files/smart-wearable/index.ts",
+    "line": 7
   },
-  "triangle-count": {
-    "file": "src/checks/model-geometry.ts",
-    "line": 56
-  },
-  "bounding-box": {
-    "file": "src/checks/model-geometry.ts",
-    "line": 93
-  },
-  "skeleton": {
-    "file": "src/checks/model-geometry.ts",
-    "line": 126
+  "thumbnail": {
+    "file": "src/checks/files/thumbnail/index.ts",
+    "line": 7
   },
   "bone-weights": {
-    "file": "src/checks/model-geometry.ts",
-    "line": 223
+    "file": "src/checks/model/bone-weights/index.ts",
+    "line": 8
+  },
+  "bounding-box": {
+    "file": "src/checks/model/bounding-box/index.ts",
+    "line": 7
   },
   "hands-geometry": {
-    "file": "src/checks/model-geometry.ts",
-    "line": 300
+    "file": "src/checks/model/hands-geometry/index.ts",
+    "line": 9
   },
   "hides-replaces": {
-    "file": "src/checks/model-geometry.ts",
-    "line": 333
-  },
-  "static-mesh": {
-    "file": "src/checks/model-geometry.ts",
-    "line": 381
-  },
-  "spring-bones": {
-    "file": "src/checks/model-geometry.ts",
-    "line": 439
-  },
-  "texture-count": {
-    "file": "src/checks/model-materials.ts",
-    "line": 125
-  },
-  "texture-size": {
-    "file": "src/checks/model-materials.ts",
-    "line": 161
-  },
-  "texture-format": {
-    "file": "src/checks/model-materials.ts",
-    "line": 205
-  },
-  "texture-maps": {
-    "file": "src/checks/model-materials.ts",
-    "line": 257
+    "file": "src/checks/model/hides-replaces/index.ts",
+    "line": 6
   },
   "material-count": {
-    "file": "src/checks/model-materials.ts",
-    "line": 282
+    "file": "src/checks/model/material-count/index.ts",
+    "line": 7
   },
   "material-names": {
-    "file": "src/checks/model-materials.ts",
-    "line": 307
+    "file": "src/checks/model/material-names/index.ts",
+    "line": 9
   },
-  "qr-code": {
-    "file": "src/checks/qr-code.ts",
-    "line": 66
+  "skeleton": {
+    "file": "src/checks/model/skeleton/index.ts",
+    "line": 10
+  },
+  "spring-bones": {
+    "file": "src/checks/model/spring-bones/index.ts",
+    "line": 9
+  },
+  "static-mesh": {
+    "file": "src/checks/model/static-mesh/index.ts",
+    "line": 7
+  },
+  "texture-count": {
+    "file": "src/checks/model/texture-count/index.ts",
+    "line": 8
+  },
+  "texture-format": {
+    "file": "src/checks/model/texture-format/index.ts",
+    "line": 8
+  },
+  "texture-maps": {
+    "file": "src/checks/model/texture-maps/index.ts",
+    "line": 8
+  },
+  "texture-size": {
+    "file": "src/checks/model/texture-size/index.ts",
+    "line": 8
+  },
+  "triangle-count": {
+    "file": "src/checks/model/triangle-count/index.ts",
+    "line": 8
+  },
+  "emote-quality": {
+    "file": "src/checks/rendering/emote-quality/index.ts",
+    "line": 12
+  },
+  "render-valid": {
+    "file": "src/checks/rendering/render-valid/index.ts",
+    "line": 7
+  },
+  "thumbnail-honesty": {
+    "file": "src/checks/rendering/thumbnail-honesty/index.ts",
+    "line": 27
+  },
+  "visual-quality": {
+    "file": "src/checks/rendering/visual-quality/index.ts",
+    "line": 12
   }
 }

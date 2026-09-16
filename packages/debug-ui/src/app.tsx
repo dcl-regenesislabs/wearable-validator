@@ -19,6 +19,7 @@ import { limitFor } from "./limits.js";
 import { Preview } from "./preview.js";
 import { MetadataValues } from "./metadata-values.js";
 import { fetchItem, parseItemReference } from "./catalyst.js";
+import { VisualReview } from "./visual-review.js";
 
 const GROUP_LABELS: Record<Group, string> = {
   files: "Files & metadata",
@@ -27,12 +28,13 @@ const GROUP_LABELS: Record<Group, string> = {
   rendering: "Rendering",
   content: "Content"
 };
+const CODE_CHECK_COUNT = registry.filter((check) => check.group !== "rendering").length;
 const GROUP_ORDER: Group[] = ["files", "model", "emote", "content"];
 const GROUP_INTROS: Record<Group, string> = {
   files: "The cheapest checks run first: the package's files, sizes, metadata and integrity — everything knowable without opening the 3D model.",
   model: "The 3D model itself: geometry budgets, textures, materials, skeleton and skinning — parsed from the GLB and measured exactly.",
   emote: "The animation data: length, clips, bone targets, root motion and sound — measured from the keyframes.",
-  rendering: "Real renders inspected by pixel tests — arrives with the headless renderer.",
+  rendering: "Real renders reviewed against the thumbnail — rendered by the local run server (npm run serve) and streamed here as they happen.",
   content: "Deterministic content screening. The AI-based IP and policy checks arrive with the renderer."
 };
 const CATEGORIES = Object.keys(manifest.triangles.perCategory).concat(manifest.facialCategories);
@@ -263,7 +265,7 @@ export function App() {
           <span className="title">Wearable Validator</span>
         </div>
         <div className="top-meta">
-          rules <b>v{manifest.version}</b> · <b>{registry.length}</b> checks · runs in your browser
+          rules <b>v{manifest.version}</b> · <b>{CODE_CHECK_COUNT}</b> checks · runs in your browser
         </div>
       </header>
 
@@ -464,10 +466,11 @@ export function App() {
                 </section>
               );
             })}
+            {!loaded.isBareGlb && !loaded.files && <VisualReview bytes={loaded.bytes} name={loaded.name} codeResult={result} />}
             <footer className="foot">
               Checks that don't apply to this item (wrong item type, or metadata a bare .glb can't carry) aren't shown — that's
-              why fewer than {registry.length} appear. Rendering &amp; AI checks arrive with the renderer. Nothing leaves this
-              page: files are read and validated locally.
+              why fewer than {CODE_CHECK_COUNT} appear. Code checks never leave this page. The visual review, when a run server is
+              running, uploads the zip to it and streams the screenshots back.
             </footer>
           </main>
         </div>
@@ -588,7 +591,7 @@ function Verdict({ result, bare }: { result: Result; bare: boolean }) {
           <span className={`n${warnings ? " wrn" : ""}`}>{warnings}</span> warnings
         </div>
         <div>
-          <span className="n">{checked}</span> of {registry.length} checks apply
+          <span className="n">{checked}</span> of {CODE_CHECK_COUNT} checks apply
           {result.summary.skipped > 0 && <> · {result.summary.skipped} skipped</>}
         </div>
       </div>

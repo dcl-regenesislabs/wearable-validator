@@ -12,6 +12,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./rendering": {
+      "types": "./dist/adapters/rendering.d.ts",
+      "import": "./dist/adapters/rendering.js"
+    },
+    "./ai": {
+      "types": "./dist/adapters/ai.d.ts",
+      "import": "./dist/adapters/ai.js"
     }
   },
   "bin": {
@@ -27,7 +35,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test test/*.test.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\" \"test/*.test.ts\"",
     "gen:sources": "tsx generate-source-links.ts"
   },
   "dependencies": {
@@ -37,7 +45,7 @@
     "@gltf-transform/extensions": "^4.2.1",
     "commander": "^12.1.0",
     "fast-png": "^6.3.0",
-    "image-size": "^2.0.2",
+    "image-size": "^2.0.4",
     "jpeg-js": "^0.4.4",
     "jsqr": "^1.4.0",
     "jszip": "^3.10.1",
@@ -46,6 +54,23 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@earendil-works/pi-ai": "0.84.1",
+    "playwright-core": "1.63.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "0.84.1",
+    "playwright-core": "1.63.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "playwright-core": {
+      "optional": true
+    }
+  },
+  "imports": {
+    "#test/*": "./test/*"
   }
 }

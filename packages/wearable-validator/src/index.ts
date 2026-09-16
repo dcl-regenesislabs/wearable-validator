@@ -1,12 +1,9 @@
 export { validate } from "./validate.js";
-export { checks, registry, resolveCheck } from "./registry.js";
-export { explanations } from "./explanations.js";
-export { fixes } from "./fixes.js";
-export { details } from "./details.js";
+export { checks, registry, resolveCheck, explanations, fixes, details, docsUrl } from "./registry.js";
 export { sourceLinks } from "./source-links.js";
-export { docsUrl } from "./types.js";
 export { manifest, effectiveTriangleLimit, AVATAR_BONE_NAMES, AVATAR_CORE_BONE_NAMES } from "./manifest/index.js";
 export type {
   Input, Options, Result, Finding, CheckResult, CheckDefinition, CheckContext,
-  Group, Severity, CheckStatus, ItemType, NormalizedItem, ParsedModel
+  Group, Severity, CheckStatus, ItemType, NormalizedItem, ParsedModel, CheckExecution, ProgressEvent,
+  CaptureRequest, CaptureRecord, RenderInput, Renderer, Prompt, ReviewImage, ReviewRequest, ReviewMetadata, ReviewResult, Reviewer, Services
 } from "./types.js";

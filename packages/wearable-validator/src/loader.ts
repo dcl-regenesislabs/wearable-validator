@@ -1,8 +1,8 @@
 import JSZip from "jszip";
-import { isGlb, parseGlb } from "./gltf.js";
+import { isGlb, parseGlb } from "./logic/gltf.js";
 import { manifest } from "./manifest/index.js";
 import type { CheckContext, Finding, Input, InputKind, ItemType, MetadataMode, NormalizedItem, Options, ParsedModel } from "./types.js";
-import { docsUrl } from "./types.js";
+import { WEARABLES } from "./checks/docs.js";
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47];
 const MANIFEST_NAMES = ["wearable.json", "emote.json"];
@@ -14,7 +14,7 @@ export interface LoadedInput {
 }
 
 function fileFormatFinding(message: string, data?: Finding["data"]): Finding {
-  return { check: "file-format", group: "files", severity: "error", message, data, rule: "S-01", docs: docsUrl("file-format") };
+  return { check: "file-format", group: "files", severity: "error", message, data, rule: "S-01", docs: `${WEARABLES}#building-3d-models-for-wearables` };
 }
 
 export async function loadInput(input: Input, options: Options): Promise<LoadedInput> {

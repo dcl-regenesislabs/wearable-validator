@@ -1,0 +1,85 @@
+/** V-01 Renders at all — a model the previewer draws as nothing is broken for everyone, whatever the other rules say. */
+import { captureRequest, inputDigest, rendererBuild, resolveCaptures } from "../../../logic/captures.js";
+import { subjectRatio } from "../../../logic/pixels.js";
+import { finding, type CaptureRecord, type CaptureRequest, type CheckContext, type CheckDefinition, type CheckExecution, type CheckMeta, type Finding } from "../../../types.js";
+import { WEARABLES } from "../../docs.js";
+
+const meta: CheckMeta = { name: "render-valid", group: "rendering", rule: "V-01", docs: `${WEARABLES}#building-3d-models-for-wearables` };
+
+/** One front view per body shape: the item alone for wearables, the avatar at the clip start for emotes. */
+export async function renderValidRequests(ctx: CheckContext, build: string): Promise<CaptureRequest[] | string> {
+  const representations = ctx.item.representations;
+  if (!ctx.category || !representations?.length) return "Provide the item's category and declared body-shape representations to render it.";
+  for (const path of new Set(representations.flatMap((rep) => rep.contents))) {
+    if (!ctx.files.has(path)) return `Add the declared file "${path}" before rendering.`;
+  }
+  const digest = await inputDigest(ctx);
+  const requests: CaptureRequest[] = [];
+  for (const rep of representations) {
+    if (!rep.contents.includes(rep.mainFile) || !rep.bodyShapes.length) return "Each representation needs a body shape and its main file in contents.";
+    for (const bodyShape of rep.bodyShapes) {
+      if (!ctx.manifest.rendering.bodyShapes.includes(bodyShape)) return "Declare each supported body shape once, with its own representation.";
+      requests.push(await captureRequest(ctx, {
+        inputDigest: digest,
+        rendererBuild: build,
+        recipeVersion: ctx.manifest.rendering.recipeVersion,
+        bodyShape,
+        mainFile: rep.mainFile,
+        view: ctx.itemType === "wearable" ? "wearable" : "avatar",
+        azimuthDegrees: 0,
+        ...(ctx.itemType === "emote" ? { timeFraction: 0 } : {}),
+        size: ctx.manifest.rendering.imageSizePx
+      }));
+    }
+  }
+  return requests;
+}
+
+/** Captures whose subject share is under the manifest floor — the same test render-valid reports, reused as a guard by other rules. */
+export function emptyCaptures(ctx: CheckContext, captures: CaptureRecord[]): { capture: CaptureRecord; ratio: number }[] {
+  const { minSubjectRatio, backgroundTolerance } = ctx.manifest.renderValid;
+  const empty: { capture: CaptureRecord; ratio: number }[] = [];
+  for (const capture of captures) {
+    const ratio = subjectRatio(capture.bytes, backgroundTolerance) ?? 0;
+    if (ratio < minSubjectRatio) empty.push({ capture, ratio });
+  }
+  return empty;
+}
+
+const percent = (ratio: number): string => `${(ratio * 100).toFixed(1)}%`;
+
+function skipped(reason: string): CheckExecution {
+  return { status: "skipped", coverage: "missing", findings: [], reason };
+}
+
+export const renderValid: CheckDefinition = {
+  ...meta,
+  title: "Renders at all",
+  describe: "the item draws something visible on every declared body shape",
+  explanation: "Before anything else is judged, the item has to show up: a model that loads but draws nothing (missing textures, broken materials, wrong scale) is broken for everyone who equips it.",
+  fix: "Open the exported GLB in the Builder preview or Blender's glTF import. If it shows nothing, re-export with textures embedded, materials assigned, and the mesh at avatar scale (about 2 m tall).",
+  details: "Renders the item alone (wearables) or the avatar at the clip start (emotes) for each declared body shape, then measures how much of the frame is not backdrop: pixels farther than the manifest tolerance from their row's median. Below the manifest floor the view counts as empty.",
+  appliesTo: (ctx) =>
+    ctx.category && ctx.manifest.facialCategories.includes(ctx.category) ? "facial textures are not rendered on the avatar yet" : true,
+  run: async (ctx) => {
+    if (ctx.parseError) return skipped(`Fix the model before rendering it: ${ctx.parseError}`);
+    const build = rendererBuild(ctx);
+    if (!build) return skipped("Configure services.renderer to render the item, or supply captures from one renderer build.");
+    const requests = await renderValidRequests(ctx, build);
+    if (typeof requests === "string") return skipped(requests);
+    const captures = await resolveCaptures(ctx, requests);
+    if (typeof captures === "string") return skipped(captures);
+    const { minSubjectRatio } = ctx.manifest.renderValid;
+    const findings: Finding[] = emptyCaptures(ctx, captures).map(({ capture, ratio }) => {
+      const shape = capture.request.bodyShape.split(":").pop() ?? capture.request.bodyShape;
+      return finding(meta, "error",
+        `"${capture.request.mainFile}" renders as nothing visible on ${shape}: ${percent(ratio)} of the frame is drawn, the floor is ${percent(minSubjectRatio)}. Re-export with textures embedded and materials assigned, at avatar scale.`,
+        { where: capture.request.mainFile, measured: percent(ratio), limit: `≥ ${percent(minSubjectRatio)}`, evidence: [{ captureId: capture.request.id }] });
+    });
+    const ratios = captures.map((capture) => subjectRatio(capture.bytes, ctx.manifest.renderValid.backgroundTolerance) ?? 0);
+    const measured = `${captures.length} views · ${percent(Math.min(...ratios))} drawn at least`;
+    return findings.length
+      ? { status: "failed", coverage: "complete", findings, measured }
+      : { status: "passed", coverage: "complete", findings: [], measured };
+  }
+};

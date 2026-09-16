@@ -4,7 +4,7 @@ import { basename } from "node:path";
 import { Command } from "commander";
 import { validate } from "./validate.js";
 import { registry } from "./registry.js";
-import { explanations } from "./explanations.js";
+import { explanations } from "./registry.js";
 import type { Finding, Group, Result } from "./types.js";
 
 const program = new Command();
@@ -13,7 +13,7 @@ program.name("wearable-validator").description("The Decentraland wearable & emot
 program
   .command("validate")
   .argument("<file>", "wearable/emote .zip, bare .glb, or facial-feature .png")
-  .option("--groups <groups>", "comma-separated: files,model,emote,content")
+  .option("--groups <groups>", "comma-separated: files,model,emote,content,rendering")
   .option("--checks <checks>", "comma-separated check names (rule IDs like M-01 work as aliases)")
   .option("--category <category>", "category hint for bare GLBs (e.g. upper_body)")
   .option("--item-type <type>", "wearable | emote — overrides inference on bare GLBs")
@@ -45,7 +45,8 @@ program
   .description("list every check with its group and rule-book ID")
   .action(() => {
     for (const check of registry) {
-      console.log(`${check.name.padEnd(20)} ${check.group.padEnd(9)} ${check.rule.padEnd(6)} ${check.describe}`);
+      const prompt = check.prompt ? `  prompt v${check.prompt.version}` : "";
+      console.log(`${check.name.padEnd(20)} ${check.group.padEnd(9)} ${check.rule.padEnd(6)} ${check.describe}${prompt}`);
       console.log(`${" ".repeat(37)}${explanations[check.name] ?? ""}\n`);
     }
   });
@@ -67,6 +68,7 @@ function formatFinding(f: Finding): string {
   const head = `${icon} ${f.check}`.padEnd(22);
   const lines = [`${head}${f.message}`];
   if (f.where) lines.push(`${" ".repeat(22)}${f.where}`);
+  if (f.evidence?.length) lines.push(`${" ".repeat(22)}evidence: ${f.evidence.map((e) => e.captureId).join(", ")}`);
   lines.push(`${" ".repeat(22)}${f.docs}   (rule ${f.rule})`);
   return lines.join("\n");
 }
