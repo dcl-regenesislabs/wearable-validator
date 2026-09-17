@@ -505,7 +505,8 @@ export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: b
     const browser = await launchChromium(options);
     log("browser launched", { version: browser.version(), gpu: options.gpu, extraArgs: process.env.CHROMIUM_ARGS ?? "", ms: Date.now() - started });
     let closing: Promise<void> | undefined;
-    const close = () => (closing ??= browser.close());
+    // the log shows launched/closed pairs: an unclosed browser keeps a Unity engine spinning on the host
+    const close = () => (closing ??= browser.close().then(() => log("browser closed", { ms: Date.now() - started })));
     const abort = () => {
       void close();
     };
