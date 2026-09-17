@@ -11,3 +11,4 @@ packages/server/renderer-build/
 .env.*
 !.env.default
 packages/server/build-info.json
+deploy/.env
