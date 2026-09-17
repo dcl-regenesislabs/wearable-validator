@@ -500,6 +500,16 @@ describe("createRenderer", () => {
   });
 });
 
+describe("createRenderer timeouts", () => {
+  it("lets the host override the manifest's whole-capture timeout", async () => {
+    await withBuildDir(async (directory) => {
+      const slow = await createRenderer({ buildDirectory: directory, open: () => new Promise(() => {}), timeouts: { timeoutMs: 20 } });
+      await assert.rejects(slow.capture(input, recipe("build").slice(0, 1)), /did not finish within 20 ms/);
+      await slow.stop();
+    });
+  });
+});
+
 describe("captureAll", () => {
   it("issues one update per body shape and view", async () => {
     const wire = scripted();

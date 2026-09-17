@@ -446,8 +446,8 @@ export async function routeAssets(context: BrowserContext, assets?: LocalBuild, 
 }
 
 /** The default seam: one Chromium per session, closed on abort, on failure to load, and by close(). */
-export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: boolean; log?: RenderLog }): OpenPreview {
-  const settings = manifest.rendering;
+export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: boolean; log?: RenderLog; settings?: RenderTimeouts }): OpenPreview {
+  const settings = { ...manifest.rendering, ...options.settings };
   const log: RenderLog = options.log ?? (() => {});
   return async (signal) => {
     signal.throwIfAborted();
@@ -655,7 +655,11 @@ export interface RendererOptions {
   onCapture?: (capture: CaptureRecord) => void;
   /** Browser diagnostics for the host's log: launch, previewer load or failure, page errors, retries. */
   onLog?: RenderLog;
+  /** Operational overrides of the manifest timeouts: a slow host needs longer than a developer's machine. */
+  timeouts?: Partial<RenderTimeouts>;
 }
+
+export type RenderTimeouts = Pick<Manifest["rendering"], "navigationTimeoutMs" | "loadTimeoutMs" | "commandTimeoutMs" | "timeoutMs">;
 
 export async function createRenderer(options: RendererOptions): Promise<Renderer> {
   const assets = await readLocalBuild(options.buildDirectory);
@@ -669,7 +673,8 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     browserOptions,
     binaries: [...assets].map(([path, asset]) => [path, asset.sha256])
   });
-  const open = options.open ?? openPreview({ assets, ...browserOptions, log: options.onLog });
+  const timeouts: RenderTimeouts = { ...manifest.rendering, ...options.timeouts };
+  const open = options.open ?? openPreview({ assets, ...browserOptions, log: options.onLog, settings: timeouts });
   const active = new Map<AbortController, Promise<CaptureRecord[]>>();
   const pending = new Map<string, Promise<CaptureRecord[]>>();
   let stopped = false;
@@ -704,7 +709,7 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     signal?: AbortSignal
   ): Promise<CaptureRecord[]> {
     const abort = () => controller.abort();
-    const timeout = setTimeout(abort, manifest.rendering.timeoutMs);
+    const timeout = setTimeout(abort, timeouts.timeoutMs);
     signal?.addEventListener("abort", abort, { once: true });
     let session: PreviewSession | undefined;
     try {
@@ -720,7 +725,7 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
       if (controller.signal.aborted) {
         throw new Error(stopped
           ? "Rendering was stopped before the views were captured. Run the capture again."
-          : `Rendering did not finish within ${manifest.rendering.timeoutMs} ms. Retry the capture, or raise rendering.timeoutMs.`);
+          : `Rendering did not finish within ${timeouts.timeoutMs} ms. Retry the capture, or raise the render timeout.`);
       }
       throw error;
     } finally {
