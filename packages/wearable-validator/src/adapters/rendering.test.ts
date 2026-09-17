@@ -503,8 +503,10 @@ describe("createRenderer", () => {
 describe("createRenderer timeouts", () => {
   it("lets the host override the manifest's whole-capture timeout", async () => {
     await withBuildDir(async (directory) => {
-      const slow = await createRenderer({ buildDirectory: directory, open: () => new Promise(() => {}), timeouts: { timeoutMs: 20 } });
-      await assert.rejects(slow.capture(input, recipe("build").slice(0, 1)), /did not finish within 20 ms/);
+      // a browser that never comes up but honours the abort the timeout fires
+      const never = (signal: AbortSignal) => new Promise<PreviewSession>((_, reject) => signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+      const slow = await createRenderer({ buildDirectory: directory, open: never, timeouts: { timeoutMs: 20 } });
+      await assert.rejects(slow.capture(input, recipe(slow.buildId).slice(0, 1)), /did not finish within 20 ms/);
       await slow.stop();
     });
   });
