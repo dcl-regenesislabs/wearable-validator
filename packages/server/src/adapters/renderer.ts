@@ -32,12 +32,20 @@ export async function createRendererComponent(components: { config: IConfigCompo
   const chromiumArgs = await config.getString("CHROMIUM_ARGS");
   if (chromiumArgs !== undefined && process.env.CHROMIUM_ARGS === undefined) process.env.CHROMIUM_ARGS = chromiumArgs;
   if (!buildDirectory) log.warn("no Unity build found: visual runs will skip rendering (put the PR #10053 build in packages/server/renderer-build or set RENDERER_BUILD)");
+  // a slow host (few vCPUs, software rendering) needs longer per previewer command than the manifest assumes
+  const timeouts = {
+    commandTimeoutMs: await config.getNumber("RENDER_COMMAND_TIMEOUT_MS"),
+    loadTimeoutMs: await config.getNumber("RENDER_LOAD_TIMEOUT_MS"),
+    timeoutMs: await config.getNumber("RENDER_TOTAL_TIMEOUT_MS")
+  };
+  const overrides = Object.fromEntries(Object.entries(timeouts).filter(([, value]) => value !== undefined));
+  if (Object.keys(overrides).length) log.info("render timeouts overridden", overrides);
   return {
     available: Boolean(buildDirectory),
     buildDirectory,
     forRun: async (run) =>
       buildDirectory
-        ? createRenderer({ buildDirectory, onCapture: (capture) => void run.capture(capture), onLog: (message, fields) => log.info(message, { run: run.id, ...fields }) })
+        ? createRenderer({ buildDirectory, timeouts: overrides, onCapture: (capture) => void run.capture(capture), onLog: (message, fields) => log.info(message, { run: run.id, ...fields }) })
         : undefined
   };
 }
