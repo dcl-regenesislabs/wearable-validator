@@ -11,7 +11,7 @@ import { manifest } from "@dcl-regenesislabs/wearable-validator";
 import { createPiReviewer } from "@dcl-regenesislabs/wearable-validator/ai";
 import { createRenderer } from "@dcl-regenesislabs/wearable-validator/rendering";
 import { createAccessVerifier } from "./access.js";
-import { accessIdentity, localIdentity, type Identify } from "./identity.js";
+import { accessIdentity, firstOf, localIdentity, tokenIdentity, type Identify } from "./identity.js";
 import { createLogger } from "./log.js";
 import { dryRunReviewer, liveReviewer, recordingReviewer, tokenCredentials } from "./reviewers.js";
 import { createRunServer, isLoopback } from "./server.js";
@@ -22,13 +22,16 @@ const ROOT = resolve(import.meta.dirname, "../../..");
 function chooseIdentity(env: NodeJS.ProcessEnv, host: string): { identify: Identify; kind: string } {
   const teamDomain = env.CF_ACCESS_TEAM_DOMAIN;
   const audience = env.CF_ACCESS_AUD;
+  // the shared secret is checked first: it costs nothing and the bot is the only caller that carries it
+  const bot = env.OPERATOR_TOKEN ? tokenIdentity(env.OPERATOR_TOKEN) : undefined;
+  const withBot = (identify: Identify, kind: string) => ({ identify: bot ? firstOf(bot, identify) : identify, kind: bot ? `${kind} + operator token` : kind });
   if (teamDomain || audience) {
     if (!teamDomain || !audience) throw new Error("Set both CF_ACCESS_TEAM_DOMAIN (the team slug) and CF_ACCESS_AUD (the Access application audience tag).");
     const operators = (env.OPERATORS ?? "").split(",").map((email) => email.trim()).filter(Boolean);
-    return { identify: accessIdentity(createAccessVerifier({ teamDomain, audience }), operators), kind: `cloudflare-access (${teamDomain}${operators.length ? `, ${operators.length} operators` : ""})` };
+    return withBot(accessIdentity(createAccessVerifier({ teamDomain, audience }), operators), `cloudflare-access (${teamDomain}${operators.length ? `, ${operators.length} operators` : ""})`);
   }
-  if (isLoopback(host)) return { identify: localIdentity(), kind: "local" };
-  if (env.INSECURE_ANONYMOUS === "1") return { identify: localIdentity("anonymous"), kind: "anonymous" };
+  if (isLoopback(host)) return withBot(localIdentity(), "local");
+  if (env.INSECURE_ANONYMOUS === "1") return withBot(localIdentity("anonymous"), "anonymous");
   throw new Error(`HOST=${host} is reachable from other machines: set CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD, or INSECURE_ANONYMOUS=1 on a trusted network only.`);
 }
 

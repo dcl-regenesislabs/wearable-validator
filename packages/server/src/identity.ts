@@ -4,6 +4,7 @@
  * later ADR-44 signed fetch for the Builder (owner = wallet address) without touching server.ts.
  * Previous hop: main.ts picks the provider from the environment. Next hop: server.ts calls identify(req) per request.
  */
+import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { AccessVerifier } from "./access.js";
 
@@ -15,6 +16,30 @@ export interface Identity {
 }
 
 export type Identify = (req: IncomingMessage) => Promise<Identity | undefined>;
+
+/** One trusted machine caller (the Slack bot) with a shared secret: `Authorization: Bearer <OPERATOR_TOKEN>`, compared in constant time. */
+export function tokenIdentity(token: string, name = "bot"): Identify {
+  if (token.length < 32) throw new Error("OPERATOR_TOKEN must be at least 32 characters; generate it with `openssl rand -hex 32`.");
+  const expected = Buffer.from(token);
+  return async (req) => {
+    const header = req.headers.authorization;
+    const value = (Array.isArray(header) ? header[0] : header) ?? "";
+    if (!value.startsWith("Bearer ")) return undefined;
+    const given = Buffer.from(value.slice("Bearer ".length));
+    return given.length === expected.length && timingSafeEqual(given, expected) ? { owner: `service:${name}`, kind: "service", operator: true } : undefined;
+  };
+}
+
+/** Providers in order: the first one that recognises the caller wins. */
+export function firstOf(...providers: Identify[]): Identify {
+  return async (req) => {
+    for (const identify of providers) {
+      const identity = await identify(req);
+      if (identity) return identity;
+    }
+    return undefined;
+  };
+}
 
 /** Everyone is the same owner: the server is only reachable by whoever started it. */
 export function localIdentity(owner = "local"): Identify {

@@ -44,7 +44,8 @@ To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.t
 | `CF_ACCESS_TEAM_DOMAIN` | from step 2 |
 | `CF_ACCESS_AUD` | from step 2 |
 | `ANTHROPIC_OAUTH_SETUP_TOKEN` | **secret** — a `claude setup-token` (`sk-ant-oat…`, valid about a year); the only model credential |
-| `OPERATORS` | comma-separated emails that may read every curator's runs, the stats and the log (`/api/runs?all=1`, `/api/stats`, `/api/logs`). Service tokens are always operators |
+| `OPERATOR_TOKEN` | **secret** — `openssl rand -hex 32`; the Slack bot sends it as a Bearer token and becomes operator `service:bot` (step 5) |
+| `OPERATORS` | optional comma-separated curator emails that may also read every run, the stats and the log |
 | `MAX_CONCURRENT_RUNS` | `1` — renders at once; raise it with RAM (one per ~2 GB). Everyone else waits in the line the site shows |
 | `LOG_FORMAT` | `json` |
 | `CHROMIUM_ARGS` | leave unset: the image sets `--enable-features=Vulkan --use-vulkan=swiftshader --disable-dev-shm-usage` (the last one because App Platform gives `/dev/shm` only 64 MB; without it the previewer never reports load) |
@@ -60,13 +61,15 @@ Workers & Pages → `wearable-validator` → Settings → Build: build command `
 
 ### 5. The Slack bot (or any operator script)
 
-The bot needs its own identity, not a curator's login. Cloudflare Access service tokens do that:
+The bot is the one machine caller, so it gets a shared secret instead of a login:
 
-1. Zero Trust → Access controls → **Service credentials** → Create a service token, name `slack-bot`, duration as you like. Copy the **Client ID** and **Client Secret** once; the secret is never shown again.
-2. On the Access application (step 2) add a second policy: name `Bots`, action **Service Auth**, Include → **Service Token** → `slack-bot`. Keep the `Curators` Allow policy as it is.
-3. The bot calls the **site** hostname, not `api.`: `https://wearable-validator.dclregenesislabs.xyz/api/stats` with headers `CF-Access-Client-Id` and `CF-Access-Client-Secret`. Access swaps them for a JWT whose `common_name` is the token's name, the Worker forwards it, and the server treats `service:slack-bot` as an operator.
+1. Generate it once: `openssl rand -hex 32`.
+2. Validator app on App Platform → environment → `OPERATOR_TOKEN` = that value, encrypted. Redeploy.
+3. Slack bot → environment → `WEARABLE_VALIDATOR_TOKEN` = the same value, encrypted. Its `wearable-validator` skill calls `https://api.wearable-validator.dclregenesislabs.xyz` directly with `Authorization: Bearer <token>`; the server compares it in constant time and treats the caller as operator `service:bot`.
 
-Operator endpoints, all JSON: `GET /api/stats` (totals, by day, by curator, average render time, queue), `GET /api/runs?all=1` (every run with its owner), `GET /api/runs/<id>` for any run, `GET /api/logs?limit=200&since=<ISO time>` (the server's recent log lines, kept in memory since the last restart). The Slack bot's skill lives in the `slack-bot` repo under `skills/wearable-validator/`; it reads `WEARABLE_VALIDATOR_ACCESS_CLIENT_ID` and `WEARABLE_VALIDATOR_ACCESS_CLIENT_SECRET`.
+Check from a terminal: `curl -s -H "Authorization: Bearer <token>" https://api.wearable-validator.dclregenesislabs.xyz/api/stats` answers JSON.
+
+Operator endpoints, all read-only JSON: `GET /api/stats` (totals, by day, by curator, average render time, queue), `GET /api/runs?all=1` (every run with its owner), `GET /api/runs/<id>` for any run, `GET /api/logs?limit=200&since=<ISO time>` (the server's recent log lines, kept in memory since the last restart). Rotating the secret is changing the two variables. Cloudflare Access service tokens (a "Service Auth" policy on the application) are also accepted as operators, for a caller that should not hold a shared secret.
 
 ### 6. Smoke test
 
