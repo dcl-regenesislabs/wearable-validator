@@ -31,42 +31,26 @@ To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.t
 4. Save, then copy from the application's overview the **Application Audience (AUD) tag** → `CF_ACCESS_AUD`. The team domain is the slug before `.cloudflareaccess.com` (e.g. `dclregenesislabs`) → `CF_ACCESS_TEAM_DOMAIN`.
 5. Settings → Cookie settings → **SameSite attribute: Lax**, so the Access cookie never rides on a request another site starts (the server also refuses cross-site and non-`application/zip` uploads; this is the second lock).
 
-### 3. DigitalOcean App Platform (the run server)
+### 3. The run server on a droplet
 
-1. Create App → GitHub → this repo, branch `main`, source directory empty, **Autodeploy on push**. App Platform detects the root `Dockerfile` (that is why it lives there) and builds with it; no build or run command.
-2. Resource type Web Service, HTTP port `4180`.
-3. One instance with **4 GB RAM and 2 dedicated vCPUs** (rendering is software-only and CPU-bound; 1 vCPU risks command timeouts) (a render peaks at ~1.7 GB plus Chromium and Node; the server admits one run at a time. Measured in Docker with `--memory=2g`: a run completes at a 1.84 GiB peak, too tight to recommend).
-4. Health check: HTTP, path `/api/health`.
-5. Environment variables:
+Software rendering is CPU-bound: on App Platform's shared vCPUs the first view of a run took six minutes, and memory never passed 2 GB. A dedicated-CPU droplet is faster and cheaper than the equivalent App Platform tier, so that is where the server runs.
 
-| Variable | Value |
-| --- | --- |
-| `HOST` | `0.0.0.0` (alias of `HTTP_SERVER_HOST`; `PORT` likewise stands in for `HTTP_SERVER_PORT`) |
-| `PUBLIC_HOSTS` | `api.wearable-validator.dclregenesislabs.xyz` |
-| `CF_ACCESS_TEAM_DOMAIN` | from step 2 |
-| `CF_ACCESS_AUD` | from step 2 |
-| `ANTHROPIC_OAUTH_SETUP_TOKEN` | **secret** — a `claude setup-token` (`sk-ant-oat…`, valid about a year); the only model credential |
-| `OPERATOR_TOKEN` | **secret**, a long random string (32+ characters); the Slack bot sends it as a Bearer token and becomes operator `service:bot` (step 5) |
-| `OPERATORS` | optional comma-separated curator emails that may also read every run, the stats and the log |
-| `MAX_CONCURRENT_RUNS` | `1` — renders at once; raise it with RAM (one per ~2 GB). Everyone else waits in the line the site shows |
-| `LOG_FORMAT` | `json` |
-| `RENDER_COMMAND_TIMEOUT_MS` | optional; the manifest's 15 s per previewer command is tuned for a developer machine. On 2 vCPUs the first view alone took over a minute; set 120000 to measure how long each view really takes there (`captured … ms` lines) before choosing an instance size |
-| `CHROMIUM_PROFILE_DIR` | optional; where Chromium keeps its profile between runs. Default is a temp folder, which already saves the second run of a container most of its cold start; point it at a mounted volume to keep it across deploys. Empty disables it, and it is ignored above one concurrent run |
-| `CHROMIUM_ARGS` | leave unset: the image sets `--enable-features=Vulkan --use-vulkan=swiftshader --disable-dev-shm-usage` (the last one because App Platform gives `/dev/shm` only 64 MB; without it the previewer never reports load) |
-| `ARTIFACTS_DIR` | `/app/packages/server/artifacts` — the container disk is ephemeral: every run folder vanishes on redeploy or restart |
-| `MAX_UPLOAD_BYTES` | default `33554432` (32 MB); a larger upload answers 413 |
-| `UPLOAD_TIMEOUT_MS` | default `60000`; a request (headers and body) must arrive within it |
-| `MAX_ACTIVE_RUNS_PER_OWNER` | default `3` runs waiting or rendering per owner; the next answers 429 |
-| `MAX_WAITING_RUNS` | default `20` runs in the line; beyond it uploads answer 503 |
-| `MAX_RUNS_PER_OWNER_PER_DAY` | default `40` renders per owner per 24 h; the next answers 429 saying when a slot opens |
-| `MAX_SSE_LISTENERS_PER_RUN` | default `5` tabs following one run; the next answers 429 |
-| `WKC_METRICS_BEARER_TOKEN` | **secret** — required as `Authorization: Bearer` on `GET /metrics`; unset, anyone who reaches the port can read the metrics |
+1. Create a **CPU-Optimized droplet, 4 dedicated vCPUs / 8 GB**, Ubuntu with Docker preinstalled (the Docker Marketplace image). Nothing else runs on it.
+2. Cloudflare Zero Trust → Networks → Tunnels → create a tunnel, add a public hostname `api.wearable-validator.dclregenesislabs.xyz` pointing at `http://validator:4180`, and copy the tunnel token. The tunnel means the droplet needs no open port, no certificate and no firewall rules.
+3. On the droplet:
 
-Every key and its default is in `packages/server/.env.default` (committed, no secrets); the environment wins over it. Set a limit only to change it. The server reads no other `.env` file, and `.env` / `.env.*` are gitignored so a local copy holding a token is never committed.
+```sh
+git clone https://github.com/dcl-regenesislabs/wearable-validator.git
+cd wearable-validator
+cp deploy/env.example deploy/.env    # fill in the tunnel token, the setup token, OPERATOR_TOKEN, CF_ACCESS_*
+docker compose -f deploy/docker-compose.yml up -d --build
+docker compose -f deploy/docker-compose.yml logs -f validator
+```
 
-The server refuses to start on a non-loopback host without the two Access variables (unless `INSECURE_ANONYMOUS=1`, which makes every caller owner `anonymous` and is for local Docker smoke tests only).
+The first build takes a few minutes: it pulls the Playwright image, installs Chromium and downloads the pinned Unity build (§1). The log then shows the self-test: the dependencies it reached and whether WebGPU draws.
 
-6. Settings → Domains → add `api.wearable-validator.dclregenesislabs.xyz`; App Platform shows the CNAME target. In Cloudflare DNS create that CNAME, proxied (orange cloud), and set the zone's SSL/TLS mode to **Full (strict)**. If App Platform's certificate stays *Pending*, switch the record to *DNS only* until it shows *Active*, then turn the proxy on. The proxy is not a gate: the container trusts only JWTs whose signature, issuer and audience verify (`packages/server/src/adapters/access.ts`), and the Host check answers 403 on the `*.ondigitalocean.app` name.
+4. Redeploy after a merge: `git pull && docker compose -f deploy/docker-compose.yml up -d --build`.
+5. The named volumes keep run folders and Chromium's profile across restarts, so a restarted container renders warm (the App Platform disk forgot both).
 
 ### 4. Workers
 
