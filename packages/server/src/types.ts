@@ -5,6 +5,7 @@ import type { IIdentityComponent } from "./adapters/identity.js";
 import type { ILogBufferComponent } from "./adapters/log-buffer.js";
 import type { IRendererComponent } from "./adapters/renderer.js";
 import type { IReviewerComponent } from "./adapters/reviewer.js";
+import type { IBuildInfoComponent } from "./adapters/build-info.js";
 import type { ISiteComponent } from "./adapters/site.js";
 import type { IQueueComponent } from "./logic/queue.js";
 import type { IRunStoreComponent } from "./logic/run-store.js";
@@ -28,6 +29,7 @@ export type BaseComponents = {
   queue: IQueueComponent;
   runs: IRunsComponent;
   site: ISiteComponent;
+  buildInfo: IBuildInfoComponent;
 };
 
 export type AppComponents = BaseComponents & {

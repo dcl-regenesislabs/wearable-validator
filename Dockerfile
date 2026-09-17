@@ -3,6 +3,17 @@
 # Lives at the root so DigitalOcean App Platform detects it; the build context is the whole repo.
 # Run:  docker run --rm --shm-size=1g --memory=4g -p 4180:4180 -e ANTHROPIC_OAUTH_SETUP_TOKEN=... \
 #         -e CF_ACCESS_TEAM_DOMAIN=... -e CF_ACCESS_AUD=... wearable-validator-server
+# stage 1: the commit this image was built from, read from the checkout's .git (HEAD, refs and packed-refs are the
+# only .git files in the build context); the server shows it in /api/health so operators know what is running
+FROM alpine:3.20 AS gitinfo
+WORKDIR /src
+COPY .git .git
+RUN ref=$(sed -n 's/^ref: //p' .git/HEAD); \
+    if [ -n "$ref" ] && [ -f ".git/$ref" ]; then sha=$(cat ".git/$ref"); \
+    elif [ -n "$ref" ] && [ -f .git/packed-refs ]; then sha=$(grep " $ref$" .git/packed-refs | cut -c1-40); \
+    else sha=$(cat .git/HEAD); fi; \
+    printf '{"commit":"%s","builtAt":"%s"}' "${sha:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /build-info.json && cat /build-info.json
+
 FROM mcr.microsoft.com/playwright:v1.63.0-noble
 ARG RENDERER_BUILD_URL=https://github.com/dcl-regenesislabs/wearable-validator/releases/download/renderer-build-1/renderer-build.tar.gz
 ARG RENDERER_BUILD_SHA256=f5667806f56cfd5d7dc927540a29dcbb3ef21ad89a2ec3693673746472109fbf
@@ -22,6 +33,7 @@ RUN curl -fsSL "$RENDERER_BUILD_URL" -o /tmp/renderer-build.tar.gz \
 COPY tsconfig.base.json ./
 COPY packages/wearable-validator ./packages/wearable-validator
 COPY packages/server ./packages/server
+COPY --from=gitinfo /build-info.json ./packages/server/build-info.json
 ENV RENDERER_BUILD=/app/packages/server/renderer-build
 # Linux Chromium reaches SwiftShader WebGPU only through Vulkan; without those two flags pipeline creation fails.
 # Hosted containers (App Platform) give /dev/shm 64 MB, far too small for this page: --disable-dev-shm-usage moves

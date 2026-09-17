@@ -119,7 +119,10 @@ describe("run server", () => {
   after(() => stopAndClean(server));
 
   it("reports its capabilities, without identity, and names the caller when it can", async () => {
-    const health = (await (await fetch(`${base}/api/health`)).json()) as { ok: boolean; visual: { renderer: boolean; reviewer: string }; checks: string[]; rulesVersion: string; owner: string | null };
+    const health = (await (await fetch(`${base}/api/health`)).json()) as { ok: boolean; visual: { renderer: boolean; reviewer: string }; checks: string[]; rulesVersion: string; owner: string | null; build: { version: string; commit: string; builtAt: string | null; startedAt: number } };
+    assert.equal(health.build.commit, "dev", "a checkout has no build-info.json: the Docker image writes one from .git/HEAD");
+    assert.equal(health.build.builtAt, null);
+    assert.ok(health.build.startedAt > 0 && typeof health.build.version === "string");
     assert.equal(health.ok, true);
     assert.deepEqual(health.visual, { renderer: true, reviewer: "dry-run" });
     assert.deepEqual(health.checks, ["render-valid", "thumbnail-honesty", "visual-quality", "emote-quality"]);
