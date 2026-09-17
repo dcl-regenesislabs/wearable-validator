@@ -364,15 +364,20 @@ export const GPU_ARGS: Record<Gpu, string[]> = {
   hardware: ["--enable-unsafe-webgpu", "--ignore-gpu-blocklist"]
 };
 
+/** GPU flags plus the operator's CHROMIUM_ARGS, in launch order. */
+export function chromiumArgs(gpu: Gpu): string[] {
+  const extra = (process.env.CHROMIUM_ARGS ?? "").split(/\s+/).filter(Boolean);
+  return [...GPU_ARGS[gpu], ...extra];
+}
+
 export function launchChromium(options: { gpu: Gpu; headed?: boolean; executablePath?: string }): Promise<Browser> {
   // channel "chromium" full headless: the headless shell gives WebGPU errors and screenshot timeouts (install with --no-shell)
   // CHROMIUM_ARGS is an operator knob for platform-specific flags (Linux containers need Vulkan-backed SwiftShader); it never changes the pixels' provenance, which is why it is not part of buildId
-  const extra = (process.env.CHROMIUM_ARGS ?? "").split(/\s+/).filter(Boolean);
   return chromium.launch({
     channel: "chromium",
     headless: !options.headed,
     executablePath: options.executablePath,
-    args: [...GPU_ARGS[options.gpu], ...extra]
+    args: chromiumArgs(options.gpu)
   });
 }
 
@@ -495,29 +500,56 @@ export async function routeAssets(context: BrowserContext, assets?: LocalBuild, 
   };
 }
 
+export interface BrowserSeat {
+  context: BrowserContext;
+  version: string;
+  close(): Promise<void>;
+}
+
+/**
+ * A browser with one context. With `profileDirectory` Chromium keeps its caches there — the Unity WASM compile
+ * cache and the SwiftShader shader cache are most of a cold start — so the next run begins warm. One process at a
+ * time per profile: Chromium locks it.
+ */
+export async function openBrowserSeat(options: { assets?: LocalBuild; gpu: Gpu; headed?: boolean; profileDirectory?: string; size: number }): Promise<BrowserSeat> {
+  const viewport = { width: options.size, height: options.size };
+  if (options.profileDirectory) {
+    const context = await chromium.launchPersistentContext(options.profileDirectory, {
+      channel: "chromium",
+      headless: !options.headed,
+      args: chromiumArgs(options.gpu),
+      viewport,
+      serviceWorkers: "block"
+    });
+    return { context, version: context.browser()?.version() ?? "persistent", close: () => context.close() };
+  }
+  const browser = await launchChromium(options);
+  const context = await browser.newContext({ viewport, serviceWorkers: "block" });
+  return { context, version: browser.version(), close: () => browser.close() };
+}
+
 /** The default seam: one Chromium per session, closed on abort, on failure to load, and by close(). */
-export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: boolean; log?: RenderLog; settings?: RenderTimeouts }): OpenPreview {
+export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: boolean; log?: RenderLog; settings?: RenderTimeouts; profileDirectory?: string }): OpenPreview {
   const settings = { ...manifest.rendering, ...options.settings };
   const log: RenderLog = options.log ?? (() => {});
   return async (signal) => {
     signal.throwIfAborted();
     const started = Date.now();
-    const browser = await launchChromium(options);
-    log("browser launched", { version: browser.version(), gpu: options.gpu, extraArgs: process.env.CHROMIUM_ARGS ?? "", ms: Date.now() - started });
+    const seat = await openBrowserSeat({ ...options, size: settings.imageSizePx });
+    log("browser launched", { version: seat.version, gpu: options.gpu, extraArgs: process.env.CHROMIUM_ARGS ?? "", profile: options.profileDirectory ? "persistent" : "fresh", ms: Date.now() - started });
     let closing: Promise<void> | undefined;
-    const close = () => (closing ??= browser.close());
+    // the log shows launched/closed pairs: an unclosed browser keeps a Unity engine spinning on the host
+    const close = () => (closing ??= seat.close().then(() => log("browser closed", { ms: Date.now() - started })));
     const abort = () => {
       void close();
     };
     signal.addEventListener("abort", abort, { once: true });
     try {
       signal.throwIfAborted();
-      const context = await browser.newContext({
-        viewport: { width: settings.imageSizePx, height: settings.imageSizePx },
-        serviceWorkers: "block"
-      });
+      const context = seat.context;
       const health = await routeAssets(context, options.assets, log);
-      const page = await context.newPage();
+      // a persistent profile opens with one page already there
+      const page = context.pages()[0] ?? (await context.newPage());
       watchPage(page, log);
       const session = pageSession(page, settings);
       await mountPreview(page, previewUrl(), settings.imageSizePx);
@@ -707,6 +739,8 @@ export interface RendererOptions {
   onLog?: RenderLog;
   /** Operational overrides of the manifest timeouts: a slow host needs longer than a developer's machine. */
   timeouts?: Partial<RenderTimeouts>;
+  /** Chromium profile to keep between browsers, so the next cold start reuses the compiled WASM and shaders. */
+  profileDirectory?: string;
 }
 
 export type RenderTimeouts = Pick<Manifest["rendering"], "navigationTimeoutMs" | "loadTimeoutMs" | "commandTimeoutMs" | "timeoutMs">;
@@ -724,10 +758,35 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     binaries: [...assets].map(([path, asset]) => [path, asset.sha256])
   });
   const timeouts: RenderTimeouts = { ...manifest.rendering, ...options.timeouts };
-  const open = options.open ?? openPreview({ assets, ...browserOptions, log: options.onLog, settings: timeouts });
+  const open = options.open ?? openPreview({ assets, ...browserOptions, log: options.onLog, settings: timeouts, profileDirectory: options.profileDirectory });
   const active = new Map<AbortController, Promise<CaptureRecord[]>>();
   const pending = new Map<string, Promise<CaptureRecord[]>>();
   let stopped = false;
+
+  // One browser for the whole renderer, not one per capture(): booting the engine and loading the avatar is most of
+  // the cost, and a run asks for its views in two calls (the first rule's views, then the rest). stop() closes it.
+  const lifetime = new AbortController();
+  let session: Promise<PreviewSession> | undefined;
+  let queued: Promise<unknown> = Promise.resolve();
+
+  async function currentSession(): Promise<PreviewSession> {
+    session ??= open(lifetime.signal);
+    return session;
+  }
+
+  /** After a failure the engine's state is unknown: the next capture starts from a new browser. */
+  async function dropSession(): Promise<void> {
+    const closing = session;
+    session = undefined;
+    await closing?.then((value) => value.close()).catch(() => {});
+  }
+
+  /** Views share one engine, so captures run one after another even when two callers ask at once. */
+  function serialize<T>(work: () => Promise<T>): Promise<T> {
+    const result = queued.then(work, work);
+    queued = result.catch(() => {});
+    return result;
+  }
 
   // one browser per capture() — open → capture → close in finally; identical un-signalled requests share one promise; stop() aborts and rejects further work
   async function capture(input: RenderInput, requests: CaptureRequest[], signal?: AbortSignal): Promise<CaptureRecord[]> {
@@ -761,16 +820,18 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     const abort = () => controller.abort();
     const timeout = setTimeout(abort, timeouts.timeoutMs);
     signal?.addEventListener("abort", abort, { once: true });
-    let session: PreviewSession | undefined;
     try {
-      session = await open(controller.signal);
-      controller.signal.throwIfAborted();
-      // the site URL selects Babylon and a WebGPU fallback is not Unity evidence — a non-unity load closes the browser
-      if (session.engine !== "unity") {
-        throw new Error(`The preview loaded the ${session.engine} engine. Visual evidence requires the configured Unity build.`);
-      }
-      return await captureAll(session, input, requests, controller.signal, options.onCapture, options.onLog);
+      return await serialize(async () => {
+        const preview = await currentSession();
+        controller.signal.throwIfAborted();
+        // the site URL selects Babylon and a WebGPU fallback is not Unity evidence — a non-unity load closes the browser
+        if (preview.engine !== "unity") {
+          throw new Error(`The preview loaded the ${preview.engine} engine. Visual evidence requires the configured Unity build.`);
+        }
+        return await captureAll(preview, input, requests, controller.signal, options.onCapture, options.onLog);
+      });
     } catch (error) {
+      await dropSession();
       if (signal?.aborted) throw error; // the caller cancelled: let its AbortError through untouched
       if (controller.signal.aborted) {
         throw new Error(stopped
@@ -781,7 +842,6 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     } finally {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);
-      await session?.close();
     }
   }
 
@@ -789,6 +849,8 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     stopped = true;
     for (const controller of active.keys()) controller.abort();
     await Promise.allSettled(active.values());
+    lifetime.abort();
+    await dropSession();
   }
 
   return { buildId, capture, stop };
