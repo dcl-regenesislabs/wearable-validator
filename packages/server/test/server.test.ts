@@ -273,8 +273,8 @@ describe("run server", () => {
     assert.ok((await listAs(base, bob)).every((row) => row.id !== id), "bob's list never shows alice's run");
     const bobsLines = server.lines.filter((line) => line.message === "request" && line.extra.owner === "bob");
     assert.deepEqual(bobsLines.map((line) => [line.level, line.extra.route, line.extra.status]), [
-      ["INFO", "/api/runs/:id", 404], ["INFO", "/api/runs/:id/events", 404], ["INFO", "/api/runs/:id/(.*)", 404], ["INFO", "/api/runs/:id", 404], ["INFO", "/api/runs", 200]
-    ], "a thrown 404 is logged as the 404 the client got, never as a 500");
+      ["INFO", "/api/runs/:id", 404], ["INFO", "/api/runs/:id/events", 404], ["INFO", "/api/runs/:id/(.*)", 404], ["INFO", "/api/runs/:id", 404], ["DEBUG", "/api/runs", 200]
+    ], "a thrown 404 is logged as the 404 the client got, never as a 500; the site's list polling stays at debug");
   });
 
   it("serves Prometheus metrics at /metrics, behind the bearer token when one is set", async () => {

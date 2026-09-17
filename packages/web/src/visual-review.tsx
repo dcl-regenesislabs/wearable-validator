@@ -326,11 +326,17 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
   useEffect(() => {
     if (!serverKnown) return;
     let alive = true;
+    let last = "";
     const read = () => void queueState().then((q) => {
       if (!alive) return;
       setQueue(q);
       setNow(Date.now());
-      if (q && (q.running.length > 0 || q.waiting.length > 0)) refreshRuns();
+      // the run list only changes when the line does: one extra request per change, not per poll
+      const shape = q ? [...q.running, ...q.waiting].map((entry) => `${entry.id ?? "?"}:${entry.position}`).join(",") : "";
+      if (shape !== last) {
+        last = shape;
+        refreshRuns();
+      }
     });
     read();
     const timer = setInterval(read, QUEUE_POLL_MS);
