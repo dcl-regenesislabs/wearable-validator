@@ -9,6 +9,7 @@ import { createIdentityComponent } from "./adapters/identity.js";
 import { appLogger, createLogBufferComponent } from "./adapters/log-buffer.js";
 import { createRendererComponent } from "./adapters/renderer.js";
 import { createReviewerComponent } from "./adapters/reviewer.js";
+import { createBuildInfoComponent } from "./adapters/build-info.js";
 import { createSiteComponent } from "./adapters/site.js";
 import { createQueueComponent } from "./logic/queue.js";
 import { createRunStoreComponent } from "./logic/run-store.js";
@@ -63,6 +64,7 @@ export async function createBaseComponents(config: IConfigComponent, logs: ILogg
   });
   const runs = await createRunsComponent({ config, logs: logBuffer, metrics, runStore, queue, renderer, reviewer });
   const site = await createSiteComponent({ config, logs: logBuffer });
+  const buildInfo = await createBuildInfoComponent();
 
   appLogger(logBuffer, "server").info("run server configured", {
     host: await config.requireString("HTTP_SERVER_HOST"),
@@ -73,11 +75,14 @@ export async function createBaseComponents(config: IConfigComponent, logs: ILogg
     identity: identity.kind,
     concurrentRuns: queue.maxConcurrent,
     rules: manifest.version,
+    version: buildInfo.version,
+    commit: buildInfo.commit,
+    builtAt: buildInfo.builtAt ?? "checkout",
     artifacts: runStore.root,
     site: site.root ?? "not built (run npm run build -w wearable-validator-web, or use the Vite dev server)"
   });
 
-  return { config, logs: logBuffer, logBuffer, server, metrics, identity, renderer, reviewer, runStore, queue, runs, site };
+  return { config, logs: logBuffer, logBuffer, server, metrics, identity, renderer, reviewer, runStore, queue, runs, site, buildInfo };
 }
 
 export async function initComponents(): Promise<AppComponents> {
