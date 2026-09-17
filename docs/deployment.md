@@ -51,6 +51,7 @@ To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.t
 | `MAX_CONCURRENT_RUNS` | `1` — renders at once; raise it with RAM (one per ~2 GB). Everyone else waits in the line the site shows |
 | `LOG_FORMAT` | `json` |
 | `RENDER_COMMAND_TIMEOUT_MS` | optional; the manifest's 15 s per previewer command is tuned for a developer machine. On 2 vCPUs the first view alone took over a minute; set 120000 to measure how long each view really takes there (`captured … ms` lines) before choosing an instance size |
+| `CHROMIUM_PROFILE_DIR` | optional; where Chromium keeps its profile between runs. Default is a temp folder, which already saves the second run of a container most of its cold start; point it at a mounted volume to keep it across deploys. Empty disables it, and it is ignored above one concurrent run |
 | `CHROMIUM_ARGS` | leave unset: the image sets `--enable-features=Vulkan --use-vulkan=swiftshader --disable-dev-shm-usage` (the last one because App Platform gives `/dev/shm` only 64 MB; without it the previewer never reports load) |
 | `ARTIFACTS_DIR` | `/app/packages/server/artifacts` — the container disk is ephemeral: every run folder vanishes on redeploy or restart |
 | `MAX_UPLOAD_BYTES` | default `33554432` (32 MB); a larger upload answers 413 |
