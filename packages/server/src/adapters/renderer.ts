@@ -1,15 +1,17 @@
 /** The Unity renderer as a component: one browser per run, its captures and diagnostics routed to the run's stream and the log. */
-import { stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { IConfigComponent, ILoggerComponent } from "@well-known-components/interfaces";
 import type { Renderer } from "@dcl-regenesislabs/wearable-validator";
 import { createRenderer } from "@dcl-regenesislabs/wearable-validator/rendering";
 import type { RunSink } from "../types.js";
-import { appLogger } from "./log-buffer.js";
+import { appLogger, type AppLogger } from "./log-buffer.js";
 
 const ROOT = resolve(import.meta.dirname, "../../../..");
 // packages/server/renderer-build is the gitignored home for the PR #10053 Unity build, so RENDERER_BUILD is optional once it is there
 const DEFAULT_BUILD = join(ROOT, "packages/server/renderer-build");
+const DEFAULT_PROFILE = join(tmpdir(), "wearable-validator-chromium");
 
 export interface IRendererComponent {
   readonly available: boolean;
@@ -22,6 +24,29 @@ export interface IRendererComponent {
 export async function resolveBuildDirectory(configured: string | undefined, env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
   if (configured) return resolve(env.INIT_CWD ?? process.cwd(), configured);
   return stat(join(DEFAULT_BUILD, "avatar-preview-renderer.wasm")).then(() => DEFAULT_BUILD).catch(() => undefined);
+}
+
+/**
+ * Where Chromium keeps its profile between runs: the compiled WASM, the shaders and the avatar the previewer
+ * downloads are most of a cold start. Chromium locks a profile, so it is only safe while one run renders at a time.
+ */
+export async function resolveProfileDirectory(config: IConfigComponent, log: AppLogger): Promise<string | undefined> {
+  const configured = await config.getString("CHROMIUM_PROFILE_DIR");
+  if (configured === "") return undefined;
+  const concurrent = (await config.getNumber("MAX_CONCURRENT_RUNS")) ?? 1;
+  if (concurrent > 1) {
+    log.warn("MAX_CONCURRENT_RUNS above 1: every render starts from a cold browser (Chromium locks one profile at a time)", { concurrent });
+    return undefined;
+  }
+  const directory = configured ? resolve(process.env.INIT_CWD ?? process.cwd(), configured) : DEFAULT_PROFILE;
+  try {
+    await mkdir(directory, { recursive: true });
+    log.info("browser profile kept between runs", { directory });
+    return directory;
+  } catch (error) {
+    log.warn("cannot keep a browser profile: every render starts cold", { directory, error: error instanceof Error ? error.message : String(error) });
+    return undefined;
+  }
 }
 
 export async function createRendererComponent(components: { config: IConfigComponent; logs: ILoggerComponent }): Promise<IRendererComponent> {
@@ -40,12 +65,13 @@ export async function createRendererComponent(components: { config: IConfigCompo
   };
   const overrides = Object.fromEntries(Object.entries(timeouts).filter(([, value]) => value !== undefined));
   if (Object.keys(overrides).length) log.info("render timeouts overridden", overrides);
+  const profileDirectory = await resolveProfileDirectory(config, log);
   return {
     available: Boolean(buildDirectory),
     buildDirectory,
     forRun: async (run) =>
       buildDirectory
-        ? createRenderer({ buildDirectory, timeouts: overrides, onCapture: (capture) => void run.capture(capture), onLog: (message, fields) => log.info(message, { run: run.id, ...fields }) })
+        ? createRenderer({ buildDirectory, timeouts: overrides, profileDirectory, onCapture: (capture) => void run.capture(capture), onLog: (message, fields) => log.info(message, { run: run.id, ...fields }) })
         : undefined
   };
 }
