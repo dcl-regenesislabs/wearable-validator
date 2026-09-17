@@ -14,6 +14,7 @@ import { decode } from "fast-png";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import playwright from "playwright-core/package.json" with { type: "json" };
 import { digest, digestJson } from "../logic/captures.js";
+import { imageDimensions } from "../logic/images.js";
 import { manifest, type Manifest } from "../manifest/index.js";
 import build from "./rendering-build.json" with { type: "json" };
 import type { CaptureRecord, CaptureRequest, Renderer, RenderInput } from "../types.js";
@@ -22,6 +23,30 @@ import type { CaptureRecord, CaptureRequest, Renderer, RenderInput } from "../ty
 export const PREVIEW_URL = `https://cdn.decentraland.org/@dcl/wearable-preview/${build.previewVersion}/`;
 /** Fulfilled from memory with the page that holds the iframe — never fetched. */
 export const PREVIEW_HOST_URL = "https://preview-host.invalid/";
+/** Beyond the host page and the wrapper CDN, the wrapper only needs Decentraland's own services (profiles, base-avatar content). */
+const BROWSER_ALLOWED_DOMAIN = "decentraland.org";
+const BROWSER_ALLOWED_HOSTS = new Set([new URL(PREVIEW_HOST_URL).hostname, new URL(PREVIEW_URL).hostname]);
+
+/** Whether Chromium may send this request: https to an allowlisted host — creator content loaded in the page reaches nothing else. */
+export function browserRequestAllowed(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  const host = parsed.hostname;
+  return BROWSER_ALLOWED_HOSTS.has(host) || host === BROWSER_ALLOWED_DOMAIN || host.endsWith(`.${BROWSER_ALLOWED_DOMAIN}`);
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.slice(0, 253);
+  } catch {
+    return "(unparsable)";
+  }
+}
 
 export type Gpu = "hardware" | "software";
 
@@ -170,6 +195,7 @@ async function recentPreviewEvents(page: Page, count = 6): Promise<unknown[]> {
 
 // Unity repeats the same warning every frame: each distinct line is logged once per page, and only so many
 const MAX_PAGE_LINES = 20;
+const MAX_BLOCKED_HOSTS_LOGGED = 10;
 
 /** Page-level trouble an operator needs to see: crashes, uncaught errors, console errors, failed requests. */
 function watchPage(page: Page, log: RenderLog): void {
@@ -185,7 +211,11 @@ function watchPage(page: Page, log: RenderLog): void {
   page.on("console", (message) => {
     if (message.type() === "error") once("browser console error", { text: message.text().slice(0, 300) });
   });
-  page.on("requestfailed", (request) => once("browser request failed", { url: request.url().slice(0, 200), error: request.failure()?.errorText }));
+  page.on("requestfailed", (request) => {
+    const error = request.failure()?.errorText;
+    if (error?.includes("BLOCKED_BY_CLIENT")) return; // routeAssets already logged the blocked host, without the URL
+    once("browser request failed", { url: request.url().slice(0, 200), error });
+  });
 }
 
 export function previewUrl(engine: "unity" | "babylon" = "unity"): string {
@@ -347,16 +377,36 @@ export function launchChromium(options: { gpu: Gpu; headed?: boolean; executable
 }
 
 /** Without `assets` the deployed binaries are served (the probe's baseline) — still pinned by hash. */
-export async function routeAssets(context: BrowserContext, assets?: LocalBuild): Promise<{ assertHealthy(): void }> {
+export async function routeAssets(context: BrowserContext, assets?: LocalBuild, log: RenderLog = () => {}): Promise<{ assertHealthy(): void }> {
   let error: string | undefined;
-  // contentsquare/sentry aborted; serviceWorkers blocked; the host page is fulfilled with minimal HTML that holds the iframe
+  // registered first so every later route is consulted before it: whatever no other route handles is aborted unless the host is allowlisted
+  const blocked = new Set<string>();
+  const block = (url: string) => {
+    const host = hostOf(url);
+    if (blocked.has(host) || blocked.size > MAX_BLOCKED_HOSTS_LOGGED) return;
+    blocked.add(host);
+    // content can ask for any number of hostnames: the operator log names the first few and then says only that there were more
+    if (blocked.size > MAX_BLOCKED_HOSTS_LOGGED) log("browser requests blocked from more hosts than are listed", { listed: MAX_BLOCKED_HOSTS_LOGGED });
+    else log("browser request blocked", { host });
+  };
+  await context.route("**/*", (route) => {
+    const url = route.request().url();
+    if (browserRequestAllowed(url)) return route.continue();
+    block(url);
+    return route.abort("blockedbyclient");
+  });
+  // context.route never sees WebSockets; the wrapper opens none, so every socket is closed unanswered
+  await context.routeWebSocket("**/*", (socket) => {
+    block(socket.url());
+    socket.close({ code: 1008, reason: "blocked" });
+  });
+  // the host page is fulfilled with minimal HTML that holds the iframe; the wrapper's analytics hosts fall to the catch-all above
   await context.route(PREVIEW_HOST_URL, (route) =>
     route.fulfill({
       contentType: "text/html",
       body: "<!doctype html><title>Visual evidence</title>"
     })
   );
-  await context.route(/contentsquare\.net|sentry\.io/, (route) => route.abort());
   await context.route(`${PREVIEW_URL}**`, async (route) => {
     const path = new URL(route.request().url()).pathname.slice(new URL(PREVIEW_URL).pathname.length);
     // deployed 2.20.0 ignores camera changes and draws the avatar in item-only view; only unity/Build/* is served locally, the JS wrapper stays pinned
@@ -416,7 +466,7 @@ export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: b
         viewport: { width: settings.imageSizePx, height: settings.imageSizePx },
         serviceWorkers: "block"
       });
-      const health = await routeAssets(context, options.assets);
+      const health = await routeAssets(context, options.assets, log);
       const page = await context.newPage();
       watchPage(page, log);
       const session = pageSession(page, settings);
@@ -461,6 +511,11 @@ export async function screenshot(session: PreviewSession, size = manifest.render
     throw new Error("The preview did not return a PNG screenshot.");
   }
   const bytes = Buffer.from(data.slice(data.indexOf(",") + 1), "base64");
+  // the header is checked before decoding so a wrong-sized answer never inflates
+  const header = imageDimensions(bytes);
+  if (!header || header.width !== size || header.height !== size) {
+    throw new Error("The preview returned the wrong screenshot size.");
+  }
   const png = decode(bytes);
   if (png.width !== size || png.height !== size) {
     throw new Error("The preview returned the wrong screenshot size.");

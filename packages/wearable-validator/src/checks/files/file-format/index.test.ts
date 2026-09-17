@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { validate } from "../../../index.js";
-import { pngBytes, syntheticZip } from "#test/helpers/synthetic.js";
+import { pngBytes, pngHeaderBytes, syntheticZip } from "#test/helpers/synthetic.js";
 import { enc } from "#test/helpers/bytes.js";
 import { only } from "#test/helpers/findings.js";
 import { wearableManifest } from "#test/helpers/manifest.js";
@@ -31,6 +31,14 @@ describe("file-format (S-01)", () => {
     const findings = only((await validate(pngBytes(300, 300), { category: "eyes", checks: ["file-format"] })).findings, "file-format");
     assert.equal(findings.length, 1);
     assert.equal(findings[0].severity, "error");
+    assert.equal(findings[0].limit, "256×256");
+  });
+
+  it("errors from the header alone on a facial-feature PNG claiming bomb-sized dimensions", async () => {
+    const findings = only((await validate(pngHeaderBytes(12000, 12000), { category: "eyes", checks: ["file-format"] })).findings, "file-format");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].severity, "error");
+    assert.equal(findings[0].measured, "12000×12000");
     assert.equal(findings[0].limit, "256×256");
   });
 

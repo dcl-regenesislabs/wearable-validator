@@ -318,6 +318,53 @@ export function pngBytes(width: number, height: number, opaque = false, channels
   return encodePng({ width, height, data, channels });
 }
 
+/** Only a PNG signature and IHDR claiming `width`×`height` RGBA — what a decode bomb's header looks like; there is no pixel data behind it. */
+export function pngHeaderBytes(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(33);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(8, 13);
+  bytes.set([0x49, 0x48, 0x44, 0x52], 12);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  bytes.set([8, 6, 0, 0, 0], 24);
+  return bytes;
+}
+
+/** The same PNG with a tEXt chunk spliced in before IHDR: fast-png still decodes it, a header reader that expects IHDR first does not. */
+export function pngWithLeadingChunk(png: Uint8Array): Uint8Array {
+  const text = new TextEncoder().encode("Comment\0made for the header test");
+  const chunk = new Uint8Array(12 + text.length);
+  const view = new DataView(chunk.buffer);
+  view.setUint32(0, text.length);
+  chunk.set([0x74, 0x45, 0x58, 0x74], 4);
+  chunk.set(text, 8);
+  view.setUint32(8 + text.length, pngCrc(chunk.subarray(4, 8 + text.length)));
+  const out = new Uint8Array(png.length + chunk.length);
+  out.set(png.subarray(0, 8), 0);
+  out.set(chunk, 8);
+  out.set(png.subarray(8), 8 + chunk.length);
+  return out;
+}
+
+/** The same JPEG with two 0xFF fill bytes after SOI: jpeg-js skips them, a strict marker walk stops. */
+export function jpegWithFillBytes(jpeg: Uint8Array): Uint8Array {
+  const out = new Uint8Array(jpeg.length + 2);
+  out.set(jpeg.subarray(0, 2), 0);
+  out.set([0xff, 0xff], 2);
+  out.set(jpeg.subarray(2), 4);
+  return out;
+}
+
+function pngCrc(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 /** A 16-bit-per-channel RGBA PNG (texture-format failing case). */
 export function png16Bytes(width: number, height: number): Uint8Array {
   const data = new Uint16Array(width * height * 4);

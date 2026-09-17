@@ -6,3 +6,7 @@ tools/artifacts/
 packages/server/artifacts/
 packages/server/renderer-build/
 .wrangler/
+# local overrides next to .env.default hold secrets
+.env
+.env.*
+!.env.default

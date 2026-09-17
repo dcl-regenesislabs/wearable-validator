@@ -124,16 +124,21 @@ const EVENT_TYPES: RunEvent["type"][] = ["check", "gate", "stage", "queue", "cap
 /** Follows a run; the stream closes itself after `done` or `error`. Returns a stop function. */
 export function followRun(id: string, onEvent: (event: RunEvent) => void): () => void {
   const source = new EventSource(`/api/runs/${id}/events`);
+  let received = false;
   for (const type of EVENT_TYPES) {
     source.addEventListener(type, (raw) => {
+      received = true;
       const event = { type, data: JSON.parse((raw as MessageEvent<string>).data) } as RunEvent;
       onEvent(event);
       if (type === "done" || type === "error") source.close();
     });
   }
   source.onerror = () => {
-    // EventSource reconnects on its own; a closed stream after done/error is not an error
-    if (source.readyState === EventSource.CLOSED) return;
+    // EventSource reconnects on its own and closes itself after done/error; closed before any event means the server said no
+    // (429 too many tabs, 404 not yours) with a body EventSource cannot read
+    if (source.readyState !== EventSource.CLOSED || received) return;
+    received = true;
+    onEvent({ type: "error", data: { message: "Could not follow this run: too many tabs are open on it, or it is not yours." } });
   };
   return () => source.close();
 }

@@ -4,14 +4,22 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "start": "tsx src/main.ts",
-    "review": "tsx src/review.ts",
+    "start": "tsx src/index.ts",
+    "review": "tsx src/cli/review.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@dcl-regenesislabs/wearable-validator": "*",
+    "@dcl/core-commons": "^0.11.0",
+    "@dcl/http-commons": "^2.0.1",
+    "@dcl/http-server": "^2.4.0",
+    "@dcl/metrics": "^1.0.1",
     "@earendil-works/pi-ai": "0.84.1",
+    "@well-known-components/env-config-provider": "^1.2.0",
+    "@well-known-components/interfaces": "^1.5.2",
+    "@well-known-components/logger": "^3.1.3",
+    "fast-png": "^6.3.0",
     "playwright-core": "1.63.0",
     "tsx": "^4.20.0"
   },

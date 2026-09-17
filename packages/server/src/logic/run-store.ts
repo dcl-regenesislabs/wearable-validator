@@ -1,15 +1,14 @@
-/**
- * Run folders on disk: captures, prompt, context, answer, finding, gallery — the boundary of one visual review,
- * written so a human can open it and a later run can reuse its views (docs/visual-validation.md §3).
- * Previous hop: server.ts (each streamed run) and review.ts (the CLI) call writeRun()/readRun(); reviewers.ts
- * records every model call through promptMarkdown() and contextJson().
- * Next hop: readRun() hands CaptureRecords back to validate(), whose resolveCaptures() re-verifies each one.
- */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+/** Run folders on disk (docs/visual-validation.md §3) and the index of every run this server has seen. */
+import { mkdir, readdir, readFile, rm, stat, writeFile, appendFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import type { Context } from "@earendil-works/pi-ai";
+import { START_COMPONENT, type IBaseComponent, type IConfigComponent, type ILoggerComponent } from "@well-known-components/interfaces";
 import { digest, type CaptureRecord, type CaptureRequest, type CheckResult, type Finding, type Result, type ReviewRequest } from "@dcl-regenesislabs/wearable-validator";
 import { reviewMessages } from "@dcl-regenesislabs/wearable-validator/ai";
+import { appLogger } from "../adapters/log-buffer.js";
+import type { RunEvent } from "../types.js";
+
+const ROOT = resolve(import.meta.dirname, "../../../..");
 
 export function readEvidenceFile(path: string): Promise<Buffer> {
   if (basename(path).startsWith(".env")) throw new Error("Choose an item or evidence file, not an environment file.");
@@ -205,4 +204,108 @@ export async function writeRun(dir: string, result: Result, thumbnail?: Uint8Arr
   const index = join(dir, "index.html");
   await writeFile(index, galleryHtml(result, attachments));
   return index;
+}
+
+// ---- the component -------------------------------------------------------------------------
+
+export interface StoredRun {
+  id: string;
+  owner: string;
+  name: string;
+  dir: string;
+  startedAt: number;
+  done: boolean;
+  passed: boolean | null;
+  /** Whether the run reached the renderer (input.json carries the zip's sha256 from that moment on): what the daily quota counts. */
+  rendered: boolean;
+}
+
+export interface IRunStoreComponent extends IBaseComponent {
+  readonly root: string;
+  /** Resolves once the folders on disk are indexed; every lookup awaits it so a restart never hides a run. */
+  ready(): Promise<void>;
+  get(id: string): StoredRun | undefined;
+  set(run: StoredRun): void;
+  all(): StoredRun[];
+  previousRun(sha256: string): string | undefined;
+  rememberRun(sha256: string, dir: string): void;
+  createRunDir(id: string, name: string): Promise<string>;
+  writeInput(dir: string, input: RunInput): Promise<void>;
+  /** The queued upload stays on disk (input.zip) until its turn, so a waiting run holds no RAM. */
+  writeUpload(dir: string, bytes: Uint8Array): Promise<void>;
+  readUpload(dir: string): Promise<Uint8Array>;
+  discardUpload(dir: string): Promise<void>;
+  appendEvent(dir: string, event: RunEvent): Promise<void>;
+  /** One capture as it lands, before writeRun() lists them all; the id is checked to be a safe file stem. */
+  writeCapture(dir: string, id: string, bytes: Uint8Array): Promise<void>;
+  writeRun(dir: string, result: Result, thumbnail?: Uint8Array): Promise<string>;
+  readRun(dir: string): Promise<CaptureRecord[]>;
+  readResult(dir: string): Promise<StoredResult | undefined>;
+}
+
+/** The default artifacts folder; a relative ARTIFACTS_DIR is taken from where the command was typed (INIT_CWD under npm -w). */
+export function resolveArtifactsDir(configured: string | undefined, env: NodeJS.ProcessEnv = process.env): string {
+  return resolve(env.INIT_CWD ?? process.cwd(), configured ?? join(ROOT, "packages/server/artifacts"));
+}
+
+/**
+ * Run folders remember which zip they came from and who started them (input.json): the newest per zip offers its
+ * captures to the next run of the same file, and every owned folder is listed and served again after a restart.
+ */
+async function indexRunFolders(root: string, previous: Map<string, string>, index: Map<string, StoredRun>): Promise<void> {
+  const entries = await readdir(root).catch(() => [] as string[]);
+  const reusable: { sha256: string; dir: string; mtime: number }[] = [];
+  for (const entry of entries) {
+    if (!entry.startsWith("visual-")) continue;
+    const dir = join(root, entry);
+    const input = await readRunInput(dir);
+    if (!input) continue;
+    if (input.sha256) {
+      const info = await stat(join(dir, "captures", "captures.json")).catch(() => undefined);
+      if (info) reusable.push({ sha256: input.sha256, dir, mtime: info.mtimeMs });
+    }
+    if (input.id && input.owner && !index.has(input.id)) {
+      const result = await readRunResult(dir);
+      index.set(input.id, { id: input.id, owner: input.owner, name: input.name ?? entry, dir, startedAt: input.startedAt ?? 0, done: true, passed: result ? verdict(result) : null, rendered: input.sha256 !== undefined });
+    }
+  }
+  for (const item of reusable.sort((a, b) => a.mtime - b.mtime)) if (!previous.has(item.sha256)) previous.set(item.sha256, item.dir);
+}
+
+export async function createRunStoreComponent(components: { config: IConfigComponent; logs: ILoggerComponent }): Promise<IRunStoreComponent> {
+  const { config, logs } = components;
+  const log = appLogger(logs, "run-store");
+  const root = resolveArtifactsDir(await config.getString("ARTIFACTS_DIR"));
+  const index = new Map<string, StoredRun>();
+  const previous = new Map<string, string>();
+  const indexed = indexRunFolders(root, previous, index).catch((error) => log.warn("could not index earlier runs", { error: error instanceof Error ? error.message : String(error) }));
+
+  return {
+    root,
+    ready: () => indexed,
+    [START_COMPONENT]: () => indexed,
+    get: (id) => index.get(id),
+    set: (run) => void index.set(run.id, run),
+    all: () => [...index.values()],
+    previousRun: (sha256) => previous.get(sha256),
+    rememberRun: (sha256, dir) => void previous.set(sha256, dir),
+    createRunDir: async (id, name) => {
+      const dir = join(root, `visual-${name.replace(/\.zip$/i, "")}-${id}`);
+      await mkdir(dir, { recursive: true });
+      return dir;
+    },
+    writeInput: writeRunInput,
+    writeUpload: (dir, bytes) => writeFile(join(dir, "input.zip"), bytes),
+    readUpload: async (dir) => new Uint8Array(await readFile(join(dir, "input.zip"))),
+    discardUpload: (dir) => rm(join(dir, "input.zip"), { force: true }),
+    appendEvent: (dir, event) => appendFile(join(dir, "events.jsonl"), JSON.stringify(event) + "\n"),
+    writeCapture: async (dir, id, bytes) => {
+      if (!/^[\w.-]+$/.test(id)) throw new Error(`Capture id "${id}" is not a safe file stem.`);
+      await mkdir(join(dir, "captures"), { recursive: true });
+      await writeFile(join(dir, "captures", `${id}.png`), bytes);
+    },
+    writeRun,
+    readRun,
+    readResult: readRunResult
+  };
 }

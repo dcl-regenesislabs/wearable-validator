@@ -40,15 +40,20 @@ export const thumbnail: CheckDefinition = {
         limit: thumbnailBytes
       });
     }
+    // the header decides before any pixel is decoded: an oversized thumbnail is never inflated
+    const header = imageDimensions(bytes);
+    if (header && (header.width > thumbnailMaxSize || header.height > thumbnailMaxSize)) {
+      const dims = `${header.width}×${header.height}`;
+      f("error", `Thumbnail is ${dims} — no dimension may exceed ${thumbnailMaxSize}px.`, { measured: dims, limit: `${thumbnailMaxSize}×${thumbnailMaxSize}` });
+      return findings;
+    }
     const img = decodePngSafe(bytes);
     if (!img) {
       f("error", `Thumbnail "${path}" could not be decoded — re-export it as a standard PNG.`);
       return findings;
     }
     const dims = `${img.width}×${img.height}`;
-    if (img.width > thumbnailMaxSize || img.height > thumbnailMaxSize) {
-      f("error", `Thumbnail is ${dims} — no dimension may exceed ${thumbnailMaxSize}px.`, { measured: dims, limit: `${thumbnailMaxSize}×${thumbnailMaxSize}` });
-    } else if (img.width !== img.height || img.width !== thumbnailRecommendedSize) {
+    if (img.width !== img.height || img.width !== thumbnailRecommendedSize) {
       f("warning", `Thumbnail is ${dims} — a square ${thumbnailRecommendedSize}×${thumbnailRecommendedSize} PNG is recommended.`, {
         measured: dims,
         limit: `${thumbnailRecommendedSize}×${thumbnailRecommendedSize}`

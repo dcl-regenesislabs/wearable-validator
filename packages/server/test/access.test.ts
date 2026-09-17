@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { createAccessVerifier, type AccessJwk } from "../src/access.js";
+import { certsUrl, createAccessVerifier, type AccessJwk } from "../src/adapters/access.js";
 
 const TEAM = "example-team";
 const AUD = "aud-tag-1234";
@@ -115,5 +115,51 @@ describe("Cloudflare Access verifier", () => {
       throw new Error("Cloudflare Access certs answered 503.");
     });
     await assert.rejects(failing.verify(token(current, claims())), /503/);
+  });
+
+  it("keeps serving cached keys through a failed refresh and tries again after it", async () => {
+    const unknown = pair("kid-unknown");
+    const clock = { now: NOW_MS };
+    let calls = 0;
+    const verify = verifier(async () => {
+      if (++calls === 2) throw new Error("Cloudflare Access certs answered 503.");
+      return [current.jwk];
+    }, clock);
+    assert.deepEqual(await verify.verify(token(current, claims())), { email: "curator@example.com", sub: "user-1" });
+    clock.now += 61_000;
+    await assert.rejects(verify.verify(token(unknown, claims())), /503/, "the caller hears that the certs are unreachable");
+    assert.equal(calls, 2);
+    assert.deepEqual(await verify.verify(token(current, claims())), { email: "curator@example.com", sub: "user-1" }, "the keys fetched before the failure still serve");
+    assert.equal(calls, 2);
+    clock.now += 61_000;
+    assert.equal(await verify.verify(token(unknown, claims())), undefined);
+    assert.equal(calls, 3, "the failed refresh left nothing pending: the next interval asks again");
+  });
+});
+
+describe("the certs fetch", () => {
+  it("gives up on a hanging certs endpoint within the timeout instead of holding every sign-in", { timeout: 20_000 }, async () => {
+    const original = globalThis.fetch;
+    const seen: { url: string; aborted: Promise<string> }[] = [];
+    // a certs endpoint that never answers: only the request's own signal can end the wait
+    globalThis.fetch = (input, init) => {
+      const signal = init?.signal;
+      if (!signal) return Promise.reject(new Error("the certs fetch carried no AbortSignal"));
+      const aborted = new Promise<string>((resolve) => signal.addEventListener("abort", () => resolve(String((signal.reason as { name?: string })?.name))));
+      seen.push({ url: String(input), aborted });
+      return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
+    };
+    try {
+      const verify = createAccessVerifier({ teamDomain: TEAM, audience: AUD });
+      const began = Date.now();
+      await assert.rejects(verify.verify(token(current, claims())), /TimeoutError|aborted/i);
+      const elapsed = Date.now() - began;
+      assert.ok(elapsed >= 4_000 && elapsed < 10_000, `answered after ${elapsed} ms`);
+      assert.equal(seen.length, 1);
+      assert.equal(seen[0].url, certsUrl(TEAM));
+      assert.equal(await seen[0].aborted, "TimeoutError");
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

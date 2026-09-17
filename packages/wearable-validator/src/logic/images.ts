@@ -1,6 +1,6 @@
 /** Byte-level image helpers shared by checks and adapters — no decoding beyond what a header needs. */
-import { imageSize } from "image-size";
 import { decode as decodePng } from "fast-png";
+import { manifest } from "../manifest/index.js";
 
 export function isPngBytes(bytes: Uint8Array): boolean {
   return bytes.length > 25 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
@@ -10,15 +10,65 @@ export function isJpegBytes(bytes: Uint8Array): boolean {
   return bytes.length > 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
 }
 
-/** Header dimensions of a PNG or JPEG; undefined for anything else (texture-format reports that). Other formats never reach image-size's parsers. */
-export function imageDimensions(bytes: Uint8Array): { width: number; height: number } | undefined {
-  if (!isPngBytes(bytes) && !isJpegBytes(bytes)) return undefined;
-  try {
-    const { width, height } = imageSize(bytes);
-    return { width, height };
-  } catch {
-    return undefined;
+export interface ImageDimensions {
+  width: number;
+  height: number;
+}
+
+// enough chunks to reach IHDR behind any metadata a real encoder writes; a file that hides it deeper is not decoded
+const MAX_PNG_CHUNKS_BEFORE_IHDR = 64;
+
+/** IHDR wherever it sits before the pixel data — fast-png accepts a PNG whose first chunk is metadata, so the header check must too. */
+function pngDimensions(bytes: Uint8Array): ImageDimensions | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 8;
+  for (let chunk = 0; chunk < MAX_PNG_CHUNKS_BEFORE_IHDR && offset + 8 <= bytes.length; chunk++) {
+    const length = view.getUint32(offset);
+    const type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+    if (type === "IHDR") {
+      if (length < 8 || offset + 16 > bytes.length) return undefined;
+      return { width: view.getUint32(offset + 8), height: view.getUint32(offset + 12) };
+    }
+    if (type === "IDAT" || type === "IEND") return undefined;
+    offset += 12 + length;
   }
+  return undefined;
+}
+
+/** The SOF segment, walking markers the way jpeg-js does (fill bytes skipped): precision, height, width. */
+function jpegFrame(bytes: Uint8Array): { precision: number; width: number; height: number } | undefined {
+  let i = 2;
+  while (i + 4 < bytes.length) {
+    if (bytes[i] !== 0xff) { i++; continue; }
+    const marker = bytes[i + 1];
+    if (marker === 0xff) { i++; continue; }
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; }
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      if (i + 9 > bytes.length) return undefined;
+      return { precision: bytes[i + 4], height: (bytes[i + 5] << 8) | bytes[i + 6], width: (bytes[i + 7] << 8) | bytes[i + 8] };
+    }
+    const length = (bytes[i + 2] << 8) | bytes[i + 3];
+    i += 2 + length;
+  }
+  return undefined;
+}
+
+/**
+ * Header dimensions of a PNG or JPEG, read the way the decoders read them; undefined for anything else and for a
+ * header that cannot be read — which every decode path treats as "do not decode", never as "small enough".
+ */
+export function imageDimensions(bytes: Uint8Array): ImageDimensions | undefined {
+  const dimensions = isPngBytes(bytes) ? pngDimensions(bytes) : isJpegBytes(bytes) ? jpegFrame(bytes) : undefined;
+  return dimensions && dimensions.width > 0 && dimensions.height > 0 ? { width: dimensions.width, height: dimensions.height } : undefined;
+}
+
+/**
+ * Whether an image may be decoded to pixels: a readable header whose width × height is within the budget.
+ * A decoded image costs at least 4 bytes per pixel, so a 12000×12000 PNG of a few hundred KB inflates past a gigabyte.
+ */
+export function fitsDecodeBudget(bytes: Uint8Array, maxPixels = manifest.images.maxDecodePixels): boolean {
+  const dimensions = imageDimensions(bytes);
+  return dimensions !== undefined && dimensions.width * dimensions.height <= maxPixels;
 }
 
 /** PNG alpha: IHDR color type 4 (gray+alpha) / 6 (RGBA), or palette (3) with a tRNS chunk. */
@@ -33,21 +83,9 @@ export function pngHasAlpha(bytes: Uint8Array): boolean {
   return false;
 }
 
-/** JPEG SOF precision (bits per channel) — scans markers for SOF0..SOF15 (minus DHT/JPG/DAC). */
+/** JPEG SOF precision (bits per channel). */
 export function jpegPrecision(bytes: Uint8Array): number | undefined {
-  let i = 2;
-  while (i + 4 < bytes.length) {
-    if (bytes[i] !== 0xff) { i++; continue; }
-    const marker = bytes[i + 1];
-    if (marker === 0xff) { i++; continue; }
-    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; }
-    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-      return bytes[i + 4];
-    }
-    const length = (bytes[i + 2] << 8) | bytes[i + 3];
-    i += 2 + length;
-  }
-  return undefined;
+  return jpegFrame(bytes)?.precision;
 }
 
 export interface DecodedPng {
@@ -58,8 +96,9 @@ export interface DecodedPng {
   data: Uint8Array | Uint16Array;
 }
 
-/** Full PNG decode that never throws; the data view is always indexable as bytes or 16-bit samples. */
+/** Full PNG decode that never throws and never decodes an unreadable header or one above the pixel budget; the data view is always indexable as bytes or 16-bit samples. */
 export function decodePngSafe(bytes: Uint8Array): DecodedPng | undefined {
+  if (!fitsDecodeBudget(bytes)) return undefined;
   try {
     const img = decodePng(bytes);
     // fast-png may hand back a Uint8ClampedArray — view it as Uint8Array (same buffer, same indexing).

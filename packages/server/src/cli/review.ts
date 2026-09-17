@@ -1,22 +1,19 @@
-/**
- * CLI runner for the rendering group: code gate → adapters → validate() → run folder, from a terminal instead of the website.
- * Previous hop: `npm run review -- <item.zip>` with a Builder zip on disk.
- * Next hop: validate() selects the rendering checks; runs.ts writes the folder, reviewers.ts wraps the model call —
- * the same pieces server.ts streams to the web app.
- */
-import { existsSync } from "node:fs";
+/** CLI runner for the rendering group: code gate → adapters → validate() → run folder, from a terminal instead of the website. */
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { loadInput, registry, validate, type Result, type Services } from "@dcl-regenesislabs/wearable-validator";
+import { loadInput, validate, type Result, type Services } from "@dcl-regenesislabs/wearable-validator";
 import { createPiReviewer } from "@dcl-regenesislabs/wearable-validator/ai";
 import { createRenderer } from "@dcl-regenesislabs/wearable-validator/rendering";
-import { DRY_RUN_REASON, dryRunReviewer, recordingReviewer, replayReviewer, tokenCredentials } from "./reviewers.js";
-import { readEvidenceFile, readRun, usageLine, writeRun } from "./runs.js";
+import { resolveBuildDirectory } from "../adapters/renderer.js";
+import { dryRunReviewer, recordingReviewer, replayReviewer, tokenCredentials } from "../adapters/reviewer.js";
+import { readEvidenceFile, readRun, resolveArtifactsDir, usageLine, writeRun } from "../logic/run-store.js";
+import { VISUAL_CHECKS } from "../logic/runs.js";
 
-const ROOT = resolve(import.meta.dirname, "../../..");
-const VISUAL_CHECKS = registry.filter((check) => check.group === "rendering").map((check) => check.name);
+const NO_AI_REASON = "The model was not called (--no-ai).";
+
+const ROOT = resolve(import.meta.dirname, "../../../..");
 
 export interface Args {
   file: string;
@@ -30,7 +27,7 @@ export interface Args {
   out: string;
 }
 
-export function readArgs(argv = process.argv.slice(2)): Args {
+export async function readArgs(argv = process.argv.slice(2)): Promise<Args> {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -55,14 +52,14 @@ export function readArgs(argv = process.argv.slice(2)): Args {
   const path = (value: string | undefined) => (value === undefined ? undefined : resolve(cwd, value));
   return {
     file: path(positionals[0])!,
-    buildDirectory: path(values["renderer-build"]) ?? (existsSync(join(ROOT, "packages/server/renderer-build/avatar-preview-renderer.wasm")) ? join(ROOT, "packages/server/renderer-build") : undefined),
+    buildDirectory: await resolveBuildDirectory(values["renderer-build"] ?? process.env.RENDERER_BUILD),
     from: path(values.from),
     answer: values.answer!,
     thumbnail: path(values.thumbnail),
     standalone: values.standalone!,
     noAi: values["no-ai"]!,
     cache: values.cache,
-    out: path(values.out) ?? join(ROOT, "packages/server/artifacts")
+    out: resolveArtifactsDir(values.out ?? process.env.ARTIFACTS_DIR)
   };
 }
 
@@ -98,7 +95,7 @@ function printSummary(result: Result, index: string): void {
 }
 
 async function main(): Promise<void> {
-  const args = readArgs();
+  const args = await readArgs();
   const { bytes, input, thumbnail } = await readItem(args);
   // code gate is zero-cost: no browser, no OAuth until passed === true or --standalone; it judges the zip itself, not the unpacked files
   if (!args.standalone) {
@@ -117,7 +114,7 @@ async function main(): Promise<void> {
   const runDir = await mkdtemp(join(args.out, `visual-${basename(args.file).replace(/\.zip$/i, "")}-`));
   const captures = args.from ? await readRun(args.from) : undefined;
   const renderer = args.buildDirectory ? await createRenderer({ buildDirectory: args.buildDirectory }) : undefined;
-  const reviewer = args.noAi ? dryRunReviewer()
+  const reviewer = args.noAi ? dryRunReviewer(NO_AI_REASON)
     : args.answer ? replayReviewer(args.from!)
     : createPiReviewer({ credentials: tokenCredentials(process.env.ANTHROPIC_OAUTH_SETUP_TOKEN ?? ""), cache: args.cache });
   const services: Services = { renderer, reviewer: recordingReviewer(reviewer, runDir) };
@@ -130,7 +127,7 @@ async function main(): Promise<void> {
     const result = await validate(input, { checks: VISUAL_CHECKS, captures, services, signal: controller.signal });
     const index = await writeRun(runDir, result, thumbnail);
     printSummary(result, index);
-    const dryRunCompleted = args.noAi && result.checks.every((row) => row.status === "passed" || (row.status === "errored" && Boolean(row.skipReason?.includes(DRY_RUN_REASON))));
+    const dryRunCompleted = args.noAi && result.checks.every((row) => row.status === "passed" || (row.status === "errored" && Boolean(row.skipReason?.includes(NO_AI_REASON))));
     process.exitCode = result.checks.every((row) => row.status === "passed") || dryRunCompleted ? 0 : 1;
   } finally {
     process.removeListener("SIGINT", abort);

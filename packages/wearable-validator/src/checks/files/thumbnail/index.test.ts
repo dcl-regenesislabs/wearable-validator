@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { validate } from "../../../index.js";
-import { pngBytes, syntheticZip } from "#test/helpers/synthetic.js";
+import { pngBytes, pngHeaderBytes, syntheticZip } from "#test/helpers/synthetic.js";
 import { enc } from "#test/helpers/bytes.js";
 import { only } from "#test/helpers/findings.js";
 
@@ -26,6 +26,15 @@ describe("thumbnail (S-06)", () => {
     const zip = await syntheticZip({ thumbnail: pngBytes(1030, 1030) });
     const findings = only((await validate(zip, { checks: ["thumbnail"] })).findings, "thumbnail");
     assert.ok(findings.some((f) => f.severity === "error" && f.limit === "1024×1024"));
+  });
+
+  it("errors from the header alone when the claimed size is a decode bomb", async () => {
+    const zip = await syntheticZip({ thumbnail: pngHeaderBytes(12000, 12000) });
+    const findings = only((await validate(zip, { checks: ["thumbnail"] })).findings, "thumbnail");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].severity, "error");
+    assert.equal(findings[0].measured, "12000×12000");
+    assert.equal(findings[0].limit, "1024×1024");
   });
 
   it("warns on a non-recommended size", async () => {

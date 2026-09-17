@@ -1,6 +1,6 @@
 /** S-01 File format — the engine loads self-contained GLBs; facial features are PNG sets, so anything else never renders. */
 import { isGlb } from "../../../logic/gltf.js";
-import { decodePngSafe, isPngBytes } from "../../../logic/images.js";
+import { decodePngSafe, imageDimensions, isPngBytes } from "../../../logic/images.js";
 import { isFacial } from "../../../logic/facial.js";
 import { modelFileCandidates } from "../../../logic/model-files.js";
 import { finding, type CheckContext, type CheckDefinition, type CheckMeta, type Finding, type Severity } from "../../../types.js";
@@ -17,12 +17,21 @@ function facialPngFindings(ctx: CheckContext, path: string): Finding[] {
     f("error", `"${path}" must be a PNG — facial-feature wearables (${ctx.manifest.facialCategories.join("/")}) are texture-only PNG sets.`);
     return out;
   }
+  const max = ctx.manifest.textures.facialMaxSize;
+  // the header decides before any pixel is decoded: an oversized texture is never inflated
+  const header = imageDimensions(bytes);
+  if (header && (header.width > max || header.height > max)) {
+    f("error", `"${path}" is ${header.width}×${header.height} — facial-feature textures must be at most ${max}×${max}.`, {
+      measured: `${header.width}×${header.height}`,
+      limit: `${max}×${max}`
+    });
+    return out;
+  }
   const img = decodePngSafe(bytes);
   if (!img) {
     f("error", `"${path}" is not a decodable PNG — re-export it as a standard PNG file.`);
     return out;
   }
-  const max = ctx.manifest.textures.facialMaxSize;
   if (img.width !== img.height) {
     f("error", `"${path}" is ${img.width}×${img.height} — facial-feature textures must be square.`, { measured: `${img.width}×${img.height}` });
   }

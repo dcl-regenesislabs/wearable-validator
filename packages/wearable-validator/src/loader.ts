@@ -41,15 +41,30 @@ export async function loadInput(input: Input, options: Options): Promise<LoadedI
 }
 
 async function loadZip(bytes: Uint8Array, options: Options): Promise<LoadedInput> {
+  const { maxEntries } = manifest.fileSize;
+  // the end-of-central-directory record says how many entries JSZip would parse: a zip that declares too many never gets parsed
+  const declaredEntries = declaredEntryCount(bytes);
+  if (declaredEntries !== undefined && declaredEntries > maxEntries) throw tooManyEntries(declaredEntries);
   const zip = await JSZip.loadAsync(bytes);
+  const all = Object.values(zip.files);
+  if (all.length > maxEntries) throw tooManyEntries(all.length);
+  const entries = all.filter((entry) => !entry.dir);
+  checkDeclaredSizes(entries);
+  const { maxUncompressedBytes, maxEntryUncompressedBytes } = manifest.fileSize;
   const files = new Map<string, Uint8Array>();
   const emptyFiles: string[] = [];
-  for (const [rawPath, entry] of Object.entries(zip.files)) {
-    if (entry.dir) continue;
-    const path = normalizePath(rawPath);
+  let inflated = 0;
+  for (const entry of entries) {
+    const path = normalizePath(entry.name);
     const base = path.split("/").pop() ?? path;
     if (base.startsWith(".")) continue;
-    const data = await entry.async("uint8array");
+    // headers can lie: the real bytes count against both caps as they come out of the inflater
+    const data = await inflateEntry(
+      entry,
+      Math.min(maxEntryUncompressedBytes, maxUncompressedBytes - inflated),
+      `"${path}" unpacks to more than the zip may hold — no file may unpack to more than ${mb(maxEntryUncompressedBytes)} MB and the whole zip to more than ${mb(maxUncompressedBytes)} MB.`
+    );
+    inflated += data.length;
     if (data.length === 0) {
       emptyFiles.push(path);
       continue;
@@ -61,6 +76,101 @@ async function loadZip(bytes: Uint8Array, options: Options): Promise<LoadedInput
     return { fatal: [fileFormatFinding("Legacy asset.json zips are not supported — export the item from the Builder (wearable.json / emote.json) instead.")] };
   }
   return buildContext({ files, emptyFiles, inputKind: "zip", totalBytes: bytes.length, options });
+}
+
+const tooManyEntries = (count: number): Error =>
+  new Error(`The zip holds ${count} entries — the maximum is ${manifest.fileSize.maxEntries}. Remove files and folders that are not part of the item.`);
+
+const EOCD = 0x06054b50;
+const ZIP64_EOCD_LOCATOR = 0x07064b50;
+const ZIP64_EOCD = 0x06064b50;
+// the EOCD record is 22 bytes plus a comment of at most 65535
+const EOCD_SEARCH_BYTES = 22 + 65535;
+
+/** Entries the archive declares (files and folders), from the end-of-central-directory record; undefined when there is none to read. */
+export function declaredEntryCount(bytes: Uint8Array): number | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const stop = Math.max(0, bytes.length - EOCD_SEARCH_BYTES);
+  for (let i = bytes.length - 22; i >= stop; i--) {
+    if (view.getUint32(i, true) !== EOCD) continue;
+    const count = view.getUint16(i + 10, true);
+    if (count !== 0xffff) return count;
+    if (i < 20 || view.getUint32(i - 20, true) !== ZIP64_EOCD_LOCATOR) return count;
+    const record = Number(view.getBigUint64(i - 12, true));
+    if (record + 40 > bytes.length || view.getUint32(record, true) !== ZIP64_EOCD) return count;
+    return Number(view.getBigUint64(record + 32, true));
+  }
+  return undefined;
+}
+
+/** The central directory is read before any entry is inflated: too many declared bytes never reach the inflater. */
+function checkDeclaredSizes(entries: JSZip.JSZipObject[]): void {
+  const { maxUncompressedBytes, maxEntryUncompressedBytes } = manifest.fileSize;
+  let declared = 0;
+  for (const entry of entries) {
+    const size = declaredSize(entry);
+    if (size === undefined) continue;
+    if (size > maxEntryUncompressedBytes) {
+      throw new Error(`"${normalizePath(entry.name)}" unpacks to ${mb(size)} MB — no file in the zip may unpack to more than ${mb(maxEntryUncompressedBytes)} MB.`);
+    }
+    declared += size;
+  }
+  if (declared > maxUncompressedBytes) {
+    throw new Error(`The zip unpacks to ${mb(declared)} MB — the maximum is ${mb(maxUncompressedBytes)} MB. Remove files that are not part of the item.`);
+  }
+}
+
+/** The uncompressed size the local header declares — JSZip keeps it on the private `_data` of entries read by loadAsync. */
+function declaredSize(entry: JSZip.JSZipObject): number | undefined {
+  const raw: unknown = entry;
+  if (typeof raw !== "object" || raw === null || !("_data" in raw)) return undefined;
+  const data = raw._data;
+  if (typeof data !== "object" || data === null || !("uncompressedSize" in data)) return undefined;
+  return typeof data.uncompressedSize === "number" && Number.isFinite(data.uncompressedSize) ? data.uncompressedSize : undefined;
+}
+
+interface StreamingEntry {
+  internalStream(type: "uint8array"): JSZip.JSZipStreamHelper<Uint8Array>;
+}
+
+function isStreamingEntry(entry: unknown): entry is StreamingEntry {
+  return typeof entry === "object" && entry !== null && "internalStream" in entry && typeof entry.internalStream === "function";
+}
+
+/** Inflates one entry chunk by chunk and stops the inflater the moment the running total passes `budget`, rejecting with `reason`. */
+export async function inflateEntry(entry: JSZip.JSZipObject, budget: number, reason: string): Promise<Uint8Array> {
+  const overBudget = () => new Error(reason);
+  if (!isStreamingEntry(entry)) {
+    const data = await entry.async("uint8array");
+    if (data.length > budget) throw overBudget();
+    return data;
+  }
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    const stream = entry.internalStream("uint8array");
+    stream.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > budget) {
+        chunks.length = 0;
+        stream.pause();
+        reject(overBudget());
+        return;
+      }
+      chunks.push(chunk);
+    });
+    stream.on("error", reject);
+    stream.on("end", () => {
+      const out = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        out.set(chunk, offset);
+        offset += chunk.length;
+      }
+      resolve(out);
+    });
+    stream.resume();
+  });
 }
 
 async function loadBareGlb(bytes: Uint8Array, options: Options): Promise<LoadedInput> {
