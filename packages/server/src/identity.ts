@@ -19,7 +19,7 @@ export type Identify = (req: IncomingMessage) => Promise<Identity | undefined>;
 
 /** One trusted machine caller (the Slack bot) with a shared secret: `Authorization: Bearer <OPERATOR_TOKEN>`, compared in constant time. */
 export function tokenIdentity(token: string, name = "bot"): Identify {
-  if (token.length < 32) throw new Error("OPERATOR_TOKEN must be at least 32 characters; generate it with `openssl rand -hex 32`.");
+  if (token.length < 32) throw new Error("OPERATOR_TOKEN must be at least 32 characters.");
   const expected = Buffer.from(token);
   return async (req) => {
     const header = req.headers.authorization;

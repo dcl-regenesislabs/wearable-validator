@@ -44,7 +44,7 @@ To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.t
 | `CF_ACCESS_TEAM_DOMAIN` | from step 2 |
 | `CF_ACCESS_AUD` | from step 2 |
 | `ANTHROPIC_OAUTH_SETUP_TOKEN` | **secret** — a `claude setup-token` (`sk-ant-oat…`, valid about a year); the only model credential |
-| `OPERATOR_TOKEN` | **secret** — `openssl rand -hex 32`; the Slack bot sends it as a Bearer token and becomes operator `service:bot` (step 5) |
+| `OPERATOR_TOKEN` | **secret**, a long random string (32+ characters); the Slack bot sends it as a Bearer token and becomes operator `service:bot` (step 5) |
 | `OPERATORS` | optional comma-separated curator emails that may also read every run, the stats and the log |
 | `MAX_CONCURRENT_RUNS` | `1` — renders at once; raise it with RAM (one per ~2 GB). Everyone else waits in the line the site shows |
 | `LOG_FORMAT` | `json` |
@@ -63,7 +63,7 @@ Workers & Pages → `wearable-validator` → Settings → Build: build command `
 
 The bot is the one machine caller, so it gets a shared secret instead of a login:
 
-1. Generate it once: `openssl rand -hex 32`.
+1. Pick a long random secret (32+ characters) and keep it only in the two environments below.
 2. Validator app on App Platform → environment → `OPERATOR_TOKEN` = that value, encrypted. Redeploy.
 3. Slack bot → environment → `WEARABLE_VALIDATOR_TOKEN` = the same value, encrypted. Its `wearable-validator` skill calls `https://api.wearable-validator.dclregenesislabs.xyz` directly with `Authorization: Bearer <token>`; the server compares it in constant time and treats the caller as operator `service:bot`.
 
