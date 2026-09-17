@@ -24,7 +24,8 @@ function chooseIdentity(env: NodeJS.ProcessEnv, host: string): { identify: Ident
   const audience = env.CF_ACCESS_AUD;
   if (teamDomain || audience) {
     if (!teamDomain || !audience) throw new Error("Set both CF_ACCESS_TEAM_DOMAIN (the team slug) and CF_ACCESS_AUD (the Access application audience tag).");
-    return { identify: accessIdentity(createAccessVerifier({ teamDomain, audience })), kind: `cloudflare-access (${teamDomain})` };
+    const operators = (env.OPERATORS ?? "").split(",").map((email) => email.trim()).filter(Boolean);
+    return { identify: accessIdentity(createAccessVerifier({ teamDomain, audience }), operators), kind: `cloudflare-access (${teamDomain}${operators.length ? `, ${operators.length} operators` : ""})` };
   }
   if (isLoopback(host)) return { identify: localIdentity(), kind: "local" };
   if (env.INSECURE_ANONYMOUS === "1") return { identify: localIdentity("anonymous"), kind: "anonymous" };
@@ -76,7 +77,9 @@ async function main(): Promise<void> {
     capabilities: { renderer: Boolean(buildDirectory), reviewer: reviewerKind },
     site: siteExists ? site : undefined,
     services: async (run) => {
-      const renderer = buildDirectory ? await createRenderer({ buildDirectory, onCapture: (capture) => void run.capture(capture) }) : undefined;
+      const renderer = buildDirectory
+        ? await createRenderer({ buildDirectory, onCapture: (capture) => void run.capture(capture), onLog: (message, fields) => log.info(message, { run: run.id, ...fields }) })
+        : undefined;
       const base = credentials ? createPiReviewer({ credentials }) : dryRunReviewer();
       const reviewer = liveReviewer(recordingReviewer(base, run.dir), run);
       return { renderer, reviewer, stop: () => renderer?.stop() ?? Promise.resolve() };

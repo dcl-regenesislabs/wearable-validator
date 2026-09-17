@@ -9,14 +9,16 @@ import type { AccessVerifier } from "./access.js";
 
 export interface Identity {
   owner: string;
-  kind: "local" | "access";
+  kind: "local" | "access" | "service";
+  /** Sees every run, the stats and the log: service tokens (the Slack bot) and the emails in OPERATORS. Local runs are always operators. */
+  operator: boolean;
 }
 
 export type Identify = (req: IncomingMessage) => Promise<Identity | undefined>;
 
 /** Everyone is the same owner: the server is only reachable by whoever started it. */
 export function localIdentity(owner = "local"): Identify {
-  return async () => ({ owner, kind: "local" });
+  return async () => ({ owner, kind: "local", operator: true });
 }
 
 function cookie(req: IncomingMessage, name: string): string | undefined {
@@ -29,13 +31,19 @@ function cookie(req: IncomingMessage, name: string): string | undefined {
   return undefined;
 }
 
-/** The Access JWT arrives as a header through the Worker forward; the CF_Authorization cookie is the fallback for direct calls. */
-export function accessIdentity(verifier: AccessVerifier): Identify {
+/**
+ * The Access JWT arrives as a header through the Worker forward; the CF_Authorization cookie is the fallback for direct calls.
+ * A service token (Access "Service Auth" policy) becomes owner "service:<name>" and an operator; people are operators only when listed.
+ */
+export function accessIdentity(verifier: AccessVerifier, operators: string[] = []): Identify {
+  const listed = new Set(operators.map((email) => email.trim().toLowerCase()).filter(Boolean));
   return async (req) => {
     const header = req.headers["cf-access-jwt-assertion"];
     const token = (Array.isArray(header) ? header[0] : header) ?? cookie(req, "CF_Authorization");
     if (!token) return undefined;
     const claims = await verifier.verify(token);
-    return claims ? { owner: claims.email, kind: "access" } : undefined;
+    if (!claims) return undefined;
+    if (claims.email) return { owner: claims.email, kind: "access", operator: listed.has(claims.email.toLowerCase()) };
+    return claims.serviceName ? { owner: `service:${claims.serviceName}`, kind: "service", operator: true } : undefined;
   };
 }

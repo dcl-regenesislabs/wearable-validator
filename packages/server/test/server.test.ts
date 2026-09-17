@@ -9,6 +9,7 @@ import { syntheticGlb, syntheticZip } from "../../wearable-validator/test/helper
 import { renderedFrame } from "../../wearable-validator/test/helpers/frames.js";
 import type { Identify } from "../src/identity.js";
 import { liveReviewer, recordingReviewer } from "../src/reviewers.js";
+import { createLogger } from "../src/log.js";
 import { createRunServer, hostAllowed, type RunSink, type ServeOptions } from "../src/server.js";
 
 interface Frame {
@@ -33,8 +34,9 @@ const silent = { info() {}, warn() {}, error() {} };
 /** The seam under test gets a fake: whoever the x-test-user header names, nobody without it. */
 const identify: Identify = async (req) => {
   const user = req.headers["x-test-user"];
-  return typeof user === "string" ? { owner: user, kind: "local" } : undefined;
+  return typeof user === "string" ? { owner: user, kind: "local", operator: req.headers["x-test-operator"] === "1" } : undefined;
 };
+const bot = { "x-test-user": "service:slack-bot", "x-test-operator": "1" };
 
 /** One raw HTTP/1.1 request, so the path and Host reach the server exactly as written. */
 function rawRequest(base: string, path: string, host = new URL(base).host, headers: Record<string, string> = {}): Promise<string> {
@@ -521,6 +523,51 @@ describe("runs outlive memory and restarts", () => {
       assert.equal((await fetch(`${second.base}/api/runs/${evicted}`, { headers: bob })).status, 404);
     } finally {
       await second.close();
+    }
+  });
+});
+
+describe("operators", () => {
+  it("see every run, the stats and the log; curators get 403 for those and 404 for each other's runs", async () => {
+    const out = await mkdtemp(join(tmpdir(), "run-server-ops-"));
+    const lines: string[] = [];
+    const logger = createLogger({ format: "json", write: (line) => lines.push(line) });
+    const { base, close } = await listen({ out, services: fakeServices({ services: 0, rendered: [] }), logger });
+    try {
+      const zip = await syntheticZip();
+      const a = await startRun(base, zip, "?model=0", alice);
+      await readEvents(`${base}/api/runs/${a}/events`);
+      const b = await startRun(base, zip, "?model=0", bob);
+      await readEvents(`${base}/api/runs/${b}/events`, bob);
+
+      assert.equal((await fetch(`${base}/api/stats`, { headers: alice })).status, 403);
+      assert.equal((await fetch(`${base}/api/logs`, { headers: alice })).status, 403);
+      assert.equal((await fetch(`${base}/api/runs?all=1`, { headers: alice })).status, 403);
+      assert.equal((await fetch(`${base}/api/runs/${b}`, { headers: alice })).status, 404);
+
+      const every = (await (await fetch(`${base}/api/runs?all=1`, { headers: bot })).json()) as { runs: { id: string; owner: string }[] };
+      assert.deepEqual(every.runs.map((run) => [run.id, run.owner]), [[b, "bob"], [a, "alice"]]);
+      const own = (await (await fetch(`${base}/api/runs`, { headers: bot })).json()) as { runs: unknown[] };
+      assert.equal(own.runs.length, 0, "without all=1 an operator lists only its own runs");
+      assert.equal((await fetch(`${base}/api/runs/${b}`, { headers: bot })).status, 200);
+      assert.equal((await fetch(`${base}/api/runs/${a}/events`, { headers: bot })).status, 200);
+
+      const stats = (await (await fetch(`${base}/api/stats`, { headers: bot })).json()) as { runs: { total: number; passed: number }; byOwner: { owner: string; runs: number }[]; byDay: { runs: number }[]; rulesVersion: string };
+      assert.equal(stats.runs.total, 2);
+      assert.deepEqual(stats.byOwner.map((row) => row.runs), [1, 1]);
+      assert.equal(stats.byDay.reduce((sum, row) => sum + row.runs, 0), 2);
+      assert.equal(stats.rulesVersion, manifest.version);
+
+      const logs = (await (await fetch(`${base}/api/logs?limit=500`, { headers: bot })).json()) as { lines: { message: string; fields: Record<string, unknown> }[] };
+      assert.ok(logs.lines.some((line) => line.message === "run accepted" && line.fields.owner === "alice"));
+      assert.ok(logs.lines.some((line) => line.message === "request" && line.fields.path === "/api/stats" && line.fields.status === 403 && line.fields.owner === "alice"), "every API call is one access-log line with its caller");
+      assert.ok(!logs.lines.some((line) => line.message === "request" && line.fields.path === "/api/health"));
+      const since = logs.lines.at(-1)!;
+      const later = (await (await fetch(`${base}/api/logs?since=${encodeURIComponent((since as { time?: string }).time ?? "")}`, { headers: bot })).json()) as { lines: unknown[] };
+      assert.ok(later.lines.length < logs.lines.length);
+    } finally {
+      await close();
+      await rm(out, { recursive: true, force: true });
     }
   });
 });

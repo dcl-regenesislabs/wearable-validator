@@ -15,7 +15,10 @@ export interface AccessJwk {
 }
 
 export interface AccessClaims {
-  email: string;
+  /** A person who signed in; absent for a service token. */
+  email?: string;
+  /** A service token's name (the `common_name` claim); absent for a person. */
+  serviceName?: string;
   sub: string;
 }
 
@@ -118,8 +121,11 @@ export function createAccessVerifier(options: AccessVerifierOptions): AccessVeri
       if (payload.iss !== issuer) return undefined;
       const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
       if (!audiences.includes(options.audience)) return undefined;
-      if (typeof payload.email !== "string" || payload.email.length === 0) return undefined;
-      return { email: payload.email, sub: typeof payload.sub === "string" ? payload.sub : "" };
+      const sub = typeof payload.sub === "string" ? payload.sub : "";
+      if (typeof payload.email === "string" && payload.email.length > 0) return { email: payload.email, sub };
+      // Access issues service-token JWTs with common_name instead of email
+      if (typeof payload.common_name === "string" && payload.common_name.length > 0) return { serviceName: payload.common_name, sub };
+      return undefined;
     }
   };
 }

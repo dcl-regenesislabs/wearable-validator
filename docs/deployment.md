@@ -3,7 +3,8 @@
 - **Web** — wearable-validator.dclregenesislabs.xyz, Cloudflare Workers (`wrangler.jsonc`), behind Cloudflare Access: curators sign in with their email, then the site runs the code checks in the browser and the visual review through the run server.
 - **Worker** — `packages/web/worker.ts` forwards `/api/*` to `API_ORIGIN` = api.wearable-validator.dclregenesislabs.xyz, headers and streamed body intact (SSE included).
 - **Backend** — one container (the root `Dockerfile`) on DigitalOcean App Platform, proxied through Cloudflare.
-- **Identity** — the server verifies the Access JWT the Worker forwards (`packages/server/src/access.ts`); every run belongs to the email that started it, and the API only ever shows a caller their own runs.
+- **Identity** — the server verifies the Access JWT the Worker forwards (`packages/server/src/access.ts`); every run belongs to the email that started it, and the API only ever shows a caller their own runs. Service tokens (the Slack bot) and the emails in `OPERATORS` see everything.
+- **Logs** — one JSON line per event on stdout: every API request (caller, status, ms), each run's gate, queue, captures, model calls and result, and the browser's own story (launch, previewer load or failure with the last wrapper messages, page crashes, console errors, retried views). Operators can read the recent lines through `GET /api/logs`.
 
 ## One-time setup
 
@@ -43,6 +44,7 @@ To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.t
 | `CF_ACCESS_TEAM_DOMAIN` | from step 2 |
 | `CF_ACCESS_AUD` | from step 2 |
 | `ANTHROPIC_OAUTH_SETUP_TOKEN` | **secret** — a `claude setup-token` (`sk-ant-oat…`, valid about a year); the only model credential |
+| `OPERATORS` | comma-separated emails that may read every curator's runs, the stats and the log (`/api/runs?all=1`, `/api/stats`, `/api/logs`). Service tokens are always operators |
 | `MAX_CONCURRENT_RUNS` | `1` — renders at once; raise it with RAM (one per ~2 GB). Everyone else waits in the line the site shows |
 | `LOG_FORMAT` | `json` |
 | `CHROMIUM_ARGS` | leave unset: the image sets `--enable-features=Vulkan --use-vulkan=swiftshader --disable-dev-shm-usage` (the last one because App Platform gives `/dev/shm` only 64 MB; without it the previewer never reports load) |
@@ -56,7 +58,17 @@ The server refuses to start on a non-loopback `HOST` without the two Access vari
 
 Workers & Pages → `wearable-validator` → Settings → Build: build command `npm ci && npm run build -w wearable-validator-web`, deploy command `npx wrangler deploy`. Every push to `main` redeploys the site; `API_ORIGIN` is in `wrangler.jsonc`, nothing to set in the dashboard. Until the Access application (step 2) exists the site is public and the run server answers 401 to everyone; the Access login is what makes the visual review work.
 
-### 5. Smoke test
+### 5. The Slack bot (or any operator script)
+
+The bot needs its own identity, not a curator's login. Cloudflare Access service tokens do that:
+
+1. Zero Trust → Access controls → **Service credentials** → Create a service token, name `slack-bot`, duration as you like. Copy the **Client ID** and **Client Secret** once; the secret is never shown again.
+2. On the Access application (step 2) add a second policy: name `Bots`, action **Service Auth**, Include → **Service Token** → `slack-bot`. Keep the `Curators` Allow policy as it is.
+3. The bot calls the **site** hostname, not `api.`: `https://wearable-validator.dclregenesislabs.xyz/api/stats` with headers `CF-Access-Client-Id` and `CF-Access-Client-Secret`. Access swaps them for a JWT whose `common_name` is the token's name, the Worker forwards it, and the server treats `service:slack-bot` as an operator.
+
+Operator endpoints, all JSON: `GET /api/stats` (totals, by day, by curator, average render time, queue), `GET /api/runs?all=1` (every run with its owner), `GET /api/runs/<id>` for any run, `GET /api/logs?limit=200&since=<ISO time>` (the server's recent log lines, kept in memory since the last restart). The Slack bot's skill lives in the `slack-bot` repo under `skills/wearable-validator/`; it reads `WEARABLE_VALIDATOR_ACCESS_CLIENT_ID` and `WEARABLE_VALIDATOR_ACCESS_CLIENT_SECRET`.
+
+### 6. Smoke test
 
 1. Two curators sign in at wearable-validator.dclregenesislabs.xyz (Access login). The Visual review panel header says **Signed in as <email>**.
 2. Each drops a zip and gets a streamed run.

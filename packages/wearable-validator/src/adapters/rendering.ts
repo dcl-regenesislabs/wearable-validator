@@ -153,6 +153,41 @@ export interface PreviewSession {
 
 export type OpenPreview = (signal: AbortSignal) => Promise<PreviewSession>;
 
+/** Diagnostics the host may log: what the browser did, in words an operator can act on. Never pixels, never bytes. */
+export type RenderLog = (message: string, fields?: Record<string, unknown>) => void;
+
+/** The last few wrapper messages, shortened: what the previewer said before it went quiet. */
+async function recentPreviewEvents(page: Page, count = 6): Promise<unknown[]> {
+  try {
+    return await page.evaluate(
+      (count) => (window as unknown as PreviewWindow).previewEvents.slice(-count).map((event) => ({ type: event.type, ...(event.payload?.message ? { message: String(event.payload.message).slice(0, 200) } : {}), ...(event.payload?.error ? { error: String(event.payload.error).slice(0, 200) } : {}) })),
+      count
+    );
+  } catch {
+    return [];
+  }
+}
+
+// Unity repeats the same warning every frame: each distinct line is logged once per page, and only so many
+const MAX_PAGE_LINES = 20;
+
+/** Page-level trouble an operator needs to see: crashes, uncaught errors, console errors, failed requests. */
+function watchPage(page: Page, log: RenderLog): void {
+  const seen = new Set<string>();
+  const once = (message: string, fields: Record<string, unknown>) => {
+    const key = message + JSON.stringify(fields);
+    if (seen.has(key) || seen.size >= MAX_PAGE_LINES) return;
+    seen.add(key);
+    log(message, fields);
+  };
+  page.on("crash", () => log("browser page crashed"));
+  page.on("pageerror", (error) => once("browser page error", { error: error.message.slice(0, 300) }));
+  page.on("console", (message) => {
+    if (message.type() === "error") once("browser console error", { text: message.text().slice(0, 300) });
+  });
+  page.on("requestfailed", (request) => once("browser request failed", { url: request.url().slice(0, 200), error: request.failure()?.errorText }));
+}
+
 export function previewUrl(engine: "unity" | "babylon" = "unity"): string {
   const { profile, background, skin } = manifest.rendering;
   const url = new URL("index.html", PREVIEW_URL);
@@ -361,11 +396,14 @@ export async function routeAssets(context: BrowserContext, assets?: LocalBuild):
 }
 
 /** The default seam: one Chromium per session, closed on abort, on failure to load, and by close(). */
-export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: boolean }): OpenPreview {
+export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: boolean; log?: RenderLog }): OpenPreview {
   const settings = manifest.rendering;
+  const log: RenderLog = options.log ?? (() => {});
   return async (signal) => {
     signal.throwIfAborted();
+    const started = Date.now();
     const browser = await launchChromium(options);
+    log("browser launched", { version: browser.version(), gpu: options.gpu, extraArgs: process.env.CHROMIUM_ARGS ?? "", ms: Date.now() - started });
     let closing: Promise<void> | undefined;
     const close = () => (closing ??= browser.close());
     const abort = () => {
@@ -380,11 +418,20 @@ export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: b
       });
       const health = await routeAssets(context, options.assets);
       const page = await context.newPage();
+      watchPage(page, log);
       const session = pageSession(page, settings);
       await mountPreview(page, previewUrl(), settings.imageSizePx);
-      const loaded = await waitForLoad(page, 0, settings.loadTimeoutMs);
+      log("previewer mounted", { url: previewUrl().slice(0, 120), localBuild: Boolean(options.assets), ms: Date.now() - started });
+      let loaded: PreviewEvent;
+      try {
+        loaded = await waitForLoad(page, 0, settings.loadTimeoutMs);
+      } catch (error) {
+        log("previewer did not load", { error: error instanceof Error ? error.message.slice(0, 200) : String(error), ms: Date.now() - started, lastEvents: await recentPreviewEvents(page) });
+        throw error;
+      }
       health.assertHealthy();
       session.engine = loaded.payload?.renderer ?? "unknown";
+      log("previewer loaded", { engine: session.engine, ms: Date.now() - started });
       return {
         ...session,
         async close() {
@@ -473,7 +520,8 @@ export async function captureAll(
   input: RenderInput,
   requests: CaptureRequest[],
   signal: AbortSignal,
-  onCapture?: (capture: CaptureRecord) => void
+  onCapture?: (capture: CaptureRecord) => void,
+  log: RenderLog = () => {}
 ): Promise<CaptureRecord[]> {
   const settings = manifest.rendering;
   const item = previewItem(input);
@@ -530,6 +578,7 @@ export async function captureAll(
       } catch (error) {
         if (!timedOut(error) || attempts++ >= settings.captureRetries) throw error;
         // the session state after a timeout is unknown: the next attempt starts from a fresh update
+        log("view timed out, retrying from a fresh update", { view: request.id, attempt: attempts, error: error instanceof Error ? error.message.slice(0, 200) : String(error) });
         setup = "";
       }
     }
@@ -549,6 +598,8 @@ export interface RendererOptions {
   open?: OpenPreview;
   /** Called the moment each view is captured — a live UI can show it while the rest render. */
   onCapture?: (capture: CaptureRecord) => void;
+  /** Browser diagnostics for the host's log: launch, previewer load or failure, page errors, retries. */
+  onLog?: RenderLog;
 }
 
 export async function createRenderer(options: RendererOptions): Promise<Renderer> {
@@ -563,7 +614,7 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     browserOptions,
     binaries: [...assets].map(([path, asset]) => [path, asset.sha256])
   });
-  const open = options.open ?? openPreview({ assets, ...browserOptions });
+  const open = options.open ?? openPreview({ assets, ...browserOptions, log: options.onLog });
   const active = new Map<AbortController, Promise<CaptureRecord[]>>();
   const pending = new Map<string, Promise<CaptureRecord[]>>();
   let stopped = false;
@@ -608,7 +659,7 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
       if (session.engine !== "unity") {
         throw new Error(`The preview loaded the ${session.engine} engine. Visual evidence requires the configured Unity build.`);
       }
-      return await captureAll(session, input, requests, controller.signal, options.onCapture);
+      return await captureAll(session, input, requests, controller.signal, options.onCapture, options.onLog);
     } catch (error) {
       if (signal?.aborted) throw error; // the caller cancelled: let its AbortError through untouched
       if (controller.signal.aborted) {

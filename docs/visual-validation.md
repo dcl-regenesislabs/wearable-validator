@@ -49,6 +49,7 @@ The API is deliberately small so the page never changes between local and hosted
 | `GET /api/health` | `{ ok, visual: { renderer, reviewer: "pi" \| "dry-run" }, checks, rulesVersion, owner }` — what the site can offer and who the server thinks is calling (`null` when nobody is); the only route without identity |
 | `GET /api/runs` | `{ runs: [{ id, name, startedAt, done, passed }] }` newest first — only the caller's runs, from memory plus the on-disk index |
 | `POST /api/runs[?standalone=1][&model=0]` (zip bytes, `content-type: application/zip`, URL-encoded `x-file-name`) | `201 { id }`; 415 without that content type (a form or no-cors fetch from another site cannot send it); 400 when the name does not decode; always accepted: the code gate runs at once and a run that needs the renderer joins a first-in first-out line (`MAX_CONCURRENT_RUNS` slots, default 1); the code gate runs first and, when it fails, stops before any screenshot unless `standalone`; `model=0` renders only |
+| `GET /api/stats`, `GET /api/logs?limit=&since=`, `GET /api/runs?all=1` | operators only (service tokens, `OPERATORS` emails): totals by day and curator, the recent log lines, every run with its owner; 403 for a curator |
 | `GET /api/queue` | `{ running, waiting, averageRunMs, maxConcurrentRuns }` — who is rendering and who waits; your own items carry `id` and `name`, another curator's item is anonymous |
 | `GET /api/runs/:id/events` | Server-Sent Events: `check` (start/finish of every check), `gate` (code result), `queue` (`{ position, ahead, running, averageRunMs, etaMs }` every time the line moves; position 0 = your turn), `stage`, `capture` (`{ id, request, url }` as each PNG lands), `review` (`request` with prompt digest and image order, then `answer` = the `ReviewResult`), `done` (the `Result` with capture URLs) or `error`. Events carry ids; `Last-Event-ID` replays the rest; a finished run loaded from disk replays as one `done` event |
 | `GET /api/runs/:id/captures/<id>.png`, `/thumbnail.png`, `/<check>/1-prompt.md` … | files from the run folder (§3), path-safe |
@@ -150,7 +151,7 @@ Compare the image labeled thumbnail with ALL labeled render captures. … Compar
 ```json
 { "ok": true,
   "answer": { "verdict": "matches", "summary": "…", "reviewedCaptureIds": ["BaseMale-avatar-000", "…", "thumbnail"], "findings": [] },
-  "metadata": { "provider": "anthropic", "model": "claude-sonnet-4-5-20250929", "promptVersion": 4, "promptDigest": "9df22b60…",
+  "metadata": { "provider": "anthropic", "model": "claude-sonnet-5", "promptVersion": 4, "promptDigest": "9df22b60…",
                 "stopReason": "end_turn", "usage": { "input": 19710, "output": 1801, "cacheRead": 0, "cacheWrite": 0, "cost": 0.086 },
                 "images": [{ "id": "BaseMale-avatar-000", "sha256": "…" }], "answer": "{\"verdict\":\"matches\",…}" } }
 ```
@@ -183,7 +184,7 @@ How it is reviewed:
   }
 },
 "ai": {                             // the one call, shared by every AI-backed rule — read only by ai.ts (+ maxTextLength by parsers)
-  "model": "claude-sonnet-4-5-20250929",
+  "model": "claude-sonnet-5",
   "maxOutputTokens": 4096, "maxInputTokens": 40000, "maxImages": 13, "timeoutMs": 120000, "maxRetries": 0,
   "thinkingBudgetTokens": 1024, "imagePixelsPerToken": 750, "textCharactersPerToken": 3, "maxTextLength": 1200
 },

@@ -57,6 +57,8 @@ describe("Cloudflare Access verifier", () => {
     assert.equal(await verify.verify(token(current, claims({ iss: "https://other-team.cloudflareaccess.com" }))), undefined);
     assert.equal(await verify.verify(token(current, claims({ email: undefined }))), undefined);
     assert.equal(await verify.verify(token(current, claims({ email: "" }))), undefined);
+    assert.deepEqual(await verify.verify(token(current, claims({ email: undefined, common_name: "slack-bot" }))), { serviceName: "slack-bot", sub: "user-1" }, "a service token names itself instead of a person");
+    assert.equal(await verify.verify(token(current, claims({ email: undefined, common_name: "" }))), undefined);
   });
 
   it("rejects alg none, HS256 and a tampered payload", async () => {

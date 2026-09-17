@@ -11,7 +11,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { mkdir, readFile, readdir, stat, writeFile, appendFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { loadInput, manifest, registry, validate, type CaptureRecord, type Renderer, type Result, type Reviewer } from "@dcl-regenesislabs/wearable-validator";
-import type { Identify } from "./identity.js";
+import type { Identify, Identity } from "./identity.js";
 import { createLogger, type Logger } from "./log.js";
 import { readRun, readRunInput, readRunResult, verdict, writeRun, writeRunInput } from "./runs.js";
 
@@ -473,21 +473,62 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
     };
   }
 
-  function listRuns(owner: string): (Omit<RunSummary, "owner" | "dir"> & { queued: boolean })[] {
+  /** Your runs; an operator asking for everyone's also sees who owns each. */
+  function listRuns(identity: Identity, everyone: boolean): (Omit<RunSummary, "owner" | "dir"> & { owner?: string; queued: boolean })[] {
+    const all = everyone && identity.operator;
     return [...index.values()]
-      .filter((run) => run.owner === owner)
+      .filter((run) => all || run.owner === identity.owner)
       .sort((a, b) => b.startedAt - a.startedAt)
-      .map(({ id, name, startedAt, done, passed }) => ({ id, name, startedAt, done, passed, queued: waiting.some((pending) => pending.run.id === id) }));
+      .map(({ id, owner, name, startedAt, done, passed }) => ({ id, ...(all ? { owner } : {}), name, startedAt, done, passed, queued: waiting.some((pending) => pending.run.id === id) }));
   }
 
-  /** Someone else's run is indistinguishable from no run at all. */
-  async function findRun(id: string | undefined, owner: string): Promise<Run | undefined> {
+  /** Someone else's run is indistinguishable from no run at all; operators see every run. */
+  async function findRun(id: string | undefined, identity: Identity): Promise<Run | undefined> {
     if (!id) return undefined;
+    const mine = (owner: string) => identity.operator || owner === identity.owner;
     const live = runs.get(id);
-    if (live) return live.owner === owner ? live : undefined;
+    if (live) return mine(live.owner) ? live : undefined;
     const summary = index.get(id);
-    return summary?.owner === owner ? loadFinishedRun(summary) : undefined;
+    return summary && mine(summary.owner) ? loadFinishedRun(summary) : undefined;
   }
+
+  const startedAt = Date.now();
+
+  /** What an operator (the Slack bot) asks for: how many, how they went, who, how busy. Counts come from the run folders on disk. */
+  function stats(): unknown {
+    const all = [...index.values()];
+    const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+    const byDay = new Map<string, { runs: number; passed: number; failed: number }>();
+    const byOwner = new Map<string, number>();
+    for (const run of all) {
+      const bucket = byDay.get(day(run.startedAt)) ?? { runs: 0, passed: 0, failed: 0 };
+      bucket.runs++;
+      if (run.passed === true) bucket.passed++;
+      if (run.passed === false) bucket.failed++;
+      byDay.set(day(run.startedAt), bucket);
+      byOwner.set(run.owner, (byOwner.get(run.owner) ?? 0) + 1);
+    }
+    return {
+      runs: {
+        total: all.length,
+        passed: all.filter((run) => run.passed === true).length,
+        failed: all.filter((run) => run.passed === false).length,
+        noVerdict: all.filter((run) => run.done && run.passed === null).length,
+        running: running.size,
+        waiting: waiting.length
+      },
+      byDay: [...byDay].sort(([a], [b]) => a.localeCompare(b)).slice(-30).map(([date, counts]) => ({ date, ...counts })),
+      byOwner: [...byOwner].sort(([, a], [, b]) => b - a).map(([owner, runs]) => ({ owner, runs })),
+      averageRunMs: averageRunMs(),
+      maxConcurrentRuns: maxConcurrent,
+      firstRunAt: all.length ? Math.min(...all.map((run) => run.startedAt)) : null,
+      serverStartedAt: startedAt,
+      rulesVersion: manifest.version
+    };
+  }
+
+  // one line per API request once it is answered: who, what, how it went, how long
+  const callers = new WeakMap<ServerResponse, Identity>();
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -511,14 +552,29 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
     }
 
     const identity = await options.identify(req);
+    if (identity) callers.set(res, identity);
     if (!identity) {
       log.warn("request refused, no identity", { method: req.method, path: clean(url.pathname, 200) });
       return json(res, 401, { message: "Sign in to use the run server." });
     }
     await indexed;
 
-    if (parts[1] === "runs" && parts.length === 2 && req.method === "GET") return json(res, 200, { runs: listRuns(identity.owner) });
+    if (parts[1] === "runs" && parts.length === 2 && req.method === "GET") {
+      if (url.searchParams.get("all") === "1" && !identity.operator) return json(res, 403, { message: "Only operators can list every curator's runs." });
+      return json(res, 200, { runs: listRuns(identity, url.searchParams.get("all") === "1") });
+    }
     if (parts[1] === "queue" && parts.length === 2 && req.method === "GET") return json(res, 200, queueSnapshot(identity.owner));
+    if (parts[1] === "stats" && parts.length === 2 && req.method === "GET") {
+      if (!identity.operator) return json(res, 403, { message: "Only operators can read the stats." });
+      return json(res, 200, stats());
+    }
+    if (parts[1] === "logs" && parts.length === 2 && req.method === "GET") {
+      if (!identity.operator) return json(res, 403, { message: "Only operators can read the log." });
+      const limit = Number(url.searchParams.get("limit") ?? 200) || 200;
+      const since = url.searchParams.get("since");
+      const lines = (log.recent?.(limit) ?? []).filter((entry) => !since || entry.time > since);
+      return json(res, 200, { lines });
+    }
 
     if (parts[1] === "runs" && parts.length === 2 && req.method === "POST") {
       if (crossSite(req)) return json(res, 403, { message: "Cross-site requests cannot start a run." });
@@ -548,7 +604,7 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
       return;
     }
 
-    const run = parts[1] === "runs" ? await findRun(parts[2], identity.owner) : undefined;
+    const run = parts[1] === "runs" ? await findRun(parts[2], identity) : undefined;
     if (!run) return json(res, 404, { message: "Unknown run." });
 
     if (parts.length === 3 && req.method === "GET") return json(res, 200, { id: run.id, name: run.name, done: run.done, events: run.events });
@@ -591,6 +647,14 @@ export function createRunServer(options: ServeOptions): { server: Server; close(
   }
 
   const server = createServer((req, res) => {
+    const began = Date.now();
+    res.on("finish", () => {
+      const path = (req.url ?? "/").split("?")[0];
+      // health probes and the site's static files would drown the log; every API call is one line
+      if (!path.startsWith("/api/") || path === "/api/health") return;
+      const identity = callers.get(res);
+      log.info("request", { method: req.method, path: clean(path, 200), status: res.statusCode, ms: Date.now() - began, owner: identity?.owner, kind: identity?.kind });
+    });
     handle(req, res).catch((error) => {
       // the reason (paths, upstream URLs) stays in the log; the client gets a reference to find it by
       const reference = randomBytes(4).toString("hex");

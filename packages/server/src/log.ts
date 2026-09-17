@@ -5,19 +5,34 @@
  */
 export type LogLevel = "info" | "warn" | "error";
 
+export interface LogEntry {
+  time: string;
+  level: LogLevel;
+  message: string;
+  fields: Record<string, unknown>;
+}
+
 export interface Logger {
   info(message: string, fields?: Record<string, unknown>): void;
   warn(message: string, fields?: Record<string, unknown>): void;
   error(message: string, fields?: Record<string, unknown>): void;
+  /** The most recent lines, oldest first, for operators asking the API what happened. */
+  recent?(limit?: number): LogEntry[];
 }
+
+// enough for a day of quiet operation or a few busy hours; the host's log collector keeps the rest
+const RECENT_LINES = 2000;
 
 const LEVEL_TAG: Record<LogLevel, string> = { info: "info ", warn: "WARN ", error: "ERROR" };
 
 export function createLogger(options: { format?: "pretty" | "json"; write?: (line: string) => void } = {}): Logger {
   const format = options.format ?? (process.env.LOG_FORMAT === "json" || !process.stdout.isTTY ? "json" : "pretty");
   const write = options.write ?? ((line: string) => process.stdout.write(line + "\n"));
+  const recent: LogEntry[] = [];
   const emit = (level: LogLevel, message: string, fields: Record<string, unknown> = {}): void => {
     const time = new Date().toISOString();
+    recent.push({ time, level, message, fields });
+    if (recent.length > RECENT_LINES) recent.shift();
     if (format === "json") {
       write(JSON.stringify({ time, level, message, ...fields }));
       return;
@@ -31,6 +46,7 @@ export function createLogger(options: { format?: "pretty" | "json"; write?: (lin
   return {
     info: (message, fields) => emit("info", message, fields),
     warn: (message, fields) => emit("warn", message, fields),
-    error: (message, fields) => emit("error", message, fields)
+    error: (message, fields) => emit("error", message, fields),
+    recent: (limit = 200) => recent.slice(-Math.max(0, Math.min(limit, RECENT_LINES)))
   };
 }
