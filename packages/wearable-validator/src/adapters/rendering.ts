@@ -376,6 +376,56 @@ export function launchChromium(options: { gpu: Gpu; headed?: boolean; executable
   });
 }
 
+/** What a host can actually do: an engine that never draws looks exactly like a slow one in the run log. */
+export interface RenderEnvironment {
+  browserVersion: string;
+  /** The WebGPU adapter the page was given, when it got one. */
+  adapter?: { vendor: string; architecture: string; device: string; description: string; isFallbackAdapter?: boolean };
+  /** A GPUDevice was created: an adapter alone does not prove the engine can render. */
+  device: boolean;
+  error?: string;
+  ms: number;
+}
+
+/** Launches the browser and asks a secure page for a WebGPU adapter and a device. Answers within timeoutMs either way. */
+export async function probeRenderEnvironment(options: { gpu?: Gpu; timeoutMs?: number } = {}): Promise<RenderEnvironment> {
+  const started = Date.now();
+  const timeoutMs = options.timeoutMs ?? 30000;
+  let browser: Browser | undefined;
+  try {
+    browser = await launchChromium({ gpu: options.gpu ?? "software" });
+    const context = await browser.newContext();
+    // WebGPU needs a secure context: the same fulfilled https page the renderer mounts the previewer in
+    await context.route(PREVIEW_HOST_URL, (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>probe</title>" }));
+    const page = await context.newPage();
+    await page.goto(PREVIEW_HOST_URL, { timeout: timeoutMs });
+    const result = await page.evaluate(async (timeout) => {
+      type AdapterInfo = { vendor: string; architecture: string; device: string; description: string; isFallbackAdapter?: boolean };
+      type Adapter = { info: AdapterInfo; requestDevice(): Promise<unknown> };
+      const gpu = Reflect.get(navigator, "gpu") as { requestAdapter(): Promise<Adapter | null> } | undefined;
+      if (!gpu) return { error: "navigator.gpu is missing: this Chromium build has no WebGPU" };
+      const late = new Promise<{ error: string }>((resolve) => setTimeout(() => resolve({ error: `no WebGPU adapter within ${timeout} ms` }), timeout));
+      const asked = (async () => {
+        const adapter = await gpu.requestAdapter();
+        if (!adapter) return { error: "WebGPU returned no adapter: the container has no working backend" };
+        const { vendor, architecture, device, description, isFallbackAdapter } = adapter.info;
+        try {
+          await adapter.requestDevice();
+          return { adapter: { vendor, architecture, device, description, isFallbackAdapter }, device: true };
+        } catch (error) {
+          return { adapter: { vendor, architecture, device, description, isFallbackAdapter }, device: false, error: error instanceof Error ? error.message : "requestDevice failed" };
+        }
+      })();
+      return Promise.race([asked, late]);
+    }, Math.max(1000, timeoutMs - (Date.now() - started)));
+    return { browserVersion: browser.version(), device: false, ...result, ms: Date.now() - started };
+  } catch (error) {
+    return { browserVersion: browser?.version() ?? "none", device: false, error: error instanceof Error ? error.message : String(error), ms: Date.now() - started };
+  } finally {
+    await browser?.close().catch(() => {});
+  }
+}
+
 /** Without `assets` the deployed binaries are served (the probe's baseline) — still pinned by hash. */
 export async function routeAssets(context: BrowserContext, assets?: LocalBuild, log: RenderLog = () => {}): Promise<{ assertHealthy(): void }> {
   let error: string | undefined;

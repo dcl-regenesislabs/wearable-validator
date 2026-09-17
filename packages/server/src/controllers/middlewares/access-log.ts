@@ -18,9 +18,11 @@ export async function accessLogMiddleware(context: ApiContext, next: () => Promi
   } finally {
     const log = appLogger(context.components.logs, "http");
     const fields = { method: context.request.method, route: context.routerPath ?? "/api/(.*)", status, ms: Date.now() - began, owner: context.identity?.owner, kind: context.identity?.kind };
-    // refusals and the site's polling (queue and run list every few seconds per open tab) stay out of the operator log
+    // the site's polling (queue and run list every few seconds per open tab) is not worth a line anywhere
     const polling = context.request.method === "GET" && (fields.route === "/api/queue" || fields.route === "/api/runs") && status === 200;
-    if (status === 401 || status === 403 || polling) log.debug("request", fields);
-    else log.info("request", fields);
+    if (!polling) {
+      if (status === 401 || status === 403) log.debug("request", fields);
+      else log.info("request", fields);
+    }
   }
 }

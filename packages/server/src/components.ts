@@ -8,6 +8,7 @@ import { manifest } from "@dcl-regenesislabs/wearable-validator";
 import { createIdentityComponent } from "./adapters/identity.js";
 import { appLogger, createLogBufferComponent } from "./adapters/log-buffer.js";
 import { createRendererComponent } from "./adapters/renderer.js";
+import { runSelfTest } from "./adapters/self-test.js";
 import { createReviewerComponent } from "./adapters/reviewer.js";
 import { createBuildInfoComponent } from "./adapters/build-info.js";
 import { createSiteComponent } from "./adapters/site.js";
@@ -81,6 +82,9 @@ export async function createBaseComponents(config: IConfigComponent, logs: ILogg
     artifacts: runStore.root,
     site: site.root ?? "not built (run npm run build -w wearable-validator-web, or use the Vite dev server)"
   });
+
+  // the port is already open: a slow probe must not delay the health check, and its answer is in the log either way
+  if (renderer.available && (await config.getString("RENDERER_SELF_TEST")) !== "0") void runSelfTest({ logs: logBuffer }).catch(() => {});
 
   return { config, logs: logBuffer, logBuffer, server, metrics, identity, renderer, reviewer, runStore, queue, runs, site, buildInfo };
 }
