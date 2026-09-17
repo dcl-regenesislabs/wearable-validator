@@ -1,21 +1,17 @@
-/**
- * Reviewer wrappers around the library's Reviewer contract: the setup-token credential store, the recording
- * wrapper that leaves prompt/context/answer in the run folder, the --no-ai dry run, the --answer replay and the
- * live wrapper that announces each model call on a run's event stream.
- * Previous hop: main.ts (server) and review.ts (CLI) compose them around createPiReviewer().
- * Next hop: validate() calls review(); runs.ts formats what lands on disk.
- */
+/** Reviewer wrappers around the library's Reviewer contract: the setup-token credential store, recording, dry run, replay and live. */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
-import type { Reviewer, ReviewResult } from "@dcl-regenesislabs/wearable-validator";
-import { contextJson, promptMarkdown, readEvidenceFile } from "./runs.js";
-import type { RunSink } from "./server.js";
+import type { IConfigComponent, ILoggerComponent } from "@well-known-components/interfaces";
+import { manifest, type Reviewer, type ReviewResult } from "@dcl-regenesislabs/wearable-validator";
+import { createPiReviewer } from "@dcl-regenesislabs/wearable-validator/ai";
+import { contextJson, promptMarkdown, readEvidenceFile } from "../logic/run-store.js";
+import type { RunSink } from "../types.js";
 
 // a `claude setup-token` (sk-ant-oat…) lives about a year and is itself the bearer, not a refresh token
 const SETUP_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
-export const DRY_RUN_REASON = "The model was not called (--no-ai).";
+export const DRY_RUN_REASON = "The model was not called: the run server has no ANTHROPIC_OAUTH_SETUP_TOKEN.";
 
 /** The only credential: a `claude setup-token` from the environment, seeded in memory as the access token so the SDK never tries to refresh it. */
 export function tokenCredentials(token: string): CredentialStore {
@@ -42,7 +38,7 @@ export function tokenCredentials(token: string): CredentialStore {
   };
 }
 
-/** Writes <check>/1-prompt.md and 2-context.json BEFORE forwarding, 3-answer.json after — so --no-ai still leaves the prompt on disk. */
+/** Writes <check>/1-prompt.md and 2-context.json BEFORE forwarding, 3-answer.json after — so a dry run still leaves the prompt on disk. */
 export function recordingReviewer(reviewer: Reviewer, dir: string): Reviewer {
   return {
     async review(request, signal) {
@@ -57,13 +53,13 @@ export function recordingReviewer(reviewer: Reviewer, dir: string): Reviewer {
   };
 }
 
-/** --no-ai: renders and records the prompt, never calls the model; the row becomes errored with this reason. */
-export function dryRunReviewer(): Reviewer {
+/** No model: renders and records the prompt, never calls it; the row becomes errored with this reason. */
+export function dryRunReviewer(reason = DRY_RUN_REASON): Reviewer {
   return {
     async review(request) {
       return {
         ok: false,
-        reason: DRY_RUN_REASON,
+        reason,
         metadata: { provider: "none", model: "none", promptVersion: request.prompt.version, promptDigest: request.promptDigest }
       };
     }
@@ -107,5 +103,24 @@ export function liveReviewer(reviewer: Reviewer, run: RunSink): Reviewer {
       run.emit("review", { check, phase: "answer", ...result });
       return result;
     }
+  };
+}
+
+export interface IReviewerComponent {
+  readonly kind: "pi" | "dry-run";
+  readonly model?: string;
+  forRun(run: RunSink): Reviewer;
+}
+
+export async function createReviewerComponent(components: { config: IConfigComponent; logs: ILoggerComponent }): Promise<IReviewerComponent> {
+  const { config, logs } = components;
+  // the only credential is the year-long `claude setup-token` from the environment: no session file, nothing to refresh or persist
+  const setupToken = await config.getString("ANTHROPIC_OAUTH_SETUP_TOKEN");
+  const credentials = setupToken ? tokenCredentials(setupToken) : undefined;
+  if (!credentials) logs.getLogger("reviewer").warn("no OAuth session: reviews render and write the prompt without calling the model (set ANTHROPIC_OAUTH_SETUP_TOKEN to a claude setup-token)");
+  return {
+    kind: credentials ? "pi" : "dry-run",
+    model: credentials ? manifest.ai.model : undefined,
+    forRun: (run) => liveReviewer(recordingReviewer(credentials ? createPiReviewer({ credentials }) : dryRunReviewer(), run.dir), run)
   };
 }

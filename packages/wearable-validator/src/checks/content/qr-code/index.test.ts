@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { encode as encodePng } from "fast-png";
 import { encode as encodeJpeg } from "jpeg-js";
 import { validate } from "../../../index.js";
-import { syntheticGlb, syntheticZip } from "#test/helpers/synthetic.js";
+import { jpegWithFillBytes, pngHeaderBytes, pngWithLeadingChunk, syntheticGlb, syntheticZip } from "#test/helpers/synthetic.js";
 
 // Version-2 QR module matrix for "https://example.com/qr" (generated once with the `qrcode`
 // package, stored as packed bits — no binary fixture in git).
@@ -67,6 +67,48 @@ describe("qr-code (F-04)", () => {
     assert.equal(findings.length, 1);
     assert.equal(findings[0].severity, "error");
     assert.equal(findings[0].where, "thumbnail.png");
+  });
+
+  it("reports a texture whose header claims more pixels than the decode budget instead of decoding it", async () => {
+    const glb = await syntheticGlb({ textureImages: [{ bytes: pngHeaderBytes(12000, 12000), name: "bomb" }] });
+    const result = await validate(await syntheticZip({ glb }), { checks: ["qr-code"] });
+    const findings = result.findings.filter((f) => f.check === "qr-code");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].severity, "warning");
+    assert.match(findings[0].message, /12000×12000 — too large to scan/);
+    assert.match(findings[0].where ?? "", /bomb/);
+  });
+
+  it("reports a thumbnail above the decode budget the same way", async () => {
+    const result = await validate(await syntheticZip({ thumbnail: pngHeaderBytes(20000, 20000) }), { checks: ["qr-code"] });
+    const findings = result.findings.filter((f) => f.check === "qr-code");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].severity, "warning");
+    assert.equal(findings[0].where, "thumbnail.png");
+    assert.equal(findings[0].measured, "20000×20000");
+  });
+
+  it("judges a bomb by its IHDR even behind a leading chunk, and refuses a PNG whose header cannot be read", async () => {
+    const hidden = await validate(await syntheticZip({ thumbnail: pngWithLeadingChunk(pngHeaderBytes(12000, 12000)) }), { checks: ["qr-code"] });
+    const [finding] = hidden.findings.filter((f) => f.check === "qr-code");
+    assert.equal(finding.severity, "warning");
+    assert.match(finding.message, /12000×12000 — too large to scan/);
+
+    const headless = new Uint8Array(40);
+    headless.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    headless.set([0, 0, 0, 0, 0x49, 0x44, 0x41, 0x54], 8);
+    const unreadable = await validate(await syntheticZip({ thumbnail: headless }), { checks: ["qr-code"] });
+    const [warning] = unreadable.findings.filter((f) => f.check === "qr-code");
+    assert.equal(warning.severity, "warning");
+    assert.match(warning.message, /header that could not be read/);
+  });
+
+  it("still scans a JPEG with fill bytes after SOI", async () => {
+    const glb = await syntheticGlb({ textureImages: [{ bytes: jpegWithFillBytes(qrJpegBytes()), mimeType: "image/jpeg", name: "jq" }] });
+    const result = await validate(await syntheticZip({ glb }), { checks: ["qr-code"] });
+    const findings = result.findings.filter((f) => f.check === "qr-code");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].severity, "error");
   });
 
   it("passes a clean wearable zip", async () => {

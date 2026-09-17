@@ -1,8 +1,4 @@
-/**
- * Cloudflare Access JWT verification with node:crypto only: the Worker in front of the curators site forwards the
- * `cf-access-jwt-assertion` header, and the run server trusts nothing else about who is calling.
- * Previous hop: identity.ts accessIdentity() hands the raw token in. Next hop: nothing — claims go back to the seam.
- */
+/** Cloudflare Access JWT verification with node:crypto only. */
 import { createPublicKey, verify, type KeyObject } from "node:crypto";
 
 export interface AccessJwk {
@@ -15,7 +11,10 @@ export interface AccessJwk {
 }
 
 export interface AccessClaims {
-  email: string;
+  /** A person who signed in; absent for a service token. */
+  email?: string;
+  /** A service token's name (the `common_name` claim); absent for a person. */
+  serviceName?: string;
   sub: string;
 }
 
@@ -31,11 +30,14 @@ export interface AccessVerifierOptions {
 }
 
 export interface AccessVerifier {
+  /** Undefined for a token that does not verify; rejects only when the keys could not be fetched (the caller answers 503, not 401). */
   verify(token: string): Promise<AccessClaims | undefined>;
 }
 
 /** An unknown kid triggers a key refresh at most this often, so a forged token cannot make us hammer Cloudflare. */
 const REFRESH_INTERVAL_MS = 60_000;
+/** A certs fetch that hangs must not hold every sign-in with it; cached keys keep serving meanwhile. */
+const CERTS_TIMEOUT_MS = 5_000;
 
 export function certsUrl(teamDomain: string): string {
   return `https://${teamDomain}.cloudflareaccess.com/cdn-cgi/access/certs`;
@@ -48,7 +50,7 @@ function isJwk(value: unknown): value is AccessJwk {
 }
 
 async function fetchAccessKeys(url: string): Promise<AccessJwk[]> {
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(CERTS_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`Cloudflare Access certs answered ${res.status} at ${url}.`);
   const body: unknown = await res.json();
   const keys = body && typeof body === "object" && "keys" in body && Array.isArray(body.keys) ? (body.keys as unknown[]) : undefined;
@@ -73,6 +75,7 @@ export function createAccessVerifier(options: AccessVerifierOptions): AccessVeri
   let lastFetch = -Infinity;
   let pending: Promise<void> | undefined;
 
+  // keys are replaced only by a successful fetch: a failed refresh keeps serving what is cached and is retried after the interval
   function refresh(): Promise<void> {
     pending ??= (async () => {
       lastFetch = now();
@@ -118,8 +121,11 @@ export function createAccessVerifier(options: AccessVerifierOptions): AccessVeri
       if (payload.iss !== issuer) return undefined;
       const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
       if (!audiences.includes(options.audience)) return undefined;
-      if (typeof payload.email !== "string" || payload.email.length === 0) return undefined;
-      return { email: payload.email, sub: typeof payload.sub === "string" ? payload.sub : "" };
+      const sub = typeof payload.sub === "string" ? payload.sub : "";
+      if (typeof payload.email === "string" && payload.email.length > 0) return { email: payload.email, sub };
+      // Access issues service-token JWTs with common_name instead of email
+      if (typeof payload.common_name === "string" && payload.common_name.length > 0) return { serviceName: payload.common_name, sub };
+      return undefined;
     }
   };
 }

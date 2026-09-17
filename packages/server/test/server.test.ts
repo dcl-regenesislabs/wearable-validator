@@ -1,15 +1,15 @@
 import { describe, it, after, before } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { connect, type AddressInfo } from "node:net";
-import { digest, manifest, type CaptureRecord, type Renderer, type Reviewer } from "@dcl-regenesislabs/wearable-validator";
+import { connect } from "node:net";
+import { manifest } from "@dcl-regenesislabs/wearable-validator";
 import { syntheticGlb, syntheticZip } from "../../wearable-validator/test/helpers/synthetic.js";
-import { renderedFrame } from "../../wearable-validator/test/helpers/frames.js";
-import type { Identify } from "../src/identity.js";
-import { liveReviewer, recordingReviewer } from "../src/reviewers.js";
-import { createRunServer, hostAllowed, type RunSink, type ServeOptions } from "../src/server.js";
+import { createAccessVerifier } from "../src/adapters/access.js";
+import { accessIdentity } from "../src/adapters/identity.js";
+import { hostAllowed } from "../src/logic/hosts.js";
+import { fakeRenderer, startTestServer, type ServiceCalls, type TestServer } from "./components.js";
 
 interface Frame {
   type: string;
@@ -22,19 +22,23 @@ interface RunRow {
   startedAt: number;
   done: boolean;
   passed: boolean | null;
+  queued: boolean;
+}
+
+interface QueueView {
+  running: { position: number; mine: boolean; id?: string; name?: string; since: number }[];
+  waiting: { position: number; mine: boolean; id?: string; name?: string; since: number }[];
+  averageRunMs: number | null;
+  maxConcurrentRuns: number;
 }
 
 const body = (bytes: Uint8Array): ArrayBuffer => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 const alice = { "x-test-user": "alice" };
 const bob = { "x-test-user": "bob" };
+const carol = { "x-test-user": "carol" };
+/** A service identity: an operator that reads everything and changes nothing. */
+const bot = { "x-test-user": "service:slack-bot" };
 const zipUpload = { "content-type": "application/zip" };
-const silent = { info() {}, warn() {}, error() {} };
-
-/** The seam under test gets a fake: whoever the x-test-user header names, nobody without it. */
-const identify: Identify = async (req) => {
-  const user = req.headers["x-test-user"];
-  return typeof user === "string" ? { owner: user, kind: "local" } : undefined;
-};
 
 /** One raw HTTP/1.1 request, so the path and Host reach the server exactly as written. */
 function rawRequest(base: string, path: string, host = new URL(base).host, headers: Record<string, string> = {}): Promise<string> {
@@ -51,9 +55,7 @@ function rawRequest(base: string, path: string, host = new URL(base).host, heade
   });
 }
 
-/** Reads one SSE stream to its end and returns the parsed frames. */
-async function readEvents(url: string, headers: Record<string, string> = alice): Promise<Frame[]> {
-  const text = await (await fetch(url, { headers })).text();
+function parseFrames(text: string): Frame[] {
   return text
     .split("\n\n")
     .filter((block) => block.includes("event:"))
@@ -64,81 +66,94 @@ async function readEvents(url: string, headers: Record<string, string> = alice):
     });
 }
 
+/** Reads one SSE stream to its end and returns the parsed frames. */
+async function readEvents(url: string, headers: Record<string, string> = alice): Promise<Frame[]> {
+  return parseFrames(await (await fetch(url, { headers })).text());
+}
+
 async function startRun(base: string, zip: Uint8Array, query = "", headers: Record<string, string> = alice): Promise<string> {
   const res = await fetch(`${base}/api/runs${query}`, { method: "POST", body: body(zip), headers: { ...zipUpload, ...headers } });
-  assert.equal(res.status, 201);
+  if (res.status !== 201) assert.fail(`expected 201, got ${res.status}: ${await res.text()}`);
   return ((await res.json()) as { id: string }).id;
 }
 
-function fakeServices(calls: { services: number; rendered: number[] }) {
-  return async (run: RunSink) => {
-    calls.services++;
-    const size = manifest.rendering.imageSizePx;
-    const bytes = renderedFrame(size);
-    const renderer: Renderer = {
-      buildId: "fake-build",
-      capture: async (_input, requests) => {
-        calls.rendered.push(requests.length);
-        const captures: CaptureRecord[] = [];
-        for (const request of requests) {
-          const capture = { request, bytes, sha256: await digest(bytes), width: size, height: size };
-          await run.capture(capture);
-          captures.push(capture);
-        }
-        return captures;
-      },
-      stop: async () => {}
-    };
-    const base: Reviewer = {
-      review: async (request) => ({
-        ok: true,
-        answer: { verdict: request.check === "thumbnail-honesty" ? "matches" : "ok", summary: "Same shirt.", reviewedCaptureIds: request.images.map((image) => image.id), findings: [] },
-        metadata: { provider: "fake", model: "fixture", promptVersion: request.prompt.version, promptDigest: request.promptDigest }
-      })
-    };
-    // the same wrapping main() does: record the prompt/answer on disk, then announce them
-    return { renderer, reviewer: liveReviewer(recordingReviewer(base, run.dir), run) };
-  };
+async function queueAs(base: string, headers: Record<string, string>): Promise<QueueView> {
+  return (await (await fetch(`${base}/api/queue`, { headers })).json()) as QueueView;
 }
 
-async function listen(options: Omit<ServeOptions, "identify" | "logger" | "capabilities"> & Partial<ServeOptions>): Promise<{ base: string; close(): Promise<void> }> {
-  const created = createRunServer({ identify, logger: silent, capabilities: { renderer: true, reviewer: "dry-run" }, ...options });
-  await new Promise<void>((resolve) => created.server.listen(0, "127.0.0.1", () => resolve()));
-  return { base: `http://127.0.0.1:${(created.server.address() as AddressInfo).port}`, close: created.close };
+async function listAs(base: string, headers: Record<string, string>): Promise<RunRow[]> {
+  return ((await (await fetch(`${base}/api/runs`, { headers })).json()) as { runs: RunRow[] }).runs;
+}
+
+async function until<T>(read: () => Promise<T>, ok: (value: T) => boolean): Promise<T> {
+  for (let i = 0; i < 200; i++) {
+    const value = await read();
+    if (ok(value)) return value;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("condition not met in time");
+}
+
+/** A renderer that does not answer until the test says so, to hold a run in the render slot. */
+function heldRenderer(calls: ServiceCalls): { renderer: ReturnType<typeof fakeRenderer>; release(): void } {
+  let release!: () => void;
+  const gate = { open: new Promise<void>((resolve) => (release = resolve)) };
+  return { renderer: fakeRenderer(calls, gate), release };
+}
+
+/** A cancelled run may still be writing its last event when the server stops: retry the sweep rather than race it. */
+async function stopAndClean(server: TestServer): Promise<void> {
+  await server.stop();
+  await rm(server.artifacts, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
 
 describe("run server", () => {
-  let out: string;
+  let server: TestServer;
   let base: string;
-  let close: () => Promise<void>;
-  const calls = { services: 0, rendered: [] as number[] };
+  const calls: ServiceCalls = { services: 0, rendered: [] };
 
   before(async () => {
-    out = await mkdtemp(join(tmpdir(), "run-server-"));
-    ({ base, close } = await listen({ out, services: fakeServices(calls), maxUploadBytes: 4 * 1024 * 1024 }));
+    server = await startTestServer({ env: { MAX_UPLOAD_BYTES: String(4 * 1024 * 1024) }, renderer: fakeRenderer(calls) });
+    base = server.base;
   });
-  after(async () => {
-    await close();
-    await rm(out, { recursive: true, force: true });
-  });
+  after(() => stopAndClean(server));
 
   it("reports its capabilities, without identity, and names the caller when it can", async () => {
-    const health = (await (await fetch(`${base}/api/health`)).json()) as { visual: { renderer: boolean }; checks: string[]; owner: string | null };
-    assert.equal(health.visual.renderer, true);
+    const health = (await (await fetch(`${base}/api/health`)).json()) as { ok: boolean; visual: { renderer: boolean; reviewer: string }; checks: string[]; rulesVersion: string; owner: string | null };
+    assert.equal(health.ok, true);
+    assert.deepEqual(health.visual, { renderer: true, reviewer: "dry-run" });
     assert.deepEqual(health.checks, ["render-valid", "thumbnail-honesty", "visual-quality", "emote-quality"]);
+    assert.equal(health.rulesVersion, manifest.version);
     assert.equal(health.owner, null);
     const known = (await (await fetch(`${base}/api/health`, { headers: alice })).json()) as { owner: string | null };
     assert.equal(known.owner, "alice");
+    const service = (await (await fetch(`${base}/api/health`, { headers: bot })).json()) as { owner: string | null };
+    assert.equal(service.owner, null, "a service token is not a person: the site never greets it");
   });
 
-  it("answers 401 on every other route without an identity", async () => {
-    for (const path of ["/api/runs", "/api/runs/nope", "/api/runs/nope/events", "/api/runs/nope/captures/x.png"]) {
+  it("answers 401 on every other route without an identity, and keeps those refusals out of the operator log", async () => {
+    for (const path of ["/api/runs", "/api/runs/nope", "/api/runs/nope/events", "/api/runs/nope/captures/x.png", "/api/queue", "/api/stats", "/api/logs"]) {
       const res = await fetch(`${base}${path}`);
       assert.equal(res.status, 401, path);
       assert.equal(((await res.json()) as { message: string }).message, "Sign in to use the run server.");
     }
     assert.equal((await fetch(`${base}/api/runs`, { method: "POST", body: body(await syntheticZip()) })).status, 401);
     assert.equal((await fetch(`${base}/api/runs/nope`, { method: "DELETE" })).status, 401);
+
+    const logs = (await (await fetch(`${base}/api/logs?limit=2000`, { headers: bot })).json()) as { lines: { message: string; fields: Record<string, unknown> }[] };
+    assert.ok(!logs.lines.some((line) => line.message === "request refused"), "a refusal never enters the ring buffer");
+    assert.ok(!logs.lines.some((line) => line.message === "request" && line.fields.status === 401), "nor its access-log line");
+    const refused = server.lines.filter((line) => line.message === "request refused" && line.extra.reason === "no-identity");
+    assert.ok(refused.length >= 9, "the host's collector still sees each one, at debug level");
+    assert.ok(refused.every((line) => line.level === "DEBUG"));
+    assert.deepEqual(refused.map((line) => line.extra.api).filter((api) => api !== "runs"), ["queue", "stats", "logs"]);
+    assert.match(await server.metricsText(), /refused_requests_total\{reason="no-identity"\} (9|[1-9]\d)/);
+  });
+
+  it("answers a JSON 404 for an API path no route claims", async () => {
+    const res = await fetch(`${base}/api/nope`, { headers: alice });
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { message: "Not found." });
   });
 
   it("refuses cross-site browser calls that start or cancel a run, and accepts same-origin ones", async () => {
@@ -149,6 +164,20 @@ describe("run server", () => {
     assert.equal((await fetch(`${base}/api/runs/${id}`, { method: "DELETE", headers: { ...alice, "sec-fetch-site": "cross-site" } })).status, 403);
     assert.equal((await fetch(`${base}/api/runs/${id}`, { method: "DELETE", headers: { ...alice, "sec-fetch-site": "none" } })).status, 202);
     await readEvents(`${base}/api/runs/${id}/events`);
+  });
+
+  it("lets a service identity read but never start or cancel a run", async () => {
+    const zip = await syntheticZip();
+    const refused = await fetch(`${base}/api/runs?model=0`, { method: "POST", body: body(zip), headers: { ...zipUpload, ...bot } });
+    assert.equal(refused.status, 403);
+    assert.match(((await refused.json()) as { message: string }).message, /read-only/);
+    const id = await startRun(base, zip, "?model=0");
+    assert.equal((await fetch(`${base}/api/runs/${id}`, { headers: bot })).status, 200, "an operator sees the run");
+    const cancel = await fetch(`${base}/api/runs/${id}`, { method: "DELETE", headers: bot });
+    assert.equal(cancel.status, 403, "but cannot cancel it");
+    const events = await readEvents(`${base}/api/runs/${id}/events`);
+    assert.equal(events.at(-1)?.type, "done", "the run was not touched");
+    assert.match(await server.metricsText(), /refused_requests_total\{reason="read-only-service"\} 2/);
   });
 
   it("takes only application/zip uploads: what a form or a no-cors fetch from another site can never send", async () => {
@@ -169,8 +198,7 @@ describe("run server", () => {
     assert.match(((await bad.json()) as { message: string }).message, /x-file-name/);
     const long = await startRun(base, zip, "?model=0", { ...alice, "x-file-name": encodeURIComponent("a".repeat(300) + ".zip") });
     await readEvents(`${base}/api/runs/${long}/events`);
-    const { runs } = (await (await fetch(`${base}/api/runs`, { headers: alice })).json()) as { runs: RunRow[] };
-    const name = runs.find((row) => row.id === long)!.name;
+    const name = (await listAs(base, alice)).find((row) => row.id === long)!.name;
     assert.equal(name.length, 80);
     assert.match(name, /^a+\.zip$/);
   });
@@ -221,13 +249,14 @@ describe("run server", () => {
     assert.equal(prompt.status, 200);
     assert.match(await prompt.text(), /Image ID: BaseMale-avatar-000/);
     assert.ok(calls.services >= 1);
-    const folder = (await (await fetch(`${base}/api/runs`, { headers: alice })).json()) as { runs: RunRow[] };
-    const input = JSON.parse(await readFile(join(out, `visual-shirt-${id}`, "input.json"), "utf8")) as Record<string, unknown>;
+    const runs = await listAs(base, alice);
+    const input = JSON.parse(await readFile(join(server.artifacts, `visual-shirt-${id}`, "input.json"), "utf8")) as Record<string, unknown>;
     assert.equal(input.id, id);
     assert.equal(input.owner, "alice");
     assert.equal(input.name, "shirt.zip");
-    assert.equal(input.startedAt, folder.runs.find((row) => row.id === id)!.startedAt);
+    assert.equal(input.startedAt, runs.find((row) => row.id === id)!.startedAt);
     assert.equal(typeof input.sha256, "string");
+    await assert.rejects(stat(join(server.artifacts, `visual-shirt-${id}`, "input.zip")), /ENOENT/, "the upload is gone once the run has it");
   });
 
   it("hides a run from everyone but its owner: 404 on the run, its events, its files and cancel", async () => {
@@ -241,8 +270,37 @@ describe("run server", () => {
     }
     assert.equal((await fetch(`${base}/api/runs/${id}`, { method: "DELETE", headers: bob })).status, 404);
     assert.equal((await fetch(`${base}${capture}`, { headers: alice })).status, 200);
-    const mine = (await (await fetch(`${base}/api/runs`, { headers: bob })).json()) as { runs: RunRow[] };
-    assert.ok(mine.runs.every((row) => row.id !== id), "bob's list never shows alice's run");
+    assert.ok((await listAs(base, bob)).every((row) => row.id !== id), "bob's list never shows alice's run");
+    const bobsLines = server.lines.filter((line) => line.message === "request" && line.extra.owner === "bob");
+    assert.deepEqual(bobsLines.map((line) => [line.level, line.extra.route, line.extra.status]), [
+      ["INFO", "/api/runs/:id", 404], ["INFO", "/api/runs/:id/events", 404], ["INFO", "/api/runs/:id/(.*)", 404], ["INFO", "/api/runs/:id", 404], ["INFO", "/api/runs", 200]
+    ], "a thrown 404 is logged as the 404 the client got, never as a 500");
+  });
+
+  it("serves Prometheus metrics at /metrics, behind the bearer token when one is set", async () => {
+    await fetch(`${base}/api/health`);
+    const open = await fetch(`${base}/metrics`);
+    assert.equal(open.status, 200);
+    assert.match(open.headers.get("content-type") ?? "", /text\/plain/);
+    const text = await open.text();
+    assert.match(text, /http_requests_total\{method="GET",handler="\/api\/health",code="200"\}/);
+    assert.match(text, /runs_accepted_total/);
+    const gated = await startTestServer({ env: { WKC_METRICS_BEARER_TOKEN: "metrics-secret" } });
+    try {
+      assert.equal((await fetch(`${gated.base}/metrics`)).status, 401);
+      assert.equal((await fetch(`${gated.base}/metrics`, { headers: { authorization: "Bearer metrics-secret" } })).status, 200);
+    } finally {
+      await stopAndClean(gated);
+    }
+  });
+
+  it("logs what a check measured without the control characters a model name can carry", async () => {
+    const glb = await syntheticGlb({ animation: { name: "\u001b[31mALERT\u001b[0m\nfake log line: run passed", seconds: 1 } });
+    const id = await startRun(base, await syntheticZip({ glb, kind: "emote" }), "");
+    await readEvents(`${base}/api/runs/${id}/events`);
+    const measured = server.lines.filter((line) => line.message === "check finished" && line.extra.run === id).map((line) => String(line.extra.measured ?? ""));
+    assert.ok(measured.some((text) => text.includes("ALERT")), "the clip name reaches the log");
+    assert.ok(measured.every((text) => !/[\u0000-\u001f\u007f-\u009f]/.test(text)), "without its escape sequences or newlines");
   });
 
   it("lists only the caller's runs, newest first, with a verdict", async () => {
@@ -252,7 +310,7 @@ describe("run server", () => {
     await readEvents(`${base}/api/runs/${older}/events`);
     const newer = await startRun(base, await syntheticZip({ glb: await syntheticGlb({ triangles: 2000 }) }), "", { ...alice, "x-file-name": "newer.zip" });
     await readEvents(`${base}/api/runs/${newer}/events`);
-    const { runs } = (await (await fetch(`${base}/api/runs`, { headers: alice })).json()) as { runs: RunRow[] };
+    const runs = await listAs(base, alice);
     assert.deepEqual(runs.slice(0, 2).map((row) => row.id), [newer, older]);
     assert.ok(runs.every((row) => row.done));
     assert.ok(runs.every((row) => row.id !== bobRun));
@@ -260,8 +318,7 @@ describe("run server", () => {
     assert.equal(runs[0].passed, false, "stopped at the code gate");
     assert.equal(runs[1].passed, true, "every visual row passed");
     assert.ok(runs[0].startedAt >= runs[1].startedAt);
-    const bobs = (await (await fetch(`${base}/api/runs`, { headers: bob })).json()) as { runs: RunRow[] };
-    assert.deepEqual(bobs.runs.map((row) => row.id), [bobRun]);
+    assert.deepEqual((await listAs(base, bob)).map((row) => row.id), [bobRun]);
   });
 
   it("shows an earlier run's photos at once and renders nothing again for the same file", async () => {
@@ -283,7 +340,7 @@ describe("run server", () => {
     const id = await startRun(base, zip, "?standalone=1");
     const all = await readEvents(`${base}/api/runs/${id}/events`);
     const later = await (await fetch(`${base}/api/runs/${id}/events`, { headers: { ...alice, "last-event-id": String(all.length - 2) } })).text();
-    assert.equal(later.split("\n\n").filter((block) => block.includes("event:")).length, 2);
+    assert.equal(parseFrames(later).length, 2);
     // fetch normalises "..", so speak raw HTTP to make sure the guard itself refuses traversal, encoded or not
     for (const path of [`/api/runs/${id}/captures/../../../etc/passwd`, `/api/runs/${id}/captures/%2e%2e/%2e%2e/%2e%2e/etc/passwd`]) {
       assert.match(await rawRequest(base, path, undefined, alice), /^HTTP\/1\.1 404/);
@@ -305,10 +362,24 @@ describe("run server", () => {
     assert.equal(hostAllowed(undefined), false);
   });
 
+  it("logs a hostile Host header as a fingerprint at debug level: never its text, never in the operator log", async () => {
+    // shell and JSON metacharacters a URL host may carry: what an operator's terminal or the Slack bot would otherwise render
+    const hostile = "evil_$(id);{json}'\"quoted\".example";
+    assert.match(await rawRequest(base, "/api/runs", hostile, alice), /^HTTP\/1\.1 403/);
+    const refused = server.lines.filter((line) => line.message === "request refused" && line.extra.reason === "host");
+    assert.ok(refused.length >= 1);
+    assert.ok(refused.every((line) => line.level === "DEBUG"));
+    assert.match(String(refused.at(-1)!.extra.host), new RegExp(`^[0-9a-f]{8}/${hostile.length}$`));
+    assert.ok(!JSON.stringify(server.lines).includes("evil_"), "the attacker's bytes reach no log line");
+    assert.ok(!server.components.logBuffer.recent(2000).some((line) => line.message === "request refused"), "the ring buffer never keeps a refusal");
+    assert.match(await server.metricsText(), /refused_requests_total\{reason="host"\} [1-9]/);
+  });
+
   it("answers 413 with a message instead of dropping the connection on an oversize upload", async () => {
     const res = await fetch(`${base}/api/runs`, { method: "POST", body: new ArrayBuffer(5 * 1024 * 1024), headers: { ...zipUpload, ...alice } });
     assert.equal(res.status, 413);
-    assert.match(((await res.json()) as { message: string }).message, /larger than/);
+    assert.match(((await res.json()) as { message: string }).message, /larger than 4194304 bytes/);
+    assert.ok((await listAs(base, alice)).every((row) => row.name !== "item.zip" || row.done), "nothing was accepted");
   });
 
   it("accepts two simultaneous uploads and runs them one after the other", async () => {
@@ -324,42 +395,11 @@ describe("run server", () => {
   });
 });
 
-interface QueueView {
-  running: { position: number; mine: boolean; id?: string; name?: string; since: number }[];
-  waiting: { position: number; mine: boolean; id?: string; name?: string; since: number }[];
-  averageRunMs: number | null;
-  maxConcurrentRuns: number;
-}
-
-/** Services that do not answer until the test says so, to hold a run in the render slot. */
-function heldServices(gate: { open: Promise<void> }, calls: { services: number; rendered: number[] }) {
-  const real = fakeServices(calls);
-  return async (run: RunSink) => {
-    await gate.open;
-    return real(run);
-  };
-}
-
-async function queueAs(base: string, headers: Record<string, string>): Promise<QueueView> {
-  return (await (await fetch(`${base}/api/queue`, { headers })).json()) as QueueView;
-}
-
-async function until<T>(read: () => Promise<T>, ok: (value: T) => boolean): Promise<T> {
-  for (let i = 0; i < 200; i++) {
-    const value = await read();
-    if (ok(value)) return value;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error("condition not met in time");
-}
-
 describe("the waiting line", () => {
   it("runs in arrival order, tells each run its place, names only your own items, and lets a waiting run leave", async () => {
-    const out = await mkdtemp(join(tmpdir(), "run-server-queue-"));
-    let release!: () => void;
-    const gate = { open: new Promise<void>((resolve) => (release = resolve)) };
-    const calls = { services: 0, rendered: [] as number[] };
-    const { base, close } = await listen({ out, services: heldServices(gate, calls) });
+    const held = heldRenderer({ services: 0, rendered: [] });
+    const server = await startTestServer({ renderer: held.renderer });
+    const { base } = server;
     try {
       const zip = await syntheticZip();
       const a = await startRun(base, zip, "?model=0", alice);
@@ -377,40 +417,42 @@ describe("the waiting line", () => {
       const told = cEvents.events.filter((event) => event.type === "queue").at(-1)!.data;
       assert.equal(told.position, 2);
       assert.equal(told.ahead, 2);
-      const mine = (await (await fetch(`${base}/api/runs`, { headers: alice })).json()) as { runs: (RunRow & { queued: boolean })[] };
-      assert.deepEqual(mine.runs.map((run) => [run.id, run.queued]), [[c, true], [a, false]]);
+      assert.deepEqual((await listAs(base, alice)).map((run) => [run.id, run.queued]), [[c, true], [a, false]]);
+      await stat(join(server.artifacts, `visual-item-${c}`, "input.zip"));
+      await assert.rejects(stat(join(server.artifacts, `visual-item-${a}`, "input.zip")), /ENOENT/, "the running run read its upload and let it go");
 
       const cancelled = await fetch(`${base}/api/runs/${b}`, { method: "DELETE", headers: bob });
       assert.equal(cancelled.status, 202);
       const bEvents = await readEvents(`${base}/api/runs/${b}/events`, bob);
       assert.equal(bEvents.at(-1)?.type, "error");
       assert.match(String(bEvents.at(-1)?.data.message), /cancelled/);
+      assert.ok(server.lines.some((line) => line.level === "WARN" && line.message === "run stopped" && line.extra.run === b), "a cancel is logged as a stop, not a failure");
+      assert.ok(!server.lines.some((line) => line.level === "ERROR" && line.extra.run === b));
       const moved = await until(() => queueAs(base, alice), (q) => q.waiting.length === 1);
       assert.deepEqual(moved.waiting.map((entry) => [entry.position, entry.id]), [[1, c]]);
       const cAgain = (await (await fetch(`${base}/api/runs/${c}`, { headers: alice })).json()) as { events: Frame[] };
       assert.equal(cAgain.events.filter((event) => event.type === "queue").at(-1)!.data.position, 1);
 
-      release();
+      held.release();
       const aEvents = await readEvents(`${base}/api/runs/${a}/events`);
       assert.equal(aEvents.at(-1)?.type, "done");
       const cDone = await readEvents(`${base}/api/runs/${c}/events`);
       assert.equal(cDone.at(-1)?.type, "done");
       assert.deepEqual(cDone.filter((event) => event.type === "queue").map((event) => event.data.position), [2, 1, 0]);
+      await assert.rejects(stat(join(server.artifacts, `visual-item-${c}`, "input.zip")), /ENOENT/);
       const after = await queueAs(base, alice);
       assert.deepEqual([after.running.length, after.waiting.length], [0, 0]);
       assert.ok(typeof after.averageRunMs === "number" && after.averageRunMs >= 0);
     } finally {
-      await close();
-      await rm(out, { recursive: true, force: true });
+      held.release();
+      await stopAndClean(server);
     }
   });
 
   it("keeps a run with code errors out of the line and runs two at once when allowed", async () => {
-    const out = await mkdtemp(join(tmpdir(), "run-server-queue2-"));
-    let release!: () => void;
-    const gate = { open: new Promise<void>((resolve) => (release = resolve)) };
-    const calls = { services: 0, rendered: [] as number[] };
-    const { base, close } = await listen({ out, services: heldServices(gate, calls), maxConcurrentRuns: 2 });
+    const held = heldRenderer({ services: 0, rendered: [] });
+    const server = await startTestServer({ renderer: held.renderer, env: { MAX_CONCURRENT_RUNS: "2" } });
+    const { base } = server;
     try {
       const zip = await syntheticZip();
       const a = await startRun(base, zip, "?model=0", alice);
@@ -423,11 +465,156 @@ describe("the waiting line", () => {
       const view = await until(() => queueAs(base, alice), (q) => q.running.length === 2);
       assert.deepEqual(view.running.map((entry) => entry.id).sort(), [a, b].sort());
       assert.equal(view.maxConcurrentRuns, 2);
-      release();
+      held.release();
       for (const id of [a, b]) assert.equal((await readEvents(`${base}/api/runs/${id}/events`)).at(-1)?.type, "done");
     } finally {
-      await close();
-      await rm(out, { recursive: true, force: true });
+      held.release();
+      await stopAndClean(server);
+    }
+  });
+
+  it("refuses a fourth run in flight for one owner with 429, standalone or not", async () => {
+    const held = heldRenderer({ services: 0, rendered: [] });
+    const server = await startTestServer({ renderer: held.renderer });
+    const { base } = server;
+    try {
+      const zip = await syntheticZip();
+      const ids = [];
+      for (let i = 0; i < 3; i++) ids.push(await startRun(base, zip, "?model=0", alice));
+      const fourth = await fetch(`${base}/api/runs?model=0&standalone=1`, { method: "POST", body: body(zip), headers: { ...zipUpload, ...alice } });
+      assert.equal(fourth.status, 429);
+      assert.match(((await fourth.json()) as { message: string }).message, /already have 3 runs in progress/);
+      assert.equal((await startRun(base, zip, "?model=0", bob)).length, 32, "another owner is not held back");
+      assert.equal((await listAs(base, alice)).length, 3, "the refused upload left nothing behind");
+      held.release();
+      for (const id of ids) assert.equal((await readEvents(`${base}/api/runs/${id}/events`)).at(-1)?.type, "done");
+      assert.equal((await startRun(base, zip, "?model=0", alice)).length, 32, "a finished run frees the slot");
+    } finally {
+      held.release();
+      await stopAndClean(server);
+    }
+  });
+
+  it("answers 503 with a retry-after when the whole line is taken", async () => {
+    const held = heldRenderer({ services: 0, rendered: [] });
+    const server = await startTestServer({ renderer: held.renderer, env: { MAX_WAITING_RUNS: "1" } });
+    const { base } = server;
+    try {
+      const zip = await syntheticZip();
+      const a = await startRun(base, zip, "?model=0", alice);
+      const b = await startRun(base, zip, "?model=0", bob);
+      await until(() => queueAs(base, alice), (q) => q.running.length === 1 && q.waiting.length === 1);
+      const full = await fetch(`${base}/api/runs?model=0`, { method: "POST", body: body(zip), headers: { ...zipUpload, ...carol } });
+      assert.equal(full.status, 503);
+      assert.equal(full.headers.get("retry-after"), "120");
+      assert.match(((await full.json()) as { message: string }).message, /Try again in a few minutes/);
+      assert.deepEqual(await listAs(base, carol), []);
+      held.release();
+      for (const [id, headers] of [[a, alice], [b, bob]] as const) assert.equal((await readEvents(`${base}/api/runs/${id}/events`, headers)).at(-1)?.type, "done");
+      assert.equal((await startRun(base, zip, "?model=0", carol)).length, 32, "room again once the line moved");
+    } finally {
+      held.release();
+      await stopAndClean(server);
+    }
+  });
+
+  it("counts the runs that reached the renderer against a daily cap and says when the next slot opens", async () => {
+    const server = await startTestServer({ env: { MAX_RUNS_PER_OWNER_PER_DAY: "1" } });
+    const { base } = server;
+    try {
+      const zip = await syntheticZip();
+      const gated = await startRun(base, await syntheticZip({ glb: await syntheticGlb({ triangles: 2000 }) }), "", alice);
+      await readEvents(`${base}/api/runs/${gated}/events`);
+      const first = await startRun(base, zip, "?model=0", alice);
+      await readEvents(`${base}/api/runs/${first}/events`);
+      const second = await fetch(`${base}/api/runs?standalone=1`, { method: "POST", body: body(zip), headers: { ...zipUpload, ...alice } });
+      assert.equal(second.status, 429, "the gated run cost nothing; the rendered one used the day's slot");
+      const message = ((await second.json()) as { message: string }).message;
+      assert.match(message, /used today's 1 visual review/);
+      const opensAt = /opens at (\S+)\./.exec(message)![1];
+      const retryAfter = Number(second.headers.get("retry-after"));
+      assert.ok(Date.parse(opensAt) - Date.now() > 23 * 60 * 60 * 1000);
+      assert.ok(retryAfter > 23 * 60 * 60 && retryAfter <= 24 * 60 * 60);
+      assert.equal((await startRun(base, zip, "?model=0", bob)).length, 32, "the cap is per owner");
+    } finally {
+      await stopAndClean(server);
+    }
+  });
+
+  it("refuses the extra upload among concurrent ones from the same owner before reading its body", async () => {
+    const held = heldRenderer({ services: 0, rendered: [] });
+    const server = await startTestServer({ renderer: held.renderer });
+    const { base } = server;
+    try {
+      const zip = await syntheticZip();
+      const responses = await Promise.all(
+        Array.from({ length: 5 }, () => fetch(`${base}/api/runs?model=0&standalone=1`, { method: "POST", body: body(zip), headers: { ...zipUpload, ...alice } }))
+      );
+      assert.deepEqual(responses.map((res) => res.status).sort(), [201, 201, 201, 429, 429]);
+      assert.equal(server.lines.filter((line) => line.message === "run accepted").length, 3, "the refused uploads were never accepted nor gated");
+      assert.equal((await listAs(base, alice)).length, 3);
+      held.release();
+      for (const res of responses) {
+        if (res.status !== 201) continue;
+        const { id } = (await res.json()) as { id: string };
+        assert.equal((await readEvents(`${base}/api/runs/${id}/events`)).at(-1)?.type, "done");
+      }
+      assert.equal((await startRun(base, zip, "?model=0", alice)).length, 32, "the slots are free again");
+    } finally {
+      held.release();
+      await stopAndClean(server);
+    }
+  });
+
+  it("tells a rendering run's tab that the server is restarting before closing it, at warn level", async () => {
+    const held = heldRenderer({ services: 0, rendered: [] });
+    const server = await startTestServer({ renderer: held.renderer });
+    const { base } = server;
+    try {
+      const zip = await syntheticZip();
+      const rendering = await startRun(base, zip, "?model=0", alice);
+      const waiting = await startRun(base, zip, "?model=0", bob);
+      await until(() => queueAs(base, alice), (q) => q.running.length === 1 && q.waiting.length === 1);
+      const tabs = await Promise.all([fetch(`${base}/api/runs/${rendering}/events`, { headers: alice }), fetch(`${base}/api/runs/${waiting}/events`, { headers: bob })]);
+      await server.stop();
+      for (const tab of tabs) {
+        const last = parseFrames(await tab.text()).at(-1);
+        assert.equal(last?.type, "error");
+        assert.match(String(last?.data.message), /server is restarting/);
+      }
+      for (const id of [rendering, waiting]) {
+        assert.ok(server.lines.some((line) => line.level === "WARN" && line.message === "run stopped" && line.extra.run === id));
+        assert.ok(!server.lines.some((line) => line.level === "ERROR" && line.extra.run === id), "a restart is not a failure");
+      }
+    } finally {
+      held.release();
+      await rm(server.artifacts, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("lets five tabs follow one run and turns the sixth away with 429", async () => {
+    const held = heldRenderer({ services: 0, rendered: [] });
+    const server = await startTestServer({ renderer: held.renderer });
+    const { base } = server;
+    try {
+      const id = await startRun(base, await syntheticZip(), "?model=0", alice);
+      await until(() => queueAs(base, alice), (q) => q.running.length === 1);
+      const tabs: Response[] = [];
+      for (let i = 0; i < 5; i++) {
+        const tab = await fetch(`${base}/api/runs/${id}/events`, { headers: alice });
+        assert.equal(tab.status, 200);
+        tabs.push(tab);
+      }
+      const sixth = await fetch(`${base}/api/runs/${id}/events`, { headers: alice });
+      assert.equal(sixth.status, 429);
+      assert.match(((await sixth.json()) as { message: string }).message, /Too many tabs/);
+      assert.ok(server.lines.some((line) => line.message === "request" && line.extra.route === "/api/runs/:id/events" && line.extra.status === 429), "the refusal is logged as the 429 it was");
+      held.release();
+      for (const tab of tabs) assert.equal(parseFrames(await tab.text()).at(-1)?.type, "done", "every attached tab saw the run end");
+      assert.equal(parseFrames(await (await fetch(`${base}/api/runs/${id}/events`, { headers: alice })).text()).at(-1)?.type, "done", "a finished run has no cap");
+    } finally {
+      held.release();
+      await stopAndClean(server);
     }
   });
 });
@@ -437,8 +624,8 @@ describe("a run folder that cannot be created", () => {
     const parent = await mkdtemp(join(tmpdir(), "run-server-broken-"));
     const file = join(parent, "not-a-directory");
     await writeFile(file, "");
-    const out = join(file, "runs");
-    const { base, close } = await listen({ out, services: fakeServices({ services: 0, rendered: [] }) });
+    const server = await startTestServer({ env: { ARTIFACTS_DIR: join(file, "runs") } });
+    const { base } = server;
     try {
       const zip = body(await syntheticZip());
       const first = await fetch(`${base}/api/runs?model=0`, { method: "POST", body: zip, headers: { ...zipUpload, ...alice } });
@@ -446,10 +633,14 @@ describe("a run folder that cannot be created", () => {
       const answer = (await first.json()) as { message: string; reference: string };
       assert.equal(answer.message, "Request failed.");
       assert.match(answer.reference, /^[0-9a-f]{8}$/);
+      const logged = server.lines.find((line) => line.message === "request failed" && line.extra.reference === answer.reference);
+      assert.ok(logged, "the reason waits in the log under the reference");
+      assert.equal(logged.extra.route, "/api/runs");
+      assert.match(String(logged.extra.error), /ENOTDIR|ENOENT/);
       const second = await fetch(`${base}/api/runs?model=0`, { method: "POST", body: zip, headers: { ...zipUpload, ...bob } });
       assert.equal(second.status, 500, "the failed upload left nothing behind");
     } finally {
-      await close();
+      await server.stop();
       await rm(parent, { recursive: true, force: true });
     }
   });
@@ -457,18 +648,16 @@ describe("a run folder that cannot be created", () => {
 
 describe("public hosts", () => {
   it("PUBLIC_HOSTS extends the Host allow list on a non-loopback bind; without it the check is skipped", async () => {
-    const out = await mkdtemp(join(tmpdir(), "run-server-hosts-"));
-    const services = fakeServices({ services: 0, rendered: [] });
-    const gated = await listen({ out, services, host: "0.0.0.0", publicHosts: ["review.example"] });
-    const open = await listen({ out, services, host: "0.0.0.0" });
+    const gated = await startTestServer({ env: { HTTP_SERVER_HOST: "0.0.0.0", PUBLIC_HOSTS: "review.example" } });
+    const open = await startTestServer({ env: { HTTP_SERVER_HOST: "0.0.0.0" } });
     try {
       assert.match(await rawRequest(gated.base, "/api/runs", "review.example", alice), /^HTTP\/1\.1 200/);
       assert.match(await rawRequest(gated.base, "/api/runs", "attacker.example", alice), /^HTTP\/1\.1 403/);
       assert.match(await rawRequest(open.base, "/api/runs", "attacker.example", alice), /^HTTP\/1\.1 200/);
+      assert.ok(open.lines.some((line) => line.level === "WARN" && line.message.startsWith("Host header check skipped")));
     } finally {
-      await gated.close();
-      await open.close();
-      await rm(out, { recursive: true, force: true });
+      await stopAndClean(gated);
+      await stopAndClean(open);
     }
   });
 });
@@ -484,15 +673,16 @@ describe("runs outlive memory and restarts", () => {
   });
 
   it("serves an evicted finished run from its folder as one done event, and lists it again after a restart", async () => {
-    const calls = { services: 0, rendered: [] as number[] };
-    const first = await listen({ out, services: fakeServices(calls), maxRunsInMemory: 1 });
+    const first = await startTestServer({ env: { ARTIFACTS_DIR: out } });
     const zip = await syntheticZip();
     const evicted = await startRun(first.base, zip, "?standalone=1", { ...alice, "x-file-name": "first.zip" });
     const live = await readEvents(`${first.base}/api/runs/${evicted}/events`);
     const capture = live.find((e) => e.type === "capture")!.data.url as string;
     const bobs = await startRun(first.base, zip, "?standalone=1", { ...bob, "x-file-name": "bobs.zip" });
     await readEvents(`${first.base}/api/runs/${bobs}/events`, bob);
-    // the second run pushed the first out of memory: only its folder remains
+    // the server keeps 50 runs in memory: fifty quick gated runs push the first two out, leaving only their folders
+    const filler = await syntheticZip({ glb: await syntheticGlb({ triangles: 2000 }) });
+    for (let i = 0; i < 50; i++) await readEvents(`${first.base}/api/runs/${await startRun(first.base, filler, "", carol)}/events`, carol);
     const reloaded = (await (await fetch(`${first.base}/api/runs/${evicted}`, { headers: alice })).json()) as { id: string; name: string; done: boolean; events: Frame[] };
     assert.equal(reloaded.done, true);
     assert.equal(reloaded.name, "first.zip");
@@ -506,21 +696,93 @@ describe("runs outlive memory and restarts", () => {
     assert.deepEqual(replay.map((e) => e.type), ["done"]);
     assert.equal((await fetch(`${first.base}${capture}`, { headers: alice })).status, 200);
     assert.equal((await fetch(`${first.base}/api/runs/${evicted}`, { headers: bob })).status, 404);
-    await first.close();
+    await first.stop();
 
-    const second = await listen({ out, services: fakeServices(calls) });
+    const second = await startTestServer({ env: { ARTIFACTS_DIR: out } });
     try {
-      const { runs } = (await (await fetch(`${second.base}/api/runs`, { headers: alice })).json()) as { runs: RunRow[] };
+      const runs = await listAs(second.base, alice);
       assert.deepEqual(runs.map((row) => [row.id, row.name, row.done, row.passed]), [[evicted, "first.zip", true, true]]);
-      const bobList = (await (await fetch(`${second.base}/api/runs`, { headers: bob })).json()) as { runs: RunRow[] };
-      assert.deepEqual(bobList.runs.map((row) => row.id), [bobs]);
+      assert.deepEqual((await listAs(second.base, bob)).map((row) => row.id), [bobs]);
+      assert.equal((await listAs(second.base, carol)).length, 50);
       const restored = (await (await fetch(`${second.base}/api/runs/${evicted}`, { headers: alice })).json()) as { done: boolean; events: Frame[] };
       assert.equal(restored.done, true);
       assert.equal(restored.events[0].type, "done");
       assert.equal((await fetch(`${second.base}${capture}`, { headers: alice })).status, 200);
       assert.equal((await fetch(`${second.base}/api/runs/${evicted}`, { headers: bob })).status, 404);
     } finally {
-      await second.close();
+      await second.stop();
+    }
+  });
+});
+
+describe("operators", () => {
+  it("see every run, the stats and the log; curators get 403 for those and 404 for each other's runs", async () => {
+    const server = await startTestServer();
+    const { base } = server;
+    try {
+      const zip = await syntheticZip();
+      const a = await startRun(base, zip, "?model=0", alice);
+      await readEvents(`${base}/api/runs/${a}/events`);
+      const b = await startRun(base, zip, "?model=0", bob);
+      await readEvents(`${base}/api/runs/${b}/events`, bob);
+
+      for (const path of ["/api/stats", "/api/logs", "/api/runs?all=1"]) {
+        const res = await fetch(`${base}${path}`, { headers: alice });
+        assert.equal(res.status, 403, path);
+        assert.match(((await res.json()) as { message: string }).message, /Only operators/);
+      }
+      assert.equal((await fetch(`${base}/api/runs/${b}`, { headers: alice })).status, 404);
+
+      const every = (await (await fetch(`${base}/api/runs?all=1`, { headers: bot })).json()) as { runs: { id: string; owner: string }[] };
+      assert.deepEqual(every.runs.map((run) => [run.id, run.owner]), [[b, "bob"], [a, "alice"]]);
+      assert.equal((await listAs(base, bot)).length, 0, "without all=1 an operator lists only its own runs");
+      assert.equal((await fetch(`${base}/api/runs/${b}`, { headers: bot })).status, 200);
+      assert.equal((await fetch(`${base}/api/runs/${a}/events`, { headers: bot })).status, 200);
+
+      const stats = (await (await fetch(`${base}/api/stats`, { headers: bot })).json()) as { runs: { total: number; passed: number; running: number; waiting: number }; byOwner: { owner: string; runs: number }[]; byDay: { runs: number }[]; averageRunMs: number | null; maxConcurrentRuns: number; rulesVersion: string };
+      assert.equal(stats.runs.total, 2);
+      assert.deepEqual([stats.runs.running, stats.runs.waiting], [0, 0]);
+      assert.deepEqual(stats.byOwner.map((row) => row.runs), [1, 1]);
+      assert.equal(stats.byDay.reduce((sum, row) => sum + row.runs, 0), 2);
+      assert.equal(stats.maxConcurrentRuns, 1);
+      assert.equal(typeof stats.averageRunMs, "number");
+      assert.equal(stats.rulesVersion, manifest.version);
+
+      const logs = (await (await fetch(`${base}/api/logs?limit=500`, { headers: bot })).json()) as { lines: { time: string; level: string; message: string; fields: Record<string, unknown> }[] };
+      assert.ok(logs.lines.some((line) => line.message === "run accepted" && line.fields.owner === "alice"));
+      assert.ok(logs.lines.some((line) => line.message === "request" && line.fields.route === "/api/runs" && line.fields.status === 201 && line.fields.owner === "alice"), "every API call is one access-log line with its caller");
+      assert.ok(logs.lines.some((line) => line.message === "request" && line.fields.route === "/api/runs/:id/events" && line.fields.kind === "service"), "the route is the pattern, never the URL as sent");
+      assert.ok(!logs.lines.some((line) => line.fields.route === `/api/runs/${a}/events`));
+      assert.ok(!logs.lines.some((line) => line.message === "request" && line.fields.route === "/api/health"));
+      assert.ok(!logs.lines.some((line) => line.fields.status === 403), "a curator's 403 is not the operator's business");
+      assert.ok(server.lines.some((line) => line.level === "DEBUG" && line.message === "request" && line.extra.route === "/api/stats" && line.extra.status === 403 && line.extra.owner === "alice"), "it still reaches the host's collector");
+      const since = logs.lines.at(-1)!;
+      const later = (await (await fetch(`${base}/api/logs?since=${encodeURIComponent(since.time)}`, { headers: bot })).json()) as { lines: unknown[] };
+      assert.ok(later.lines.length < logs.lines.length);
+    } finally {
+      await stopAndClean(server);
+    }
+  });
+});
+
+describe("a sign-in that cannot be verified", () => {
+  it("answers 503 and asks to retry, never 401 or 500, while the certs are unreachable", async () => {
+    const verifier = createAccessVerifier({ teamDomain: "example-team", audience: "aud-1", fetchKeys: async () => { throw new Error("Cloudflare Access certs answered 503."); } });
+    const server = await startTestServer({ identity: { identify: accessIdentity(verifier), kind: "cloudflare-access (example-team)" } });
+    const { base } = server;
+    try {
+      const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+      const token = `${encode({ alg: "RS256", kid: "kid-1", typ: "JWT" })}.${encode({ email: "curator@example.com" })}.sig`;
+      const res = await fetch(`${base}/api/runs`, { headers: { "cf-access-jwt-assertion": token } });
+      assert.equal(res.status, 503);
+      assert.equal(res.headers.get("retry-after"), "5");
+      assert.deepEqual(await res.json(), { message: "Sign-in could not be verified right now." });
+      assert.equal((await fetch(`${base}/api/runs`)).status, 401, "no token at all is still a plain sign-in");
+      const health = (await (await fetch(`${base}/api/health`, { headers: { "cf-access-jwt-assertion": token } })).json()) as { ok: boolean; owner: string | null };
+      assert.deepEqual([health.ok, health.owner], [true, null], "the probe stays green");
+      assert.ok(server.lines.some((line) => line.level === "WARN" && line.message === "sign-in could not be verified" && String(line.extra.error).includes("503")));
+    } finally {
+      await stopAndClean(server);
     }
   });
 });

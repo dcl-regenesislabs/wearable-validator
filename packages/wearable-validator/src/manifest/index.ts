@@ -10,7 +10,11 @@ export interface Manifest {
     wearableBytes: number; skinBytes: number; emoteBytes: number; modelHeadroomBytes: number;
     thumbnailBytes: number; thumbnailMaxSize: number; thumbnailRecommendedSize: number;
     smartWearableVideoBytes: number; audioBytes: number; maxInputBytes: number;
+    /** Zip bounds, checked against the declared sizes before inflating and against the real bytes while inflating. */
+    maxEntries: number; maxUncompressedBytes: number; maxEntryUncompressedBytes: number;
   };
+  /** Header width × height above which no check decodes an image to pixels (a decoded image costs at least 4 bytes per pixel). */
+  images: { maxDecodePixels: number };
   boundingBox: { width: number; height: number; depth: number };
   /** ADR-60 auto-hide set — the categories a skin is expected to hide. */
   skinAutoHideSet: string[];

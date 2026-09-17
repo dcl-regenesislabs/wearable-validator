@@ -4,13 +4,18 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
+import type { BrowserContext, Route, WebSocketRoute } from "playwright-core";
 import { manifest } from "../manifest/index.js";
 import {
+  browserRequestAllowed,
   captureAll, sessionOrder,
   createRenderer,
   previewItem,
   previewUrl,
+  PREVIEW_HOST_URL,
+  PREVIEW_URL,
   readLocalBuild,
+  routeAssets,
   stableScreenshot,
   type PreviewEvent,
   type PreviewSession
@@ -206,6 +211,96 @@ describe("previewUrl", () => {
     assert.equal(url.searchParams.get("background"), manifest.rendering.background);
     assert.equal(url.searchParams.get("skin"), manifest.rendering.skin);
     assert.equal(new URL(previewUrl("babylon")).searchParams.get("unity"), "false");
+  });
+});
+
+describe("browserRequestAllowed", () => {
+  it("allows only https to the host page, the wrapper CDN and Decentraland's own hosts", () => {
+    assert.equal(browserRequestAllowed(PREVIEW_HOST_URL), true);
+    assert.equal(browserRequestAllowed(`${PREVIEW_URL}index.html`), true);
+    assert.equal(browserRequestAllowed("https://peer.decentraland.org/lambdas/profiles/default1"), true);
+    assert.equal(browserRequestAllowed("https://decentraland.org/"), true);
+    assert.equal(browserRequestAllowed("https://example.com/"), false);
+    assert.equal(browserRequestAllowed("https://decentraland.org.evil.com/"), false);
+    assert.equal(browserRequestAllowed("https://evildecentraland.org/"), false);
+    assert.equal(browserRequestAllowed("http://peer.decentraland.org/"), false);
+    assert.equal(browserRequestAllowed("https://10.0.0.1/"), false);
+    assert.equal(browserRequestAllowed("https://localhost:8080/"), false);
+    assert.equal(browserRequestAllowed("not a url"), false);
+  });
+});
+
+describe("routeAssets", () => {
+  /** A BrowserContext that only records route handlers, and a Route that records its outcome. */
+  function fakeContext() {
+    const routes: { pattern: unknown; handler: (route: Route) => unknown }[] = [];
+    const sockets: ((socket: WebSocketRoute) => unknown)[] = [];
+    const context = {
+      route: async (pattern: unknown, handler: (route: Route) => unknown) => {
+        routes.push({ pattern, handler });
+      },
+      routeWebSocket: async (_pattern: unknown, handler: (socket: WebSocketRoute) => unknown) => {
+        sockets.push(handler);
+      }
+    } as unknown as BrowserContext;
+    const request = async (url: string): Promise<string> => {
+      let outcome = "unhandled";
+      const route = {
+        request: () => ({ url: () => url }),
+        continue: async () => {
+          outcome = "continue";
+        },
+        abort: async (code?: string) => {
+          outcome = `abort:${code}`;
+        },
+        fulfill: async () => {
+          outcome = "fulfill";
+        }
+      } as unknown as Route;
+      await routes[0].handler(route);
+      return outcome;
+    };
+    return { context, routes, sockets, request };
+  }
+
+  it("registers a catch-all first that aborts every host off the allowlist and logs each blocked host once", async () => {
+    const fake = fakeContext();
+    const logged: [string, Record<string, unknown> | undefined][] = [];
+    await routeAssets(fake.context, undefined, (message, fields) => logged.push([message, fields]));
+    assert.equal(fake.routes[0].pattern, "**/*");
+    assert.ok(fake.routes.length > 1);
+    assert.equal(await fake.request("https://peer.decentraland.org/content/contents/bafy"), "continue");
+    assert.equal(await fake.request("https://evil.example/collect?x=1"), "abort:blockedbyclient");
+    assert.equal(await fake.request("https://evil.example/collect?x=2"), "abort:blockedbyclient");
+    assert.equal(await fake.request("http://internal.service.local:9200/"), "abort:blockedbyclient");
+    assert.equal(await fake.request("https://t.contentsquare.net/uxa/x.js"), "abort:blockedbyclient", "the wrapper's analytics take the same door, so the URL is never logged");
+    assert.deepEqual(logged, [
+      ["browser request blocked", { host: "evil.example" }],
+      ["browser request blocked", { host: "internal.service.local:9200" }],
+      ["browser request blocked", { host: "t.contentsquare.net" }]
+    ]);
+    assert.ok(fake.routes.every((route) => !(route.pattern instanceof RegExp)), "no host-specific abort route pre-empts the catch-all");
+  });
+
+  it("names only the first few blocked hosts, then says there were more", async () => {
+    const fake = fakeContext();
+    const logged: [string, Record<string, unknown> | undefined][] = [];
+    await routeAssets(fake.context, undefined, (message, fields) => logged.push([message, fields]));
+    for (let i = 0; i < 3000; i++) assert.equal(await fake.request(`https://host-${i}.attacker.example/x`), "abort:blockedbyclient");
+    assert.equal(logged.length, 11);
+    assert.equal(logged.filter(([message]) => message === "browser request blocked").length, 10);
+    assert.deepEqual(logged.at(-1), ["browser requests blocked from more hosts than are listed", { listed: 10 }]);
+  });
+
+  it("closes every WebSocket", async () => {
+    const fake = fakeContext();
+    const logged: string[] = [];
+    await routeAssets(fake.context, undefined, (message) => logged.push(message));
+    let closed = false;
+    const socket = { url: () => "wss://evil.example/socket", close: async () => { closed = true; } } as unknown as WebSocketRoute;
+    await fake.sockets[0](socket);
+    assert.equal(closed, true);
+    assert.deepEqual(logged, ["browser request blocked"]);
   });
 });
 

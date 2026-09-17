@@ -51,7 +51,13 @@
     "thumbnailRecommendedSize": 256,
     "smartWearableVideoBytes": 262144000,
     "audioBytes": 3145728,
-    "maxInputBytes": 272629760
+    "maxInputBytes": 272629760,
+    "maxEntries": 256,
+    "maxUncompressedBytes": 268435456,
+    "maxEntryUncompressedBytes": 268435456
+  },
+  "images": {
+    "maxDecodePixels": 16777216
   },
   "boundingBox": {
     "width": 2.42,
@@ -218,7 +224,7 @@
     }
   },
   "ai": {
-    "model": "claude-sonnet-4-5-20250929",
+    "model": "claude-sonnet-5",
     "maxOutputTokens": 4096,
     "maxInputTokens": 40000,
     "maxImages": 13,

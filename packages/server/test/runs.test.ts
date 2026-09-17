@@ -7,8 +7,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { digest, type CaptureRecord, type Result, type ReviewRequest, type ReviewResult } from "@dcl-regenesislabs/wearable-validator";
 import { pngBytes, syntheticGlb, syntheticZip } from "../../wearable-validator/test/helpers/synthetic.js";
-import { dryRunReviewer, recordingReviewer, replayReviewer, tokenCredentials } from "../src/reviewers.js";
-import { readRun, writeRun } from "../src/runs.js";
+import { dryRunReviewer, recordingReviewer, replayReviewer, tokenCredentials } from "../src/adapters/reviewer.js";
+import { readRun, writeRun } from "../src/logic/run-store.js";
 
 function reviewRequest(): ReviewRequest {
   return {
@@ -28,7 +28,7 @@ describe("code gate", () => {
     try {
       const file = join(directory, "invalid.zip");
       await writeFile(file, await syntheticZip({ glb: await syntheticGlb({ triangles: 2000 }) }));
-      const script = resolve(import.meta.dirname, "../src/review.ts");
+      const script = resolve(import.meta.dirname, "../src/cli/review.ts");
       await assert.rejects(
         promisify(execFile)(process.execPath, [
           "--import", "tsx", script, file,
@@ -131,6 +131,9 @@ describe("run folder", () => {
       const dry = await dryRunReviewer().review(reviewRequest());
       assert.equal(dry.ok, false);
       assert.equal(dry.metadata.promptDigest, "digest-current");
+      assert.equal(dry.ok === false && dry.reason, "The model was not called: the run server has no ANTHROPIC_OAUTH_SETUP_TOKEN.", "the server's reason names the variable, not a flag it no longer has");
+      const flagged = await dryRunReviewer("The model was not called (--no-ai).").review(reviewRequest());
+      assert.equal(flagged.ok === false && flagged.reason, "The model was not called (--no-ai).");
 
       const stale = { ...reviewRequest(), promptDigest: "digest-next" };
       const replayed = await replayReviewer(directory).review(stale);

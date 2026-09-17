@@ -14,6 +14,7 @@ import { decode } from "fast-png";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import playwright from "playwright-core/package.json" with { type: "json" };
 import { digest, digestJson } from "../logic/captures.js";
+import { imageDimensions } from "../logic/images.js";
 import { manifest, type Manifest } from "../manifest/index.js";
 import build from "./rendering-build.json" with { type: "json" };
 import type { CaptureRecord, CaptureRequest, Renderer, RenderInput } from "../types.js";
@@ -22,6 +23,30 @@ import type { CaptureRecord, CaptureRequest, Renderer, RenderInput } from "../ty
 export const PREVIEW_URL = `https://cdn.decentraland.org/@dcl/wearable-preview/${build.previewVersion}/`;
 /** Fulfilled from memory with the page that holds the iframe — never fetched. */
 export const PREVIEW_HOST_URL = "https://preview-host.invalid/";
+/** Beyond the host page and the wrapper CDN, the wrapper only needs Decentraland's own services (profiles, base-avatar content). */
+const BROWSER_ALLOWED_DOMAIN = "decentraland.org";
+const BROWSER_ALLOWED_HOSTS = new Set([new URL(PREVIEW_HOST_URL).hostname, new URL(PREVIEW_URL).hostname]);
+
+/** Whether Chromium may send this request: https to an allowlisted host — creator content loaded in the page reaches nothing else. */
+export function browserRequestAllowed(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  const host = parsed.hostname;
+  return BROWSER_ALLOWED_HOSTS.has(host) || host === BROWSER_ALLOWED_DOMAIN || host.endsWith(`.${BROWSER_ALLOWED_DOMAIN}`);
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.slice(0, 253);
+  } catch {
+    return "(unparsable)";
+  }
+}
 
 export type Gpu = "hardware" | "software";
 
@@ -152,6 +177,46 @@ export interface PreviewSession {
 }
 
 export type OpenPreview = (signal: AbortSignal) => Promise<PreviewSession>;
+
+/** Diagnostics the host may log: what the browser did, in words an operator can act on. Never pixels, never bytes. */
+export type RenderLog = (message: string, fields?: Record<string, unknown>) => void;
+
+/** The last few wrapper messages, shortened: what the previewer said before it went quiet. */
+async function recentPreviewEvents(page: Page, count = 6): Promise<unknown[]> {
+  try {
+    return await page.evaluate(
+      (count) => (window as unknown as PreviewWindow).previewEvents.slice(-count).map((event) => ({ type: event.type, ...(event.payload?.message ? { message: String(event.payload.message).slice(0, 200) } : {}), ...(event.payload?.error ? { error: String(event.payload.error).slice(0, 200) } : {}) })),
+      count
+    );
+  } catch {
+    return [];
+  }
+}
+
+// Unity repeats the same warning every frame: each distinct line is logged once per page, and only so many
+const MAX_PAGE_LINES = 20;
+const MAX_BLOCKED_HOSTS_LOGGED = 10;
+
+/** Page-level trouble an operator needs to see: crashes, uncaught errors, console errors, failed requests. */
+function watchPage(page: Page, log: RenderLog): void {
+  const seen = new Set<string>();
+  const once = (message: string, fields: Record<string, unknown>) => {
+    const key = message + JSON.stringify(fields);
+    if (seen.has(key) || seen.size >= MAX_PAGE_LINES) return;
+    seen.add(key);
+    log(message, fields);
+  };
+  page.on("crash", () => log("browser page crashed"));
+  page.on("pageerror", (error) => once("browser page error", { error: error.message.slice(0, 300) }));
+  page.on("console", (message) => {
+    if (message.type() === "error") once("browser console error", { text: message.text().slice(0, 300) });
+  });
+  page.on("requestfailed", (request) => {
+    const error = request.failure()?.errorText;
+    if (error?.includes("BLOCKED_BY_CLIENT")) return; // routeAssets already logged the blocked host, without the URL
+    once("browser request failed", { url: request.url().slice(0, 200), error });
+  });
+}
 
 export function previewUrl(engine: "unity" | "babylon" = "unity"): string {
   const { profile, background, skin } = manifest.rendering;
@@ -312,16 +377,36 @@ export function launchChromium(options: { gpu: Gpu; headed?: boolean; executable
 }
 
 /** Without `assets` the deployed binaries are served (the probe's baseline) — still pinned by hash. */
-export async function routeAssets(context: BrowserContext, assets?: LocalBuild): Promise<{ assertHealthy(): void }> {
+export async function routeAssets(context: BrowserContext, assets?: LocalBuild, log: RenderLog = () => {}): Promise<{ assertHealthy(): void }> {
   let error: string | undefined;
-  // contentsquare/sentry aborted; serviceWorkers blocked; the host page is fulfilled with minimal HTML that holds the iframe
+  // registered first so every later route is consulted before it: whatever no other route handles is aborted unless the host is allowlisted
+  const blocked = new Set<string>();
+  const block = (url: string) => {
+    const host = hostOf(url);
+    if (blocked.has(host) || blocked.size > MAX_BLOCKED_HOSTS_LOGGED) return;
+    blocked.add(host);
+    // content can ask for any number of hostnames: the operator log names the first few and then says only that there were more
+    if (blocked.size > MAX_BLOCKED_HOSTS_LOGGED) log("browser requests blocked from more hosts than are listed", { listed: MAX_BLOCKED_HOSTS_LOGGED });
+    else log("browser request blocked", { host });
+  };
+  await context.route("**/*", (route) => {
+    const url = route.request().url();
+    if (browserRequestAllowed(url)) return route.continue();
+    block(url);
+    return route.abort("blockedbyclient");
+  });
+  // context.route never sees WebSockets; the wrapper opens none, so every socket is closed unanswered
+  await context.routeWebSocket("**/*", (socket) => {
+    block(socket.url());
+    socket.close({ code: 1008, reason: "blocked" });
+  });
+  // the host page is fulfilled with minimal HTML that holds the iframe; the wrapper's analytics hosts fall to the catch-all above
   await context.route(PREVIEW_HOST_URL, (route) =>
     route.fulfill({
       contentType: "text/html",
       body: "<!doctype html><title>Visual evidence</title>"
     })
   );
-  await context.route(/contentsquare\.net|sentry\.io/, (route) => route.abort());
   await context.route(`${PREVIEW_URL}**`, async (route) => {
     const path = new URL(route.request().url()).pathname.slice(new URL(PREVIEW_URL).pathname.length);
     // deployed 2.20.0 ignores camera changes and draws the avatar in item-only view; only unity/Build/* is served locally, the JS wrapper stays pinned
@@ -361,11 +446,14 @@ export async function routeAssets(context: BrowserContext, assets?: LocalBuild):
 }
 
 /** The default seam: one Chromium per session, closed on abort, on failure to load, and by close(). */
-export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: boolean }): OpenPreview {
+export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: boolean; log?: RenderLog }): OpenPreview {
   const settings = manifest.rendering;
+  const log: RenderLog = options.log ?? (() => {});
   return async (signal) => {
     signal.throwIfAborted();
+    const started = Date.now();
     const browser = await launchChromium(options);
+    log("browser launched", { version: browser.version(), gpu: options.gpu, extraArgs: process.env.CHROMIUM_ARGS ?? "", ms: Date.now() - started });
     let closing: Promise<void> | undefined;
     const close = () => (closing ??= browser.close());
     const abort = () => {
@@ -378,13 +466,22 @@ export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: b
         viewport: { width: settings.imageSizePx, height: settings.imageSizePx },
         serviceWorkers: "block"
       });
-      const health = await routeAssets(context, options.assets);
+      const health = await routeAssets(context, options.assets, log);
       const page = await context.newPage();
+      watchPage(page, log);
       const session = pageSession(page, settings);
       await mountPreview(page, previewUrl(), settings.imageSizePx);
-      const loaded = await waitForLoad(page, 0, settings.loadTimeoutMs);
+      log("previewer mounted", { url: previewUrl().slice(0, 120), localBuild: Boolean(options.assets), ms: Date.now() - started });
+      let loaded: PreviewEvent;
+      try {
+        loaded = await waitForLoad(page, 0, settings.loadTimeoutMs);
+      } catch (error) {
+        log("previewer did not load", { error: error instanceof Error ? error.message.slice(0, 200) : String(error), ms: Date.now() - started, lastEvents: await recentPreviewEvents(page) });
+        throw error;
+      }
       health.assertHealthy();
       session.engine = loaded.payload?.renderer ?? "unknown";
+      log("previewer loaded", { engine: session.engine, ms: Date.now() - started });
       return {
         ...session,
         async close() {
@@ -414,6 +511,11 @@ export async function screenshot(session: PreviewSession, size = manifest.render
     throw new Error("The preview did not return a PNG screenshot.");
   }
   const bytes = Buffer.from(data.slice(data.indexOf(",") + 1), "base64");
+  // the header is checked before decoding so a wrong-sized answer never inflates
+  const header = imageDimensions(bytes);
+  if (!header || header.width !== size || header.height !== size) {
+    throw new Error("The preview returned the wrong screenshot size.");
+  }
   const png = decode(bytes);
   if (png.width !== size || png.height !== size) {
     throw new Error("The preview returned the wrong screenshot size.");
@@ -473,7 +575,8 @@ export async function captureAll(
   input: RenderInput,
   requests: CaptureRequest[],
   signal: AbortSignal,
-  onCapture?: (capture: CaptureRecord) => void
+  onCapture?: (capture: CaptureRecord) => void,
+  log: RenderLog = () => {}
 ): Promise<CaptureRecord[]> {
   const settings = manifest.rendering;
   const item = previewItem(input);
@@ -530,6 +633,7 @@ export async function captureAll(
       } catch (error) {
         if (!timedOut(error) || attempts++ >= settings.captureRetries) throw error;
         // the session state after a timeout is unknown: the next attempt starts from a fresh update
+        log("view timed out, retrying from a fresh update", { view: request.id, attempt: attempts, error: error instanceof Error ? error.message.slice(0, 200) : String(error) });
         setup = "";
       }
     }
@@ -549,6 +653,8 @@ export interface RendererOptions {
   open?: OpenPreview;
   /** Called the moment each view is captured — a live UI can show it while the rest render. */
   onCapture?: (capture: CaptureRecord) => void;
+  /** Browser diagnostics for the host's log: launch, previewer load or failure, page errors, retries. */
+  onLog?: RenderLog;
 }
 
 export async function createRenderer(options: RendererOptions): Promise<Renderer> {
@@ -563,7 +669,7 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     browserOptions,
     binaries: [...assets].map(([path, asset]) => [path, asset.sha256])
   });
-  const open = options.open ?? openPreview({ assets, ...browserOptions });
+  const open = options.open ?? openPreview({ assets, ...browserOptions, log: options.onLog });
   const active = new Map<AbortController, Promise<CaptureRecord[]>>();
   const pending = new Map<string, Promise<CaptureRecord[]>>();
   let stopped = false;
@@ -608,7 +714,7 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
       if (session.engine !== "unity") {
         throw new Error(`The preview loaded the ${session.engine} engine. Visual evidence requires the configured Unity build.`);
       }
-      return await captureAll(session, input, requests, controller.signal, options.onCapture);
+      return await captureAll(session, input, requests, controller.signal, options.onCapture, options.onLog);
     } catch (error) {
       if (signal?.aborted) throw error; // the caller cancelled: let its AbortError through untouched
       if (controller.signal.aborted) {
