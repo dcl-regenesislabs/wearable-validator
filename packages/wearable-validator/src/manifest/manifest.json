@@ -1,5 +1,5 @@
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
   "triangles": {
     "default": 1500,
     "perCategory": {
@@ -160,8 +160,8 @@
     "alphaThreshold": 8
   },
   "rendering": {
-    "imageSizePx": 1024,
-    "recipeVersion": 1,
+    "imageSizePx": 512,
+    "recipeVersion": 2,
     "bodyShapes": [
       "urn:decentraland:off-chain:base-avatars:BaseMale",
       "urn:decentraland:off-chain:base-avatars:BaseFemale"
