@@ -193,6 +193,9 @@ async function recentPreviewEvents(page: Page, count = 6): Promise<unknown[]> {
   }
 }
 
+// how long stop() waits for a browser to close before giving up on it
+const CLOSE_TIMEOUT_MS = 10000;
+
 // Unity repeats the same warning every frame: each distinct line is logged once per page, and only so many
 const MAX_PAGE_LINES = 20;
 const MAX_BLOCKED_HOSTS_LOGGED = 10;
@@ -776,9 +779,28 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
 
   /** After a failure the engine's state is unknown: the next capture starts from a new browser. */
   async function dropSession(): Promise<void> {
-    const closing = session;
+    const opening = session;
     session = undefined;
-    await closing?.then((value) => value.close()).catch(() => {});
+    if (!opening) return;
+    const closed = opening.then((value) => value.close()).catch(() => {});
+    // a browser that never finished opening must not hold stop() forever; the abort already told it to close
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, CLOSE_TIMEOUT_MS);
+      void closed.finally(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  /** A capture's own deadline must reach the browser it is waiting for, even while that browser is still opening. */
+  function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+    if (signal.aborted) return Promise.reject(new Error("The capture was aborted."));
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => reject(new Error("The capture was aborted while the browser was still opening."));
+      signal.addEventListener("abort", onAbort, { once: true });
+      work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    });
   }
 
   /** Views share one engine, so captures run one after another even when two callers ask at once. */
@@ -822,7 +844,7 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     signal?.addEventListener("abort", abort, { once: true });
     try {
       return await serialize(async () => {
-        const preview = await currentSession();
+        const preview = await untilAborted(currentSession(), controller.signal);
         controller.signal.throwIfAborted();
         // the site URL selects Babylon and a WebGPU fallback is not Unity evidence — a non-unity load closes the browser
         if (preview.engine !== "unity") {
@@ -848,8 +870,9 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
   async function stop(): Promise<void> {
     stopped = true;
     for (const controller of active.keys()) controller.abort();
-    await Promise.allSettled(active.values());
+    // the browser closes first: in-flight previewer calls only fail once it is gone, and waiting first would deadlock
     lifetime.abort();
+    await Promise.allSettled(active.values());
     await dropSession();
   }
 
