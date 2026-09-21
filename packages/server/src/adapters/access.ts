@@ -27,6 +27,8 @@ export interface AccessVerifierOptions {
   fetchKeys?: () => Promise<AccessJwk[]>;
   /** Milliseconds since the epoch; injectable so tests drive expiry and the refresh window. */
   now?: () => number;
+  /** How long to wait for the signing keys before giving up; a hung endpoint must not hold every sign-in. */
+  certsTimeoutMs?: number;
 }
 
 export interface AccessVerifier {
@@ -49,8 +51,8 @@ function isJwk(value: unknown): value is AccessJwk {
   return typeof jwk.kid === "string" && typeof jwk.kty === "string" && typeof jwk.n === "string" && typeof jwk.e === "string";
 }
 
-async function fetchAccessKeys(url: string): Promise<AccessJwk[]> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(CERTS_TIMEOUT_MS) });
+async function fetchAccessKeys(url: string, timeoutMs: number): Promise<AccessJwk[]> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`Cloudflare Access certs answered ${res.status} at ${url}.`);
   const body: unknown = await res.json();
   const keys = body && typeof body === "object" && "keys" in body && Array.isArray(body.keys) ? (body.keys as unknown[]) : undefined;
@@ -70,7 +72,7 @@ function decodeSegment(segment: string): Record<string, unknown> | undefined {
 export function createAccessVerifier(options: AccessVerifierOptions): AccessVerifier {
   const issuer = `https://${options.teamDomain}.cloudflareaccess.com`;
   const now = options.now ?? Date.now;
-  const fetchKeys = options.fetchKeys ?? (() => fetchAccessKeys(certsUrl(options.teamDomain)));
+  const fetchKeys = options.fetchKeys ?? (() => fetchAccessKeys(certsUrl(options.teamDomain), options.certsTimeoutMs ?? CERTS_TIMEOUT_MS));
   let keys = new Map<string, KeyObject>();
   let lastFetch = -Infinity;
   let pending: Promise<void> | undefined;
