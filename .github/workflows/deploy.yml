@@ -42,9 +42,13 @@ jobs:
         env:
           HOST: ${{ secrets.DROPLET_HOST }}
         run: |
+          # the port is only exposed inside the compose network, so the container's own healthcheck is the signal
           for i in $(seq 1 30); do
-            body=$(ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "root@$HOST" 'curl -s --max-time 5 http://127.0.0.1:4180/api/health' || true)
-            case "$body" in *'"ok":true'*) echo "$body"; exit 0 ;; esac
+            state=$(ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "root@$HOST" 'cd /root/wearable-validator && docker inspect --format "{{.State.Health.Status}}" "$(docker compose -f deploy/docker-compose.yml ps -q validator)"' || true)
+            if [ "$state" = healthy ]; then
+              ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "root@$HOST" 'cd /root/wearable-validator && docker compose -f deploy/docker-compose.yml exec -T validator wget -qO- http://127.0.0.1:4180/api/health'
+              exit 0
+            fi
             sleep 10
           done
           echo "the server did not answer after the deploy"
