@@ -62,9 +62,8 @@ Three repository secrets make it work (Settings → Secrets and variables → Ac
 | --- | --- |
 | `DROPLET_HOST` | the droplet's IP |
 | `DROPLET_SSH_KEY` | a private key whose public half is in the droplet's `/root/.ssh/authorized_keys`; generate a dedicated one with `ssh-keygen -t ed25519 -C wearable-validator-deploy -f deploy-key -N ""` and keep it out of the repo |
-| `DROPLET_KNOWN_HOSTS` | the droplet's host key, from `ssh-keyscan -t ed25519 <ip>`; pinned so a hijacked DNS answer cannot collect the deploy key |
 
-Until they are set the workflow fails on the first step and nothing else is affected. A deploy can also be started by hand from the Actions tab.
+The droplet's public host key is pinned in the workflow itself (`ssh-keyscan -t ed25519 <ip>`); a rebuilt droplet needs that line updated. Until the secrets are set the workflow fails on the first step and nothing else is affected. A deploy can also be started by hand from the Actions tab.
 
 ### 4. Workers
 
