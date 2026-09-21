@@ -23,7 +23,7 @@ jobs:
           printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           # the droplet's public host key (ssh-keyscan -t ed25519 <ip>), pinned so a hijacked DNS answer cannot collect the deploy key
-          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDV2nKgG2u/9s3vGKYKA75CR6BBM7TyjxSlAEEoPCWv2\n' "$HOST" > ~/.ssh/known_hosts
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOYbktnQQTNW8fwnSLsg5Tn+oOKktjXv6s0LgSq6zJHa\n' "$HOST" > ~/.ssh/known_hosts
 
       - name: Pull and rebuild
         env:
