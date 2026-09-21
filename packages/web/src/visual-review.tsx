@@ -34,6 +34,8 @@ const RELATIVE_TIME = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 const TIME_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [["day", 86_400_000], ["hour", 3_600_000], ["minute", 60_000]];
 const QUEUE_POLL_MS = 4000;
 const MAX_LISTED_QUEUE = 6;
+const THUMBNAIL_RETRIES = 3;
+const THUMBNAIL_RETRY_MS = 4000;
 
 /** "about 2 min", "under a minute": the wait estimate the server derives from its last renders. */
 function waitText(etaMs: number | null): string {
@@ -149,7 +151,22 @@ function RunView({ state, modelKnown, onCancel, onRunAgain }: { state: RunState;
           <div className="visual-grid">
             {state.id && (
               <figure className={`visual-figure${highlight === "thumbnail" ? " lit" : ""}`} data-capture="thumbnail">
-                <img src={`/api/runs/${state.id}/thumbnail.png`} alt="original thumbnail" onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")} />
+                <img
+                  src={`/api/runs/${state.id}/thumbnail.png`}
+                  alt="original thumbnail"
+                  // an item with no thumbnail 404s for good; a run that has not written it yet answers on the retry
+                  onError={(event) => {
+                    const image = event.target as HTMLImageElement & { dataset: { tries?: string } };
+                    const tries = Number(image.dataset.tries ?? 0);
+                    image.style.visibility = "hidden";
+                    if (tries >= THUMBNAIL_RETRIES) return;
+                    image.dataset.tries = String(tries + 1);
+                    setTimeout(() => {
+                      image.style.visibility = "visible";
+                      image.src = `/api/runs/${state.id}/thumbnail.png?try=${tries + 1}`;
+                    }, THUMBNAIL_RETRY_MS);
+                  }}
+                />
                 <figcaption>thumbnail (original)</figcaption>
               </figure>
             )}

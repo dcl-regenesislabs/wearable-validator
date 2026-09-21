@@ -1,5 +1,5 @@
 /** The Unity renderer as a component: one browser per run, its captures and diagnostics routed to the run's stream and the log. */
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { IConfigComponent, ILoggerComponent } from "@well-known-components/interfaces";
@@ -12,6 +12,7 @@ const ROOT = resolve(import.meta.dirname, "../../../..");
 // packages/server/renderer-build is the gitignored home for the PR #10053 Unity build, so RENDERER_BUILD is optional once it is there
 const DEFAULT_BUILD = join(ROOT, "packages/server/renderer-build");
 const DEFAULT_PROFILE = join(tmpdir(), "wearable-validator-chromium");
+const SINGLETON_FILES = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
 
 export interface IRendererComponent {
   readonly available: boolean;
@@ -41,6 +42,9 @@ export async function resolveProfileDirectory(config: IConfigComponent, log: App
   const directory = configured ? resolve(process.env.INIT_CWD ?? process.cwd(), configured) : DEFAULT_PROFILE;
   try {
     await mkdir(directory, { recursive: true });
+    // a container killed mid-render leaves Chromium's singleton files behind and the next launch refuses the
+    // profile ("in use by another Chromium process on another computer"); one browser at a time makes them stale
+    await Promise.all(SINGLETON_FILES.map((name) => rm(join(directory, name), { force: true })));
     log.info("browser profile kept between runs", { directory });
     return directory;
   } catch (error) {

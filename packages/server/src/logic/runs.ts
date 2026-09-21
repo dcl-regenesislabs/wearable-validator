@@ -309,6 +309,8 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
       await runStore.discardUpload(run.dir);
       const loaded = await loadInput(bytes, {});
       const thumbnail = loaded.ctx?.files.get(loaded.ctx.item.thumbnailPath ?? "thumbnail.png");
+      // on disk now, not at the end with writeRun(): the site shows it beside the views while they are still rendering
+      if (thumbnail) await runStore.writeThumbnail(run.dir, thumbnail);
       const inputSha = createHash("sha256").update(bytes).digest("hex");
       await runStore.writeInput(run.dir, { id: run.id, owner: run.owner, name: run.name, startedAt: run.startedAt, sha256: inputSha });
       // an earlier run of the same file: show its photos now; only stale or missing views get rendered again
