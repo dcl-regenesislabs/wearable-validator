@@ -42,7 +42,9 @@ ENV CHROMIUM_ARGS="--enable-features=Vulkan --use-vulkan=swiftshader --disable-d
 ENV LOG_FORMAT=json
 ENV HOST=0.0.0.0
 # Chromium loads creator-supplied models: never as root. pwuser ships with the Playwright image.
-RUN chown -R pwuser:pwuser /app
+# /data is where a deployment mounts its volumes (run folders, the browser profile); Docker gives a fresh named
+# volume the ownership of the image's directory, so it must exist and belong to pwuser or the server cannot write.
+RUN mkdir -p /data/artifacts /data/chromium && chown -R pwuser:pwuser /app /data
 USER pwuser
 EXPOSE 4180
 CMD ["npm", "start", "-w", "wearable-validator-server"]
