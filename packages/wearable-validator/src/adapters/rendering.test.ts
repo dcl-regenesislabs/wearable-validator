@@ -370,6 +370,9 @@ describe("createRenderer", () => {
       assert.equal(captures.length, requests.length);
       assert.deepEqual(new Set(captures.map((capture) => capture.request.id)), new Set(requests.map((request) => request.id)));
       assert.ok(captures.every((capture) => capture.width === SIZE && capture.height === SIZE && capture.sha256.length === 64));
+      // the session lives as long as the renderer: a run's later views reuse this browser instead of booting another
+      assert.equal(wire.closed, 0);
+      await engine.stop();
       assert.equal(wire.closed, 1);
     });
   });
@@ -433,7 +436,7 @@ describe("createRenderer", () => {
     });
   });
 
-  it("shares one session between concurrent identical un-signalled requests", async () => {
+  it("opens one browser for every capture of a run, and shares one promise between identical concurrent requests", async () => {
     await withBuildDir(async (directory) => {
       let opens = 0;
       const engine = await renderer(directory, async () => {
@@ -443,9 +446,11 @@ describe("createRenderer", () => {
       const requests = [request(engine.buildId)];
       const [first, second] = await Promise.all([engine.capture(input, requests), engine.capture(input, requests)]);
       assert.equal(opens, 1);
-      assert.equal(first, second);
+      assert.equal(first, second, "identical un-signalled requests share one promise");
       await engine.capture(input, requests);
-      assert.equal(opens, 2);
+      assert.equal(opens, 1, "a later capture reuses the same browser");
+      await engine.stop();
+      await assert.rejects(engine.capture(input, requests), /has stopped/);
     });
   });
 
