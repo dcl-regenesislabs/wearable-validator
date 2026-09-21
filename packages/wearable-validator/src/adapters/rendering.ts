@@ -10,11 +10,10 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
-import { decode } from "fast-png";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import playwright from "playwright-core/package.json" with { type: "json" };
 import { digest, digestJson } from "../logic/captures.js";
-import { imageDimensions } from "../logic/images.js";
+import { decodePngSafe, imageDimensions } from "../logic/images.js";
 import { manifest, type Manifest } from "../manifest/index.js";
 import build from "./rendering-build.json" with { type: "json" };
 import type { CaptureRecord, CaptureRequest, Renderer, RenderInput } from "../types.js";
@@ -606,8 +605,8 @@ export async function screenshot(session: PreviewSession, size = manifest.render
   if (!header || header.width !== size || header.height !== size) {
     throw new Error("The preview returned the wrong screenshot size.");
   }
-  const png = decode(bytes);
-  if (png.width !== size || png.height !== size) {
+  const png = decodePngSafe(bytes);
+  if (!png || png.width !== size || png.height !== size) {
     throw new Error("The preview returned the wrong screenshot size.");
   }
   // two consecutive identical raw-pixel digests = settled; PNG bytes are never compared

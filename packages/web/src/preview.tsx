@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import JSZip from "jszip";
+import { unpackZip } from "@dcl-regenesislabs/wearable-validator";
 
 /**
  * Official wearable-preview iframe, fed the local file via postMessage blobs —
@@ -16,7 +16,7 @@ const FEMALE = "urn:decentraland:off-chain:base-avatars:BaseFemale";
 const AVATAR_EMOTES = ["idle", "walk", "run", "jump", "clap", "dance", "dab", "fashion", "fashion-2", "fashion-3", "fashion-4", "fist-pump", "head-explode", "money", "love"];
 
 interface PreviewProps {
-  file: { name: string; bytes?: Uint8Array; isBareGlb: boolean; files?: Map<string, Uint8Array>; metadata?: unknown };
+  file: { name: string; bytes?: Uint8Array; isBareGlb: boolean; files?: Map<string, Uint8Array>; zipFiles?: Map<string, Uint8Array>; metadata?: unknown };
   kind: "wearable" | "emote";
   category?: string;
 }
@@ -172,8 +172,8 @@ export function Preview({ file, kind, category }: PreviewProps) {
   );
 }
 
-async function buildItemWithBlobs(
-  file: { name: string; bytes?: Uint8Array; isBareGlb: boolean; files?: Map<string, Uint8Array>; metadata?: unknown },
+export async function buildItemWithBlobs(
+  file: PreviewProps["file"],
   kind: "wearable" | "emote",
   category?: string
 ): Promise<Record<string, unknown>> {
@@ -199,10 +199,7 @@ async function buildItemWithBlobs(
   } else if (file.isBareGlb) {
     files.set("model.glb", file.bytes!);
   } else {
-    const zip = await JSZip.loadAsync(file.bytes!);
-    for (const [path, entry] of Object.entries(zip.files)) {
-      if (!entry.dir) files.set(path, await entry.async("uint8array"));
-    }
+    files = file.zipFiles ?? (await unpackZip(file.bytes!)).files;
     const manifestBytes = files.get(kind === "emote" ? "emote.json" : "wearable.json");
     if (manifestBytes) {
       try {

@@ -1,8 +1,7 @@
 /** F-04 QR codes — a scannable code's target can change after review, so any readable one is rejected. */
 import jsQR from "jsqr";
-import { decode as decodePng } from "fast-png";
 import { decode as decodeJpeg } from "jpeg-js";
-import { imageDimensions, isJpegBytes, isPngBytes } from "../../../logic/images.js";
+import { decodePngSafe, imageDimensions, isJpegBytes, isPngBytes } from "../../../logic/images.js";
 import { finding, type CheckDefinition, type CheckMeta, type Finding } from "../../../types.js";
 import { POLICY } from "../../docs.js";
 
@@ -18,7 +17,8 @@ interface RgbaImage {
 function toRgba(bytes: Uint8Array, maxPixels: number): RgbaImage | undefined {
   try {
     if (isPngBytes(bytes)) {
-      const png = decodePng(bytes);
+      const png = decodePngSafe(bytes, maxPixels);
+      if (!png) return undefined;
       const { width, height, channels, depth, palette } = png;
       if (depth !== 8 && depth !== 16) return undefined;
       const src = png.data;
@@ -72,7 +72,7 @@ function scan(bytes: Uint8Array, maxPixels: number): Scan {
   if (!header) return { unreadable: true };
   if (header.width * header.height > maxPixels) return { unscanned: header };
   const rgba = toRgba(bytes, maxPixels);
-  if (!rgba) return {};
+  if (!rgba) return { unreadable: true };
   const qr = jsQR(rgba.data, rgba.width, rgba.height);
   return { decoded: qr?.data ?? undefined };
 }

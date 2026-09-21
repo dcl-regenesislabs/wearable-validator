@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   validate,
+  unpackZip,
   checks as checkRegistry,
   details,
   explanations,
@@ -14,7 +15,6 @@ import {
   type Group,
   type Result
 } from "@dcl-regenesislabs/wearable-validator";
-import JSZip from "jszip";
 import { limitFor } from "./limits.js";
 import { Preview } from "./preview.js";
 import { MetadataValues } from "./metadata-values.js";
@@ -63,6 +63,7 @@ interface Loaded {
   zipMetadataSource?: string;
   zipCategory?: string;
   zipHides?: string[];
+  zipFiles?: Map<string, Uint8Array>;
 }
 
 interface Sample {
@@ -73,18 +74,19 @@ interface Sample {
   kind: "wearable" | "emote";
 }
 
-async function zipRuleContext(bytes: Uint8Array): Promise<Pick<Loaded, "zipCategory" | "zipHides" | "zipMetadata" | "zipMetadataSource">> {
+export async function zipRuleContext(bytes: Uint8Array): Promise<Pick<Loaded, "zipCategory" | "zipHides" | "zipMetadata" | "zipMetadataSource" | "zipFiles">> {
+  const { files: zipFiles } = await unpackZip(bytes);
   try {
-    const zip = await JSZip.loadAsync(bytes);
-    const entry = zip.file("wearable.json") ?? zip.file("emote.json");
-    if (entry) {
-      const parsed = JSON.parse(await entry.async("string")) as { category?: string; data?: { category?: string; hides?: string[] } };
-      return { zipCategory: parsed.data?.category ?? parsed.category, zipHides: parsed.data?.hides, zipMetadata: parsed, zipMetadataSource: entry.name };
+    const name = zipFiles.has("wearable.json") ? "wearable.json" : "emote.json";
+    const bytes = zipFiles.get(name);
+    if (bytes) {
+      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as { category?: string; data?: { category?: string; hides?: string[] } };
+      return { zipFiles, zipCategory: parsed.data?.category ?? parsed.category, zipHides: parsed.data?.hides, zipMetadata: parsed, zipMetadataSource: name };
     }
   } catch {
     // Validation reports malformed packages; display hints remain optional.
   }
-  return {};
+  return { zipFiles };
 }
 
 export function App() {
@@ -163,31 +165,44 @@ export function App() {
 
   const onSample = useCallback(
     async (sample: Sample) => {
-      const res = await fetch(`samples/${sample.file}`);
-      if (!res.ok) return;
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      const next: Loaded = { name: `${sample.name} (${sample.label} sample)`, bytes, isBareGlb: false, ...await zipRuleContext(bytes) };
-      setLoaded(next);
-      setResult(null);
-      setCategory("");
-      setTypeOverride("");
-      await run(next, "", "");
+      try {
+        const res = await fetch(`samples/${sample.file}`);
+        if (!res.ok) return;
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        const next: Loaded = { name: `${sample.name} (${sample.label} sample)`, bytes, isBareGlb: false, ...await zipRuleContext(bytes) };
+        setLoaded(next);
+        setResult(null);
+        setCategory("");
+        setTypeOverride("");
+        await run(next, "", "");
+      } catch (error) {
+        setLoaded(null);
+        setResult(null);
+        setCrash(error instanceof Error ? error.message : String(error));
+      }
     },
     [run]
   );
 
   const onFile = useCallback(
     async (file: File) => {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const isBareGlb = bytes.length >= 4 && bytes[0] === 0x67 && bytes[1] === 0x6c && bytes[2] === 0x54 && bytes[3] === 0x46;
-      if (location.search) history.pushState({}, "", location.pathname);
-      const next: Loaded = { name: file.name, bytes, isBareGlb };
-      if (!isBareGlb && file.name.endsWith(".zip")) Object.assign(next, await zipRuleContext(bytes));
-      setLoaded(next);
-      setResult(null);
-      setCategory("");
-      setTypeOverride("");
-      await run(next, "", "");
+      try {
+        if (file.size > manifest.fileSize.maxInputBytes) throw new Error(`The file exceeds the ${manifest.fileSize.maxInputBytes / 1048576} MB input limit.`);
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const isBareGlb = bytes.length >= 4 && bytes[0] === 0x67 && bytes[1] === 0x6c && bytes[2] === 0x54 && bytes[3] === 0x46;
+        if (location.search) history.pushState({}, "", location.pathname);
+        const next: Loaded = { name: file.name, bytes, isBareGlb };
+        if (!isBareGlb && file.name.endsWith(".zip")) Object.assign(next, await zipRuleContext(bytes));
+        setLoaded(next);
+        setResult(null);
+        setCategory("");
+        setTypeOverride("");
+        await run(next, "", "");
+      } catch (error) {
+        setLoaded(null);
+        setResult(null);
+        setCrash(error instanceof Error ? error.message : String(error));
+      }
     },
     [run]
   );

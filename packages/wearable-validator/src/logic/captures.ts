@@ -4,9 +4,8 @@
  * Next hop: supplied captures are reused, the rest come from services.renderer (/rendering);
  * the ordered CaptureRecords go back to the check, which hands them to services.reviewer.
  */
-import { decode } from "fast-png";
 import { imageSize } from "image-size";
-import { isPngBytes } from "./images.js";
+import { decodePngSafe, isPngBytes } from "./images.js";
 import type { CaptureRecord, CaptureRequest, CheckContext, RenderInput } from "../types.js";
 
 export async function digest(bytes: Uint8Array): Promise<string> {
@@ -70,8 +69,8 @@ export async function validCapture(capture: CaptureRecord, request: CaptureReque
     if ((await digest(capture.bytes)) !== capture.sha256) return false;
     const header = imageSize(capture.bytes);
     if (header.type !== "png" || header.width !== request.size || header.height !== request.size) return false;
-    const png = decode(capture.bytes);
-    return png.width === request.size && png.height === request.size && capture.width === png.width && capture.height === png.height;
+    const png = decodePngSafe(capture.bytes);
+    return !!png && png.width === request.size && png.height === request.size && capture.width === png.width && capture.height === png.height;
   } catch {
     return false;
   }

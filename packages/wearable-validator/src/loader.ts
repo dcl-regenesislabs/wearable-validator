@@ -41,6 +41,21 @@ export async function loadInput(input: Input, options: Options): Promise<LoadedI
 }
 
 async function loadZip(bytes: Uint8Array, options: Options): Promise<LoadedInput> {
+  const { files, emptyFiles } = await unpackZip(bytes, options.maxInputBytes);
+  if (files.has("asset.json")) {
+    return { fatal: [fileFormatFinding("Legacy asset.json zips are not supported — export the item from the Builder (wearable.json / emote.json) instead.")] };
+  }
+  return buildContext({ files, emptyFiles, inputKind: "zip", totalBytes: bytes.length, options });
+}
+
+export interface UnpackedZip {
+  files: Map<string, Uint8Array>;
+  emptyFiles: string[];
+}
+
+/** Bounded extraction for validation, metadata display and previews; throws on unsafe or malformed archives. */
+export async function unpackZip(bytes: Uint8Array, maxInputBytes = manifest.fileSize.maxInputBytes): Promise<UnpackedZip> {
+  if (bytes.length > maxInputBytes) throw new Error(`Input is ${mb(bytes.length)} MB — the maximum accepted input is ${mb(maxInputBytes)} MB.`);
   const { maxEntries } = manifest.fileSize;
   // the end-of-central-directory record says how many entries JSZip would parse: a zip that declares too many never gets parsed
   const declaredEntries = declaredEntryCount(bytes);
@@ -72,10 +87,7 @@ async function loadZip(bytes: Uint8Array, options: Options): Promise<LoadedInput
     if (files.has(path)) throw new Error(`duplicate file path after normalization: "${path}"`);
     files.set(path, data);
   }
-  if (files.has("asset.json")) {
-    return { fatal: [fileFormatFinding("Legacy asset.json zips are not supported — export the item from the Builder (wearable.json / emote.json) instead.")] };
-  }
-  return buildContext({ files, emptyFiles, inputKind: "zip", totalBytes: bytes.length, options });
+  return { files, emptyFiles };
 }
 
 const tooManyEntries = (count: number): Error =>

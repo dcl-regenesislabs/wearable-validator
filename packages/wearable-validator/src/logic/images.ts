@@ -1,6 +1,7 @@
-/** Byte-level image helpers shared by checks and adapters — no decoding beyond what a header needs. */
+/** Image dimensions and bounded pixel decoding shared by checks and adapters. */
 import { decode as decodePng } from "fast-png";
 import { manifest } from "../manifest/index.js";
+import { boundedPng, inspectPng } from "./png.js";
 
 export function isPngBytes(bytes: Uint8Array): boolean {
   return bytes.length > 25 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
@@ -13,26 +14,6 @@ export function isJpegBytes(bytes: Uint8Array): boolean {
 export interface ImageDimensions {
   width: number;
   height: number;
-}
-
-// enough chunks to reach IHDR behind any metadata a real encoder writes; a file that hides it deeper is not decoded
-const MAX_PNG_CHUNKS_BEFORE_IHDR = 64;
-
-/** IHDR wherever it sits before the pixel data — fast-png accepts a PNG whose first chunk is metadata, so the header check must too. */
-function pngDimensions(bytes: Uint8Array): ImageDimensions | undefined {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let offset = 8;
-  for (let chunk = 0; chunk < MAX_PNG_CHUNKS_BEFORE_IHDR && offset + 8 <= bytes.length; chunk++) {
-    const length = view.getUint32(offset);
-    const type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
-    if (type === "IHDR") {
-      if (length < 8 || offset + 16 > bytes.length) return undefined;
-      return { width: view.getUint32(offset + 8), height: view.getUint32(offset + 12) };
-    }
-    if (type === "IDAT" || type === "IEND") return undefined;
-    offset += 12 + length;
-  }
-  return undefined;
 }
 
 /** The SOF segment, walking markers the way jpeg-js does (fill bytes skipped): precision, height, width. */
@@ -58,7 +39,7 @@ function jpegFrame(bytes: Uint8Array): { precision: number; width: number; heigh
  * header that cannot be read — which every decode path treats as "do not decode", never as "small enough".
  */
 export function imageDimensions(bytes: Uint8Array): ImageDimensions | undefined {
-  const dimensions = isPngBytes(bytes) ? pngDimensions(bytes) : isJpegBytes(bytes) ? jpegFrame(bytes) : undefined;
+  const dimensions = isPngBytes(bytes) ? inspectPng(bytes) : isJpegBytes(bytes) ? jpegFrame(bytes) : undefined;
   return dimensions && dimensions.width > 0 && dimensions.height > 0 ? { width: dimensions.width, height: dimensions.height } : undefined;
 }
 
@@ -94,16 +75,18 @@ export interface DecodedPng {
   channels: number;
   depth: number;
   data: Uint8Array | Uint16Array;
+  palette?: number[][];
 }
 
 /** Full PNG decode that never throws and never decodes an unreadable header or one above the pixel budget; the data view is always indexable as bytes or 16-bit samples. */
-export function decodePngSafe(bytes: Uint8Array): DecodedPng | undefined {
-  if (!fitsDecodeBudget(bytes)) return undefined;
+export function decodePngSafe(bytes: Uint8Array, maxPixels = manifest.images.maxDecodePixels): DecodedPng | undefined {
   try {
-    const img = decodePng(bytes);
+    const safe = boundedPng(bytes, maxPixels);
+    if (!safe) return undefined;
+    const img = decodePng(safe);
     // fast-png may hand back a Uint8ClampedArray — view it as Uint8Array (same buffer, same indexing).
     const data = img.data instanceof Uint16Array ? img.data : new Uint8Array(img.data.buffer, img.data.byteOffset, img.data.byteLength);
-    return { width: img.width, height: img.height, channels: img.channels, depth: img.depth, data };
+    return { width: img.width, height: img.height, channels: img.channels, depth: img.depth, data, palette: img.palette };
   } catch {
     return undefined;
   }
