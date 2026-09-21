@@ -436,6 +436,30 @@ describe("createRenderer", () => {
     });
   });
 
+  it("gives each body shape its own browser when the host allows more than one session", async () => {
+    await withBuildDir(async (directory) => {
+      const wires: Scripted[] = [];
+      const engine = await createRenderer({
+        buildDirectory: directory,
+        maxSessions: 2,
+        open: async () => {
+          const wire = scripted();
+          wires.push(wire);
+          return wire.session;
+        }
+      });
+      const requests = recipe(engine.buildId);
+      const captures = await engine.capture(input, requests);
+      assert.equal(wires.length, 2, "one browser per body shape");
+      assert.deepEqual(captures.map((capture) => capture.request.id), requests.map((request) => request.id), "results come back in the order they were asked for");
+      const shapesPerWire = wires.map((wire) => new Set(wire.log.filter(([name]) => name === "update").map(([, options]) => (options as { bodyShape?: string }).bodyShape)));
+      assert.ok(shapesPerWire.every((shapes) => shapes.size === 1), "a browser only ever loads one body shape");
+      assert.equal(new Set(shapesPerWire.flatMap((shapes) => [...shapes])).size, 2, "between them they cover both");
+      await engine.stop();
+      assert.deepEqual(wires.map((wire) => wire.closed), [1, 1]);
+    });
+  });
+
   it("opens one browser for every capture of a run, and shares one promise between identical concurrent requests", async () => {
     await withBuildDir(async (directory) => {
       let opens = 0;
