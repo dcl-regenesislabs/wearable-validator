@@ -49,14 +49,14 @@ describe("visual-quality (V-02 · V-03 · V-04 · V-06)", () => {
     assert.equal(result.passed, null);
   });
 
-  it("shares captures with thumbnail-honesty in one run: twelve renders, two model calls", async () => {
+  it("shares captures with render-valid and thumbnail-honesty: one render batch of twelve, two model calls", async () => {
     const mock = services(ok);
     mock.reviewer.review = async (request) =>
       request.check === "thumbnail-honesty"
         ? { ok: true, answer: { verdict: "matches", summary: "Same.", reviewedCaptureIds: request.images.map((image) => image.id), findings: [] }, metadata: metadata(request) }
         : ok(request);
     const result = await validate(await syntheticZip(), { groups: ["rendering"], services: mock });
-    assert.deepEqual(mock.rendered, [2, 10]);
+    assert.deepEqual(mock.rendered, [12]);
     assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:passed", "visual-quality:passed"]);
   });
 

@@ -654,6 +654,20 @@ function timedOut(error: unknown): boolean {
   return error instanceof Error && (error.name === "TimeoutError" || /Timeout \d+ms exceeded/.test(error.message));
 }
 
+/**
+ * What each body shape draws in an item-alone view: the bytes of its representation, main file first. Two
+ * shapes with the same digest show the same picture (no avatar is drawn), so the renderer takes it once.
+ */
+async function representationDigests(input: RenderInput): Promise<Map<string, string>> {
+  const digests = new Map<string, string>();
+  for (const rep of input.item.representations ?? []) {
+    const contents = await Promise.all([...rep.contents].sort().map((path) => digest(input.files.get(path) ?? new Uint8Array())));
+    const signature = await digestJson({ main: await digest(input.files.get(rep.mainFile) ?? new Uint8Array()), contents: contents.sort() });
+    for (const bodyShape of rep.bodyShapes) digests.set(bodyShape, signature);
+  }
+  return digests;
+}
+
 /** One update serves every azimuth of a view; see sessionOrder for why item-alone views go first. */
 export async function captureAll(
   session: PreviewSession,
@@ -666,6 +680,14 @@ export async function captureAll(
   const settings = manifest.rendering;
   const item = previewItem(input);
   const captures: CaptureRecord[] = [];
+  // item-alone views already taken, by everything that decides their pixels except the body shape's name
+  const shapes = await representationDigests(input);
+  const taken = new Map<string, CaptureRecord>();
+  const twinKey = (request: CaptureRequest): string | undefined => {
+    const shape = shapes.get(request.bodyShape);
+    if (request.view !== "wearable" || !shape) return undefined;
+    return `${request.azimuthDegrees}:${request.timeFraction ?? ""}:${request.pose ?? ""}:${request.size}:${shape}`;
+  };
   let setup = "";
   let azimuth = 0;
   let front: string | undefined;
@@ -707,11 +729,21 @@ export async function captureAll(
   }
 
   for (const request of sessionOrder(requests)) {
+    const twin = twinKey(request);
+    const same = twin === undefined ? undefined : taken.get(twin);
+    if (same) {
+      const capture = { ...same, request };
+      log("item-alone view reused", { view: request.id, from: same.request.id });
+      captures.push(capture);
+      onCapture?.(capture);
+      continue;
+    }
     let attempts = 0;
     for (;;) {
       signal.throwIfAborted();
       try {
         const capture = await captureOne(request);
+        if (twin !== undefined) taken.set(twin, capture);
         captures.push(capture);
         onCapture?.(capture);
         break;

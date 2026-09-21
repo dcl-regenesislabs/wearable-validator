@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { captureRequest, digest, digestJson, rendererBuild, resolveCaptures, validCapture } from "./captures.js";
+import { captureRequest, digest, digestJson, inputDigest, rendererBuild, resolveCaptures, validCapture } from "./captures.js";
 import { manifest } from "../manifest/index.js";
 import type { CaptureRecord, CaptureRequest, CheckContext, Renderer } from "../types.js";
 import { pngBytes } from "#test/helpers/synthetic.js";
@@ -111,6 +111,36 @@ describe("captures", () => {
     assert.equal(captures[0], supplied);
     assert.equal(captures[1].request.id, "BaseMale-avatar-090");
     assert.deepEqual(ctx.captures.map((capture) => capture.request.id), ["BaseMale-avatar-000", "BaseMale-avatar-090"]);
+  });
+
+  it("resolveCaptures renders the rest of the recipe with the first request when more rendering rules follow", async () => {
+    const ctx = context({ renderingRules: 2 });
+    const front = await request(ctx, { inputDigest: await inputDigest(ctx), recipeVersion: manifest.rendering.recipeVersion, size: manifest.rendering.imageSizePx });
+    const rendered: CaptureRequest[][] = [];
+    ctx.services = { renderer: fakeRenderer("build-a", rendered) };
+    const captures = await resolveCaptures(ctx, [front]);
+    assert.ok(Array.isArray(captures));
+    assert.equal(captures.length, 1);
+    assert.equal(captures[0].request.id, "BaseMale-avatar-000");
+    // one shape × two views × three azimuths, the asked view first and only once
+    assert.equal(rendered.length, 1);
+    assert.equal(rendered[0].length, 6);
+    assert.equal(rendered[0][0].key, front.key);
+    assert.equal(new Set(rendered[0].map((req) => req.key)).size, 6);
+    assert.equal(ctx.captures.length, 6);
+    // the next rule finds every view already there
+    const side = rendered[0].find((req) => req.id === "BaseMale-wearable-090")!;
+    const again = await resolveCaptures(ctx, [side]);
+    assert.ok(Array.isArray(again));
+    assert.equal(rendered.length, 1);
+
+    // the run's only rendering rule renders just what it asked for
+    const alone = context({ renderingRules: 1 });
+    const only = await request(alone, { inputDigest: await inputDigest(alone), recipeVersion: manifest.rendering.recipeVersion, size: manifest.rendering.imageSizePx });
+    const batches: CaptureRequest[][] = [];
+    alone.services = { renderer: fakeRenderer("build-a", batches) };
+    await resolveCaptures(alone, [only]);
+    assert.deepEqual(batches.map((batch) => batch.length), [1]);
   });
 
   it("resolveCaptures keeps other rules' captures and drops stale ones from the result", async () => {

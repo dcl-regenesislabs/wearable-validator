@@ -72,10 +72,11 @@ describe("render-valid (V-01)", () => {
     assert.equal(result.checks[0].coverage, "missing");
   });
 
-  it("shares its front views with thumbnail-honesty so a full rendering run renders each view once", async () => {
+  it("asks for its two front views but the run renders the whole recipe once, up front", async () => {
     const mock = renderer(() => frame(true));
     const result = await validate(await syntheticZip(), { groups: ["rendering"], services: { renderer: mock.service } });
-    assert.deepEqual(mock.rendered.map((batch) => batch.length), [2, 10]);
+    // one batch: the two front views first, then the ten the rules after it will need
+    assert.deepEqual(mock.rendered.map((batch) => batch.length), [12]);
     assert.equal(result.captures.length, 12);
     assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:skipped", "visual-quality:skipped"]);
   });

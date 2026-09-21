@@ -145,6 +145,8 @@ export interface CheckContext {
   captures?: CaptureRecord[];
   services?: Services;
   signal?: AbortSignal;
+  /** How many rendering-group rules this run executes — with more than one, the first render takes the whole recipe. */
+  renderingRules?: number;
 }
 
 /**
