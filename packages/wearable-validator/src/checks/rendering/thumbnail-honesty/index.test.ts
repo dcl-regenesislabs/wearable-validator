@@ -65,7 +65,7 @@ describe("thumbnail-honesty captures", () => {
     assert.deepEqual(mock.rendered, [12]);
   });
 
-  it("emotes sample the avatar view at three clip fractions on both shapes", async () => {
+  it("emotes sample the avatar view at five clip fractions on both shapes", async () => {
     const mock = services();
     const input = await syntheticZip({
       kind: "emote",
@@ -76,10 +76,11 @@ describe("thumbnail-honesty captures", () => {
     });
     const result = await validate(input, { ...CHECK, services: mock });
     assert.equal(result.checks[0].status, "passed");
-    assert.equal(result.captures.length, 12);
+    assert.equal(result.captures.length, 20);
     assert.equal(result.captures[0].request.id, "BaseMale-avatar-000-t0");
-    assert.equal(result.captures[3].request.id, "BaseMale-avatar-090-t0.5");
-    assert.ok(mock.reviews[0].images[3].label.endsWith("clip fraction 0.5"));
+    assert.equal(result.captures[3].request.id, "BaseMale-avatar-090-t0.25");
+    assert.equal(result.captures[5].request.id, "BaseMale-avatar-090-t0.5");
+    assert.ok(mock.reviews[0].images[5].label.endsWith("clip fraction 0.5"));
     assert.ok(result.captures.every((capture) => capture.request.view === "avatar"));
   });
 

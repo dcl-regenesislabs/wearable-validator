@@ -125,7 +125,7 @@ Written by `packages/server/src/logic/run-store.ts` (`writeRun`) for both the CL
 ```
 packages/server/artifacts/visual-upper_body-k3Qx9a/
 ├── index.html                  gallery: verdict, summary, usage/cost; findings each linking #<captureId>;
-│                               thumbnail beside the 12 captures captioned by id; <details> for prompt, context, answer
+│                               thumbnail beside the captures captioned by id; <details> for prompt, context, answer
 ├── result.json                 the validate() Result verbatim, capture bytes replaced by `file`
 ├── thumbnail.png               the thumbnail as reviewed (after --thumbnail override)
 ├── captures/                   shared by every visual rule in the run; the PNG files ARE the cache
@@ -205,15 +205,15 @@ How it is reviewed:
 },
 "ai": {                             // the one call, shared by every AI-backed rule — read only by ai.ts (+ maxTextLength by parsers)
   "model": "claude-sonnet-5",
-  "maxOutputTokens": 4096, "maxInputTokens": 40000, "maxImages": 13, "timeoutMs": 120000, "maxRetries": 0,
+  "maxOutputTokens": 4096, "maxInputTokens": 40000, "maxImages": 21, "timeoutMs": 120000, "maxRetries": 0,
   "thinkingBudgetTokens": 1024, "imagePixelsPerToken": 750, "textCharactersPerToken": 3, "maxTextLength": 1200
 },
 "thumbnailHonesty": {               // V-05 only — a flat per-topic block beside thumbnail / hands / emote, HEAD style
   "promptVersion": 4, "recipeVersion": 1,
   "views": { "wearable": ["avatar", "wearable"], "emote": ["avatar"] },
   "azimuthDegrees": { "wearable": [0, 90, 180], "emote": [0, 90] },     // 180 added after rear art was mistaken for the front
-  "emoteFractions": [0, 0.5, 1],
-  "maxCaptures": 12, "maxFindings": 8
+  "emoteFractions": [0, 0.25, 0.5, 0.75, 1],           // five moments: the quarter frames are where mid-motion clipping and sliding show
+  "maxCaptures": 20, "maxFindings": 8
 }
 ```
 

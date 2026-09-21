@@ -1,5 +1,5 @@
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "triangles": {
     "default": 1500,
     "perCategory": {
@@ -161,7 +161,7 @@
   },
   "rendering": {
     "imageSizePx": 512,
-    "recipeVersion": 3,
+    "recipeVersion": 4,
     "quality": {
       "renderScale": 1,
       "hdr": false,
@@ -194,10 +194,12 @@
     },
     "emoteFractions": [
       0,
+      0.25,
       0.5,
+      0.75,
       1
     ],
-    "maxCaptures": 12,
+    "maxCaptures": 20,
     "profile": "default1",
     "background": "444444",
     "skin": "e8b89a",
@@ -233,7 +235,7 @@
     "model": "claude-sonnet-5",
     "maxOutputTokens": 4096,
     "maxInputTokens": 40000,
-    "maxImages": 13,
+    "maxImages": 21,
     "timeoutMs": 120000,
     "maxRetries": 0,
     "thinkingBudgetTokens": 1024,
@@ -254,7 +256,7 @@
     "maxFindings": 12
   },
   "emoteQuality": {
-    "promptVersion": 1,
+    "promptVersion": 2,
     "maxFindings": 8
   },
   "receipts": {

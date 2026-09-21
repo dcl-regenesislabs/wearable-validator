@@ -159,7 +159,7 @@ export const thumbnailHonesty: CheckDefinition = {
   describe: "the thumbnail faithfully depicts the rendered item",
   explanation: "The thumbnail should show the item people will actually receive, with the same recognizable shape, colors, textures and included props.",
   fix: "Regenerate the thumbnail from the current item. Remove accessories or effects that are not included, and show its actual geometry and textures in a clear view.",
-  details: "Renders the item on both body shapes — front, side and rear, worn and alone (emotes: front and side at start, middle and end) — then asks one pinned vision model, with a versioned prompt, whether the original thumbnail depicts that item. Mismatches are advisory warnings with the capture ids as evidence. Missing evidence, an inconclusive answer or a provider failure never pass.",
+  details: "Renders the item on both body shapes — front, side and rear, worn and alone (emotes: front and side at five moments of the clip) — then asks one pinned vision model, with a versioned prompt, whether the original thumbnail depicts that item. Mismatches are advisory warnings with the capture ids as evidence. Missing evidence, an inconclusive answer or a provider failure never pass.",
   prompt: thumbnailPrompt,
   appliesTo: (ctx) =>
     ctx.category && ctx.manifest.facialCategories.includes(ctx.category)

@@ -48,12 +48,12 @@ const ok = (request: ReviewRequest): ReviewResult => ({
 });
 
 describe("emote-quality (V-07)", () => {
-  it("reviews the twelve timed frames and tells the model whether the emote loops", async () => {
+  it("reviews the twenty timed frames and tells the model whether the emote loops", async () => {
     const mock = services(ok);
     const result = await validate(await emoteZip(true), { ...CHECK, services: mock });
     assert.equal(result.checks[0].status, "passed");
-    assert.deepEqual(mock.rendered, [12]);
-    assert.equal(mock.reviews[0].images.length, 12);
+    assert.deepEqual(mock.rendered, [20]);
+    assert.equal(mock.reviews[0].images.length, 20);
     assert.equal(mock.reviews[0].images[0].id, "BaseMale-avatar-000-t0");
     assert.match(mock.reviews[0].images[0].label, /this emote loops/);
     const once = services(ok);
