@@ -1,4 +1,4 @@
-/** The HTTP contract the web app relies on (packages/web/src/api.ts): errors → Host check → health (no identity) → identity and access log → routes → JSON 404 → the site. */
+/** The HTTP contract: errors → Host and same-site checks → health → identity and access log → API → site. */
 import { Router } from "@dcl/http-server";
 import type { GlobalContext } from "../types.js";
 import { cancelRunHandler } from "./handlers/cancel-run-handler.js";
@@ -25,18 +25,19 @@ export async function setupRouter({ components }: GlobalContext): Promise<Router
   const router = new Router<GlobalContext>();
   router.use(errorHandler);
   router.use(await createHostCheckMiddleware(components));
+  router.use("/api/(.*)", sameSiteOnly("Cross-site requests cannot access the run server."));
 
   router.get("/api/health", healthHandler);
   // registered after the health route so a probe never needs a caller; every other /api layer runs behind these two
   router.use("/api/(.*)", accessLogMiddleware, identityMiddleware);
 
   router.get("/api/runs", listRunsHandler);
-  router.post("/api/runs", readOnlyServiceMiddleware, sameSiteOnly("Cross-site requests cannot start a run."), createRunHandler);
+  router.post("/api/runs", readOnlyServiceMiddleware, createRunHandler);
   router.get("/api/queue", queueHandler);
   router.get("/api/stats", operatorOnly("Only operators can read the stats."), statsHandler);
   router.get("/api/logs", operatorOnly("Only operators can read the log."), logsHandler);
   router.get("/api/runs/:id", getRunHandler);
-  router.delete("/api/runs/:id", readOnlyServiceMiddleware, sameSiteOnly("Cross-site requests cannot cancel a run."), cancelRunHandler);
+  router.delete("/api/runs/:id", readOnlyServiceMiddleware, cancelRunHandler);
   router.get("/api/runs/:id/events", runEventsHandler);
   router.get("/api/runs/:id/(.*)", runFileHandler);
   router.all("/api/(.*)", notFoundHandler);

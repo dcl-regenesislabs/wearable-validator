@@ -1,4 +1,4 @@
-/** A cookie-riding call from another site never starts or cancels a run; the upload's content type is the second lock, for browsers too old to stamp Sec-Fetch-Site. */
+/** Browser API calls stay on the site's origin; clients without Fetch Metadata also receive no CORS grant. */
 import type { IHttpServerComponent } from "@dcl/core-commons";
 import type { GlobalContext } from "../../types.js";
 import { refused } from "./refusal.js";
