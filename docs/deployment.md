@@ -52,6 +52,20 @@ The first build takes a few minutes: it pulls the Playwright image, installs Chr
 4. Redeploy after a merge: `git pull && docker compose -f deploy/docker-compose.yml up -d --build`.
 5. The named volumes keep run folders and Chromium's profile across restarts, so a restarted container renders warm (the App Platform disk forgot both).
 
+### 3b. Deploy on merge
+
+A merge to `main` redeploys the run server through `.github/workflows/deploy.yml`: it connects to the droplet, fast-forwards the checkout, rebuilds the image and waits for `/api/health` to answer, printing the container log if it does not. `.github/workflows/ci.yml` runs typecheck, tests and the build on every pull request.
+
+Three repository secrets make it work (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+| --- | --- |
+| `DROPLET_HOST` | the droplet's IP |
+| `DROPLET_SSH_KEY` | a private key whose public half is in the droplet's `/root/.ssh/authorized_keys`; generate a dedicated one with `ssh-keygen -t ed25519 -C wearable-validator-deploy -f deploy-key -N ""` and keep it out of the repo |
+| `DROPLET_KNOWN_HOSTS` | the droplet's host key, from `ssh-keyscan -t ed25519 <ip>`; pinned so a hijacked DNS answer cannot collect the deploy key |
+
+Until they are set the workflow fails on the first step and nothing else is affected. A deploy can also be started by hand from the Actions tab.
+
 ### 4. Workers
 
 Workers & Pages → `wearable-validator` → Settings → Build: build command `npm ci && npm run build -w wearable-validator-web`, deploy command `npx wrangler deploy`. Every push to `main` redeploys the site; `API_ORIGIN` is in `wrangler.jsonc`, nothing to set in the dashboard. Until the Access application (step 2) exists the site is public and the run server answers 401 to everyone; the Access login is what makes the visual review work.
