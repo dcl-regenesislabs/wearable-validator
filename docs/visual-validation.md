@@ -189,7 +189,7 @@ How it is reviewed:
   "maxDecodePixels": 16777216       // header width × height above which nothing decodes an image to pixels (4096×4096): qr-code reports "too large to scan", thumbnail / file-format judge the header, decodePngSafe returns undefined; an unreadable header is treated the same way
 },
 "rendering": {                      // the engine, shared by every visual rule — read by rendering.ts and captures.captureRequest
-  "imageSizePx": 1024,
+  "imageSizePx": 512,
   "bodyShapes": ["urn:decentraland:off-chain:base-avatars:BaseMale", "urn:decentraland:off-chain:base-avatars:BaseFemale"],
   "profile": "default1", "background": "444444", "skin": "e8b89a",
   "wearablePose": "fist-pump", "wearablePoseFraction": 0,                 // part of every capture key (scene)
