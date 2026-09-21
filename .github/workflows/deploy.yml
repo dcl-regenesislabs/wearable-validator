@@ -17,13 +17,13 @@ jobs:
       - name: Authorize the droplet
         env:
           KEY: ${{ secrets.DROPLET_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.DROPLET_KNOWN_HOSTS }}
+          HOST: ${{ secrets.DROPLET_HOST }}
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          # the host key is pinned in a secret, so a hijacked DNS answer cannot collect the deploy key
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # the droplet's public host key (ssh-keyscan -t ed25519 <ip>), pinned so a hijacked DNS answer cannot collect the deploy key
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDV2nKgG2u/9s3vGKYKA75CR6BBM7TyjxSlAEEoPCWv2\n' "$HOST" > ~/.ssh/known_hosts
 
       - name: Pull and rebuild
         env:
