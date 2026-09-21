@@ -70,12 +70,15 @@ export async function createRendererComponent(components: { config: IConfigCompo
   const overrides = Object.fromEntries(Object.entries(timeouts).filter(([, value]) => value !== undefined));
   if (Object.keys(overrides).length) log.info("render timeouts overridden", overrides);
   const profileDirectory = await resolveProfileDirectory(config, log);
+  // one browser per body shape halves the wall time when the host has the cores; each wants a core and ~1 GB
+  const maxSessions = Math.max(1, (await config.getNumber("MAX_RENDER_SESSIONS")) ?? 1);
+  if (maxSessions > 1) log.info("rendering body shapes in parallel", { sessions: maxSessions });
   return {
     available: Boolean(buildDirectory),
     buildDirectory,
     forRun: async (run) =>
       buildDirectory
-        ? createRenderer({ buildDirectory, timeouts: overrides, profileDirectory, onCapture: (capture) => void run.capture(capture), onLog: (message, fields) => log.info(message, { run: run.id, ...fields }) })
+        ? createRenderer({ buildDirectory, timeouts: overrides, profileDirectory, maxSessions, onCapture: (capture) => void run.capture(capture), onLog: (message, fields) => log.info(message, { run: run.id, ...fields }) })
         : undefined
   };
 }
