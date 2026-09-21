@@ -575,6 +575,20 @@ describe("captureAll", () => {
     assert.deepEqual(seeks, [0, 0.5 * LENGTH]);
   });
 
+  it("loads a green-skin stress pose as its own setup and hands the skin to the previewer", async () => {
+    const wire = scripted();
+    const requests = [
+      request("build", { bodyShape: MALE, view: "avatar", azimuthDegrees: 0 }),
+      request("build", { id: "stress-0", key: "stress-0", bodyShape: MALE, view: "avatar", azimuthDegrees: 0, pose: "dab", timeFraction: 0.5, skin: "00ff00" }),
+      request("build", { id: "stress-90", key: "stress-90", bodyShape: MALE, view: "avatar", azimuthDegrees: 90, pose: "dab", timeFraction: 0.5, skin: "00ff00" })
+    ];
+    await captureAll(wire.session, distinct, requests, new AbortController().signal);
+    const updates = wire.log.filter(([name]) => name === "update").map(([, options]) => options as Record<string, unknown>);
+    assert.equal(updates.length, 2);
+    assert.equal(updates[0].skin, undefined);
+    assert.deepEqual({ emote: updates[1].emote, skin: updates[1].skin }, { emote: "dab", skin: "00ff00" });
+  });
+
   it("retries a view whose previewer command timed out, from a fresh update, and gives up after the manifest's retries", async () => {
     const flaky = scripted();
     const inner = flaky.session.request;

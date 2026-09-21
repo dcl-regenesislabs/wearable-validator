@@ -207,6 +207,8 @@ export interface CaptureRequest {
   pose?: string;
   /** Fraction of the clip to scrub to — the emote's own clip, or the wearable's pose clip. */
   timeFraction?: number;
+  /** Avatar skin colour (hex, no #) for this view; unset = the manifest scene skin. Chroma green makes skin through cloth unmistakable. */
+  skin?: string;
   size: number;
 }
 

@@ -218,7 +218,7 @@ describe("run server", () => {
     assert.ok(types.filter((t) => t === "check").length > 10, "the code checks stream too");
     const forced = await startRun(base, zip, "?standalone=1");
     const forcedEvents = await readEvents(`${base}/api/runs/${forced}/events`);
-    assert.equal(forcedEvents.filter((e) => e.type === "capture").length, 12, "standalone renders");
+    assert.equal(forcedEvents.filter((e) => e.type === "capture").length, 20, "standalone renders");
     assert.equal(forcedEvents.filter((e) => e.type === "review").length, 4, "and asks the model");
   });
 
@@ -226,7 +226,7 @@ describe("run server", () => {
     const id = await startRun(base, await syntheticZip(), "?model=0");
     const events = await readEvents(`${base}/api/runs/${id}/events`);
     assert.equal(events.filter((e) => e.type === "review").length, 0);
-    assert.equal(events.filter((e) => e.type === "capture").length, 12);
+    assert.equal(events.filter((e) => e.type === "capture").length, 20);
   });
 
   it("streams every capture, the prompt and the answer, and serves the images", async () => {
@@ -235,7 +235,7 @@ describe("run server", () => {
     assert.equal(id.length, 32, "16 random bytes as hex");
     const events = await readEvents(`${base}/api/runs/${id}/events`);
     const captures = events.filter((e) => e.type === "capture");
-    assert.equal(captures.length, 12);
+    assert.equal(captures.length, 20);
     assert.ok(captures.some((c) => c.data.id === "BaseMale-wearable-000"), "the item-alone front view is among them");
     const reviews = events.filter((e) => e.type === "review").map((e) => `${e.data.check}:${e.data.phase}`);
     assert.deepEqual(reviews, ["thumbnail-honesty:request", "thumbnail-honesty:answer", "visual-quality:request", "visual-quality:answer"]);
@@ -243,7 +243,7 @@ describe("run server", () => {
     assert.equal(done.type, "done");
     const result = done.data.result as { checks: { check: string; status: string }[]; captures: { url: string }[] };
     assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:passed", "visual-quality:passed"]);
-    assert.equal(result.captures.length, 12);
+    assert.equal(result.captures.length, 20);
     const image = await fetch(`${base}${captures[3].data.url}`, { headers: alice });
     assert.equal(image.status, 200);
     assert.equal(image.headers.get("content-type"), "image/png");
@@ -332,7 +332,7 @@ describe("run server", () => {
     const second = await startRun(base, zip, "?standalone=1");
     const events = await readEvents(`${base}/api/runs/${second}/events`);
     const types = events.map((e) => e.type);
-    assert.equal(types.filter((t) => t === "capture").length, 12);
+    assert.equal(types.filter((t) => t === "capture").length, 20);
     assert.ok(types.indexOf("capture") < types.indexOf("review"), "photos arrive before the model is asked");
     assert.deepEqual(calls.rendered.slice(renderedBefore), [], "no renderer call for an unchanged file");
     assert.equal(events.at(-1)!.type, "done");
@@ -693,7 +693,7 @@ describe("runs outlive memory and restarts", () => {
     assert.equal(reloaded.events[0].type, "done");
     const result = reloaded.events[0].data.result as { checks: { check: string; status: string }[]; captures: { url: string; file?: string }[] };
     assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:passed", "visual-quality:passed"]);
-    assert.equal(result.captures.length, 12);
+    assert.equal(result.captures.length, 20);
     assert.ok(result.captures.every((entry) => entry.url.startsWith(`/api/runs/${evicted}/captures/`) && entry.file === undefined));
     const replay = await readEvents(`${first.base}/api/runs/${evicted}/events`);
     assert.deepEqual(replay.map((e) => e.type), ["done"]);

@@ -65,7 +65,8 @@ function captionFor(capture: CaptureEvent): string {
   const { request } = capture;
   const shape = request.bodyShape.split(":").pop() ?? request.bodyShape;
   const time = request.timeFraction === undefined ? "" : ` · t=${request.timeFraction}`;
-  return `${shape} · ${request.view} · ${request.azimuthDegrees}°${time}`;
+  const pose = request.pose ? ` · ${request.pose}` : "";
+  return `${shape} · ${request.view}${pose} · ${request.azimuthDegrees}°${time}`;
 }
 
 function reduce(state: RunState, event: RunEvent): RunState {

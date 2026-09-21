@@ -200,6 +200,71 @@
       1
     ],
     "maxCaptures": 20,
+    "stress": {
+      "skin": "00ff00",
+      "azimuthDegrees": [
+        0,
+        90
+      ],
+      "poses": {
+        "arms": [
+          {
+            "clip": "dab",
+            "fraction": 0.5
+          },
+          {
+            "clip": "clap",
+            "fraction": 0.5
+          }
+        ],
+        "legs": [
+          {
+            "clip": "run",
+            "fraction": 0.25
+          },
+          {
+            "clip": "jump",
+            "fraction": 0.75
+          }
+        ],
+        "head": [
+          {
+            "clip": "head-explode",
+            "fraction": 0.25
+          },
+          {
+            "clip": "dab",
+            "fraction": 0.5
+          }
+        ],
+        "body": [
+          {
+            "clip": "dab",
+            "fraction": 0.5
+          },
+          {
+            "clip": "run",
+            "fraction": 0.25
+          }
+        ]
+      },
+      "categoryPoses": {
+        "upper_body": "arms",
+        "hands_wear": "arms",
+        "lower_body": "legs",
+        "feet": "legs",
+        "skin": "body",
+        "hat": "head",
+        "helmet": "head",
+        "hair": "head",
+        "eyewear": "head",
+        "earring": "head",
+        "tiara": "head",
+        "mask": "head",
+        "top_head": "head",
+        "facial_hair": "head"
+      }
+    },
     "profile": "default1",
     "background": "444444",
     "skin": "e8b89a",
@@ -252,7 +317,7 @@
     "maxFindings": 8
   },
   "visualQuality": {
-    "promptVersion": 1,
+    "promptVersion": 2,
     "maxFindings": 12
   },
   "emoteQuality": {
@@ -272,11 +337,11 @@
     },
     {
       "topic": "self hide/replace (M-12)",
-      "note": "Downgraded to warning 2026-09-09: committee-approved items (e.g. 0xae473ded…:0) carry self-referencing hides/replaces and work in-world — the engine ignores them (replaces deprecated by ADR-239)."
+      "note": "Downgraded to warning 2026-09-09: committee-approved items (e.g. 0xae473ded\u2026:0) carry self-referencing hides/replaces and work in-world \u2014 the engine ignores them (replaces deprecated by ADR-239)."
     },
     {
       "topic": "animations/shape keys in wearable GLBs (M-13)",
-      "note": "Downgraded to warning 2026-09-09: approved items ship leftover clips (Mixamo 'Take 001') and work in-world — the engine ignores non-emote animations; docs phrase this as export hygiene."
+      "note": "Downgraded to warning 2026-09-09: approved items ship leftover clips (Mixamo 'Take 001') and work in-world \u2014 the engine ignores non-emote animations; docs phrase this as export hygiene."
     }
   ]
 }

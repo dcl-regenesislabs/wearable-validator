@@ -691,7 +691,7 @@ export async function captureAll(
   const twinKey = (request: CaptureRequest): string | undefined => {
     const shape = shapes.get(request.bodyShape);
     if (request.view !== "wearable" || !shape) return undefined;
-    return `${request.azimuthDegrees}:${request.timeFraction ?? ""}:${request.pose ?? ""}:${request.size}:${shape}`;
+    return `${request.azimuthDegrees}:${request.timeFraction ?? ""}:${request.pose ?? ""}:${request.skin ?? ""}:${request.size}:${shape}`;
   };
   let setup = "";
   let azimuth = 0;
@@ -700,9 +700,9 @@ export async function captureAll(
 
   async function captureOne(request: CaptureRequest): Promise<CaptureRecord> {
     const pose = input.itemType === "wearable" ? request.pose ?? settings.wearablePose : undefined;
-    const nextSetup = `${request.bodyShape}:${request.view}:${pose ?? ""}`;
+    const nextSetup = `${request.bodyShape}:${request.view}:${pose ?? ""}:${request.skin ?? ""}`;
     if (nextSetup !== setup) {
-      await session.update(item, { bodyShape: request.bodyShape, type: request.view, profile: settings.profile, emote: pose });
+      await session.update(item, { bodyShape: request.bodyShape, type: request.view, profile: settings.profile, emote: pose, ...(request.skin ? { skin: request.skin } : {}) });
       // idle ignores emote.pause: wearables play a clip (rest pose by default), pause, seek, then settle
       await session.request("emote", "pause", []);
       setup = nextSetup;

@@ -52,6 +52,16 @@ export interface Manifest {
     azimuthDegrees: { wearable: number[]; emote: number[] };
     emoteFractions: number[];
     maxCaptures: number;
+    /**
+     * V-02's motion pass for wearables: worn views at clip moments that pull the garment, chosen per category,
+     * with the skin in chroma green so skin through cloth is unmistakable. A category not listed uses "body".
+     */
+    stress: {
+      skin: string;
+      azimuthDegrees: number[];
+      poses: Record<string, { clip: string; fraction: number }[]>;
+      categoryPoses: Record<string, string>;
+    };
     profile: string; background: string; skin: string;
     wearablePose: string; wearablePoseFraction: number;
     navigationTimeoutMs: number; loadTimeoutMs: number; commandTimeoutMs: number; captureRetries: number; timeoutMs: number;

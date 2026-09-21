@@ -130,16 +130,55 @@ export async function resolveCaptures(ctx: CheckContext, requests: CaptureReques
 async function recipeAhead(ctx: CheckContext, build: string, requests: CaptureRequest[]): Promise<CaptureRequest[]> {
   if ((ctx.renderingRules ?? 0) < 2) return [];
   const recipe = await recipeRequests(ctx, build);
-  if (typeof recipe === "string") return [];
+  const stress = await stressRequests(ctx, build);
+  if (typeof recipe === "string" || typeof stress === "string") return [];
   const asked = new Set(requests.map((request) => request.key));
   const ahead: CaptureRequest[] = [];
-  for (const request of recipe) {
+  for (const request of [...recipe, ...stress]) {
     if (asked.has(request.key)) continue;
     const supplied = ctx.captures?.find((capture) => capture.request.key === request.key);
     if (supplied && (await validCapture(supplied, request, ctx.manifest.rendering.maxCaptureBytes))) continue;
     ahead.push(request);
   }
   return ahead;
+}
+
+/**
+ * The motion pass: worn views of a wearable at the stress poses its category calls for, front and side, both
+ * shapes, skin in chroma green. Nothing for emotes. Together with the recipe it must fit the image budget.
+ */
+export async function stressRequests(ctx: CheckContext, build: string): Promise<CaptureRequest[] | string> {
+  if (ctx.itemType !== "wearable") return [];
+  const recipe = ctx.manifest.rendering;
+  const representations = ctx.item.representations;
+  if (!ctx.category || !representations?.length) return "Provide the item's category and declared body-shape representations to render it.";
+  const poses = recipe.stress.poses[recipe.stress.categoryPoses[ctx.category] ?? "body"] ?? [];
+  const digest = await inputDigest(ctx);
+  const requests: CaptureRequest[] = [];
+  for (const rep of representations) {
+    if (!rep.contents.includes(rep.mainFile) || !rep.bodyShapes.length) return "Each representation needs a body shape and its main file in contents.";
+    for (const bodyShape of rep.bodyShapes)
+      for (const pose of poses)
+        for (const azimuthDegrees of recipe.stress.azimuthDegrees) {
+          requests.push(await captureRequest(ctx, {
+            inputDigest: digest,
+            rendererBuild: build,
+            recipeVersion: recipe.recipeVersion,
+            bodyShape,
+            mainFile: rep.mainFile,
+            view: "avatar",
+            azimuthDegrees,
+            pose: pose.clip,
+            timeFraction: pose.fraction,
+            skin: recipe.stress.skin,
+            size: recipe.imageSizePx
+          }));
+        }
+  }
+  const base = await recipeRequests(ctx, build);
+  if (typeof base === "string") return base;
+  if (base.length + requests.length > recipe.maxCaptures) return "The capture recipe exceeds its image budget.";
+  return requests;
 }
 
 /** The renderer's full recipe for this item: bodyShapes × views × (emote fractions) × azimuths — the set every visual rule shares. */
@@ -187,5 +226,6 @@ export function captureLabel(request: CaptureRequest): string {
   const shape = request.bodyShape.split(":").pop() ?? request.bodyShape;
   const pose = request.pose ? `, pose ${request.pose}` : "";
   const time = request.timeFraction === undefined ? "" : `, clip fraction ${request.timeFraction}`;
-  return `${shape}: ${request.view}${pose}, azimuth ${request.azimuthDegrees} degrees${time}`;
+  const skin = request.skin ? ", skin rendered bright green" : "";
+  return `${shape}: ${request.view}${pose}, azimuth ${request.azimuthDegrees} degrees${time}${skin}`;
 }
