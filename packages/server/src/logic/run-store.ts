@@ -233,6 +233,8 @@ export interface IRunStoreComponent extends IBaseComponent {
   writeInput(dir: string, input: RunInput): Promise<void>;
   /** The queued upload stays on disk (input.zip) until its turn, so a waiting run holds no RAM. */
   writeUpload(dir: string, bytes: Uint8Array): Promise<void>;
+  /** The item's own thumbnail, on disk before the first render so the site can show it while the views arrive. */
+  writeThumbnail(dir: string, bytes: Uint8Array): Promise<void>;
   readUpload(dir: string): Promise<Uint8Array>;
   discardUpload(dir: string): Promise<void>;
   appendEvent(dir: string, event: RunEvent): Promise<void>;
@@ -296,6 +298,7 @@ export async function createRunStoreComponent(components: { config: IConfigCompo
     },
     writeInput: writeRunInput,
     writeUpload: (dir, bytes) => writeFile(join(dir, "input.zip"), bytes),
+    writeThumbnail: (dir, bytes) => writeFile(join(dir, "thumbnail.png"), bytes),
     readUpload: async (dir) => new Uint8Array(await readFile(join(dir, "input.zip"))),
     discardUpload: (dir) => rm(join(dir, "input.zip"), { force: true }),
     appendEvent: (dir, event) => appendFile(join(dir, "events.jsonl"), JSON.stringify(event) + "\n"),
