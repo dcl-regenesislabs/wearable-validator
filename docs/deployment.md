@@ -12,16 +12,18 @@
 
 ### 1. Upload the Unity build
 
-The Docker image downloads the PR #10053 renderer build from a GitHub release asset and checks its sha256. The tarball is at `tools/artifacts/renderer-build.tar.gz` (23 MB, sha256 `f5667806f56cfd5d7dc927540a29dcbb3ef21ad89a2ec3693673746472109fbf`):
+The Docker image downloads the PR #10053 renderer build from a GitHub release asset and checks its sha256. The current one is `renderer-build-2` (sha256 `41c129dd81e909797646353a9525df0245ac7a8213f2a8fa3896c377ece8f52b`), built from unity-explorer branch `feat/validator-capture-controls` with the render-profile parameters (`renderScale`, `hdr`, `shadowMap`, `postProcessing`) that the manifest's `rendering.quality` relies on.
+
+To build it: Unity 6000.5.9f1 with Web Build Support installed under Unity Hub, a unity-explorer checkout on that branch, then `tools/renderer-build/build.sh <unity-explorer dir>` (batch mode, about five minutes; the four files land in `tools/artifacts/avatar-preview-renderer/Build`). Then, with the tarball at `tools/artifacts/renderer-build.tar.gz`:
 
 ```sh
-gh release create renderer-build-1 tools/artifacts/renderer-build.tar.gz \
+gh release create renderer-build-3 tools/artifacts/renderer-build.tar.gz \
   --repo dcl-regenesislabs/wearable-validator \
-  --title "renderer-build-1" \
-  --notes "Unity Web build of unity-explorer PR #10053 (avatar-preview-renderer). sha256 f5667806f56cfd5d7dc927540a29dcbb3ef21ad89a2ec3693673746472109fbf"
+  --title "renderer-build-3" \
+  --notes "Unity Web build of unity-explorer PR #10053 (avatar-preview-renderer). sha256 <sha>"
 ```
 
-To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.tar.gz -C <Build dir> avatar-preview-renderer.loader.js avatar-preview-renderer.framework.js avatar-preview-renderer.wasm avatar-preview-renderer.data` (the four files at the tarball's top level and nothing else: without `COPYFILE_DISABLE` macOS adds `._*` metadata entries that GNU tar unpacks as junk files), `shasum -a 256 renderer-build.tar.gz`, create release `renderer-build-2` the same way, then update the two `ARG` defaults (`RENDERER_BUILD_URL`, `RENDERER_BUILD_SHA256`) in the root `Dockerfile`.
+To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.tar.gz -C <Build dir> avatar-preview-renderer.loader.js avatar-preview-renderer.framework.js avatar-preview-renderer.wasm avatar-preview-renderer.data` (the four files at the tarball's top level and nothing else: without `COPYFILE_DISABLE` macOS adds `._*` metadata entries that GNU tar unpacks as junk files), `shasum -a 256 renderer-build.tar.gz`, create the next release the same way, then update the two `ARG` defaults (`RENDERER_BUILD_URL`, `RENDERER_BUILD_SHA256`) in the root `Dockerfile`.
 
 ### 2. Cloudflare Zero Trust (Access)
 

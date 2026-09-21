@@ -15,8 +15,8 @@ RUN ref=$(sed -n 's/^ref: //p' .git/HEAD); \
     printf '{"commit":"%s","builtAt":"%s"}' "${sha:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /build-info.json && cat /build-info.json
 
 FROM mcr.microsoft.com/playwright:v1.63.0-noble
-ARG RENDERER_BUILD_URL=https://github.com/dcl-regenesislabs/wearable-validator/releases/download/renderer-build-1/renderer-build.tar.gz
-ARG RENDERER_BUILD_SHA256=f5667806f56cfd5d7dc927540a29dcbb3ef21ad89a2ec3693673746472109fbf
+ARG RENDERER_BUILD_URL=https://github.com/dcl-regenesislabs/wearable-validator/releases/download/renderer-build-2/renderer-build.tar.gz
+ARG RENDERER_BUILD_SHA256=41c129dd81e909797646353a9525df0245ac7a8213f2a8fa3896c377ece8f52b
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/wearable-validator/package.json packages/wearable-validator/

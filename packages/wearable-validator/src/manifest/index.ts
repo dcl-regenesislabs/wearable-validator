@@ -41,6 +41,11 @@ export interface Manifest {
     imageSizePx: number;
     /** Bumped when the capture recipe (views, poses, scene) changes; part of every capture key. */
     recipeVersion: number;
+    /**
+     * The previewer's render profile, sent as URL parameters and part of every capture key: no supersampling,
+     * LDR, a small shadow map, no post-processing. A build without unity-explorer PR #10053's parameters ignores them.
+     */
+    quality: { renderScale: number; hdr: boolean; shadowMapPx: number; postProcessing: boolean };
     bodyShapes: string[];
     /** The capture recipe every visual rule draws from: views × azimuths per body shape, clip fractions for emotes. */
     views: { wearable: ("avatar" | "wearable")[]; emote: ("avatar" | "wearable")[] };
