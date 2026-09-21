@@ -39,6 +39,13 @@ const input: RenderInput = {
   category: "hat"
 };
 
+/** The same item with its own bytes per body shape: every shape must be loaded and drawn. */
+const distinct: RenderInput = {
+  ...input,
+  files: new Map([["male.glb", new Uint8Array([1, 2, 3])], ["female.glb", new Uint8Array([4, 5, 6])]]),
+  item: { category: "hat", representations: [{ bodyShapes: [MALE], mainFile: "male.glb", contents: ["male.glb"] }, { bodyShapes: [FEMALE], mainFile: "female.glb", contents: ["female.glb"] }] }
+};
+
 function request(rendererBuild: string, fields: Partial<CaptureRequest> = {}): CaptureRequest {
   const bodyShape = fields.bodyShape ?? MALE;
   const view = fields.view ?? "avatar";
@@ -346,7 +353,7 @@ describe("createRenderer", () => {
       const wire = scripted();
       const engine = await renderer(directory, async () => wire.session);
       const requests = recipe(engine.buildId);
-      const captures = await engine.capture(input, requests);
+      const captures = await engine.capture(distinct, requests);
 
       const radians = (degrees: number) => (degrees * Math.PI) / 180;
       const setup = (bodyShape: string, type: string) => [
@@ -518,12 +525,35 @@ describe("createRenderer timeouts", () => {
 });
 
 describe("captureAll", () => {
-  it("issues one update per body shape and view", async () => {
+  it("issues one update per body shape and view when each shape has its own bytes", async () => {
     const wire = scripted();
     const requests = recipe("build");
-    await captureAll(wire.session, input, requests, new AbortController().signal);
+    await captureAll(wire.session, distinct, requests, new AbortController().signal);
     const updates = wire.log.filter(([name]) => name === "update");
     assert.equal(updates.length, 4);
+  });
+
+  it("takes the item-alone views once for body shapes that share the same bytes, and reuses them in order", async () => {
+    const wire = scripted();
+    const requests = recipe("build");
+    const seen: string[] = [];
+    const logged: string[] = [];
+    const captures = await captureAll(wire.session, input, requests, new AbortController().signal, (capture) => seen.push(capture.request.id), (message) => logged.push(message));
+    // item-alone views drawn once (male), then avatar views for each shape
+    assert.equal(wire.log.filter(([name]) => name === "update").length, 3);
+    assert.equal(captures.length, requests.length);
+    assert.deepEqual(seen, sessionOrder(requests).map((request) => request.id));
+    for (const azimuth of AZIMUTHS) {
+      const male = captures.find((capture) => capture.request.id === `BaseMale-wearable-${String(azimuth).padStart(3, "0")}`)!;
+      const female = captures.find((capture) => capture.request.id === `BaseFemale-wearable-${String(azimuth).padStart(3, "0")}`)!;
+      assert.equal(female.sha256, male.sha256);
+      assert.equal(female.request.bodyShape, FEMALE);
+    }
+    assert.equal(logged.filter((message) => message === "item-alone view reused").length, AZIMUTHS.length);
+    // the avatar views are never shared: the avatar differs per shape
+    const maleAvatar = captures.find((capture) => capture.request.id === "BaseMale-avatar-000")!;
+    const femaleAvatar = captures.find((capture) => capture.request.id === "BaseFemale-avatar-000")!;
+    assert.notEqual(maleAvatar.request.bodyShape, femaleAvatar.request.bodyShape);
   });
 
   it("poses a wearable with the requested clip and fraction, one update per pose", async () => {
@@ -549,7 +579,7 @@ describe("captureAll", () => {
       return inner(namespace, method, params);
     };
     const requests = recipe("build");
-    const captures = await captureAll(flaky.session, input, requests, new AbortController().signal);
+    const captures = await captureAll(flaky.session, distinct, requests, new AbortController().signal);
     assert.equal(captures.length, requests.length);
     assert.equal(flaky.log.filter(([name]) => name === "update").length, 5);
 
@@ -558,14 +588,14 @@ describe("captureAll", () => {
       if (method === "pause") throw Object.assign(new Error("Timeout 15000ms exceeded."), { name: "TimeoutError" });
       return null;
     };
-    await assert.rejects(captureAll(stuck.session, input, requests, new AbortController().signal), /Timeout/);
+    await assert.rejects(captureAll(stuck.session, distinct, requests, new AbortController().signal), /Timeout/);
     assert.equal(stuck.log.filter(([name]) => name === "update").length, 1 + manifest.rendering.captureRetries);
 
     const broken = scripted();
     broken.session.request = async () => {
       throw new Error("The previewer rejected scene.changeCameraPosition.");
     };
-    await assert.rejects(captureAll(broken.session, input, requests, new AbortController().signal), /rejected/);
+    await assert.rejects(captureAll(broken.session, distinct, requests, new AbortController().signal), /rejected/);
     assert.equal(broken.log.filter(([name]) => name === "update").length, 1);
   });
 

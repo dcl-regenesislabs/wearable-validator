@@ -95,7 +95,8 @@ export async function resolveCaptures(ctx: CheckContext, requests: CaptureReques
     const renderer = ctx.services?.renderer;
     if (!renderer) return `Supply ${missing.length} missing or stale rendered views, or configure services.renderer to capture them.`;
     const input: RenderInput = { files: ctx.files, item: ctx.item, itemType: ctx.itemType, category: ctx.category! };
-    const generated = await renderer.capture(input, missing, ctx.signal);
+    const ahead = await recipeAhead(ctx, renderer.buildId, requests);
+    const generated = await renderer.capture(input, [...missing, ...ahead], ctx.signal);
     for (const request of missing) {
       ctx.signal?.throwIfAborted();
       const capture = generated.find((value) => value.request.key === request.key);
@@ -104,6 +105,9 @@ export async function resolveCaptures(ctx: CheckContext, requests: CaptureReques
       }
       resolved.set(request.key, capture);
     }
+    // the views rendered ahead join the context so the rules that follow find them there
+    const aheadKeys = new Set(ahead.map((request) => request.key));
+    ctx.captures = [...(ctx.captures ?? []), ...generated.filter((capture) => aheadKeys.has(capture.request.key))];
   }
   const captures = requests.map((request) => resolved.get(request.key)!);
   // other rules' captures stay in the result so one run can feed several checks — but only valid ones,
@@ -116,6 +120,26 @@ export async function resolveCaptures(ctx: CheckContext, requests: CaptureReques
   }
   ctx.captures = [...captures, ...others];
   return captures;
+}
+
+/**
+ * The rest of the recipe, when other rendering rules will ask for it: a rule that wants two front views would
+ * otherwise make the renderer load every body shape now and again for the rules after it. Nothing when this is
+ * the run's only rendering rule, when the recipe cannot be built, or for views already asked for or supplied.
+ */
+async function recipeAhead(ctx: CheckContext, build: string, requests: CaptureRequest[]): Promise<CaptureRequest[]> {
+  if ((ctx.renderingRules ?? 0) < 2) return [];
+  const recipe = await recipeRequests(ctx, build);
+  if (typeof recipe === "string") return [];
+  const asked = new Set(requests.map((request) => request.key));
+  const ahead: CaptureRequest[] = [];
+  for (const request of recipe) {
+    if (asked.has(request.key)) continue;
+    const supplied = ctx.captures?.find((capture) => capture.request.key === request.key);
+    if (supplied && (await validCapture(supplied, request, ctx.manifest.rendering.maxCaptureBytes))) continue;
+    ahead.push(request);
+  }
+  return ahead;
 }
 
 /** The renderer's full recipe for this item: bodyShapes × views × (emote fractions) × azimuths — the set every visual rule shares. */

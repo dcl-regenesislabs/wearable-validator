@@ -24,7 +24,8 @@ export async function validate(input: Input, options: Options = {}): Promise<Res
   ctx.captures = options.captures ? structuredClone(options.captures) : [];
 
   const selected = selectChecks(options);
-  if (selected.some((check) => check.group === "rendering")) {
+  ctx.renderingRules = selected.filter((check) => check.group === "rendering").length;
+  if (ctx.renderingRules > 0) {
     // adapters receive a copy — a renderer must never be able to mutate the bytes the code checks judged
     ctx.files = new Map([...ctx.files].map(([path, bytes]) => [path, bytes.slice()]));
     ctx.item = structuredClone(ctx.item);
