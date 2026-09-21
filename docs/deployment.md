@@ -37,7 +37,7 @@ To re-pin after a new Unity build: `COPYFILE_DISABLE=1 tar -czf renderer-build.t
 
 Software rendering is CPU-bound: on App Platform's shared vCPUs the first view of a run took six minutes, and memory never passed 2 GB. A dedicated-CPU droplet is faster and cheaper than the equivalent App Platform tier, so that is where the server runs.
 
-1. Create a **CPU-Optimized droplet, 4 dedicated vCPUs / 8 GB**, Ubuntu with Docker preinstalled (the Docker Marketplace image). Nothing else runs on it.
+1. Create a droplet, Ubuntu 24.04. Rendering is pure CPU: the current one is **8 vCPU Premium Intel / 16 GB** (a twelve-view render takes 24 s there against 169 s on a 4 vCPU CPU-Optimized). Install Docker with `curl -fsSL https://get.docker.com | sh`. Nothing else runs on it.
 2. Cloudflare Zero Trust → Networks → Tunnels → create a tunnel, add a public hostname `api.wearable-validator.dclregenesislabs.xyz` pointing at `http://validator:4180`, and copy the tunnel token. The tunnel means the droplet needs no open port, no certificate and no firewall rules.
 3. On the droplet:
 
