@@ -217,6 +217,11 @@ describe("previewUrl", () => {
     assert.equal(url.searchParams.get("profile"), profile);
     assert.equal(url.searchParams.get("background"), manifest.rendering.background);
     assert.equal(url.searchParams.get("skin"), manifest.rendering.skin);
+    const { quality } = manifest.rendering;
+    assert.equal(url.searchParams.get("renderScale"), String(quality.renderScale));
+    assert.equal(url.searchParams.get("hdr"), String(quality.hdr));
+    assert.equal(url.searchParams.get("shadowMap"), String(quality.shadowMapPx));
+    assert.equal(url.searchParams.get("postProcessing"), String(quality.postProcessing));
     assert.equal(new URL(previewUrl("babylon")).searchParams.get("unity"), "false");
   });
 });

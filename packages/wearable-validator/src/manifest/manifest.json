@@ -161,7 +161,13 @@
   },
   "rendering": {
     "imageSizePx": 512,
-    "recipeVersion": 2,
+    "recipeVersion": 3,
+    "quality": {
+      "renderScale": 1,
+      "hdr": false,
+      "shadowMapPx": 512,
+      "postProcessing": false
+    },
     "bodyShapes": [
       "urn:decentraland:off-chain:base-avatars:BaseMale",
       "urn:decentraland:off-chain:base-avatars:BaseFemale"

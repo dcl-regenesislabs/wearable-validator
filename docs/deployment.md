@@ -12,7 +12,7 @@
 
 ### 1. Upload the Unity build
 
-The Docker image downloads the PR #10053 renderer build from a GitHub release asset and checks its sha256. The tarball is at `tools/artifacts/renderer-build.tar.gz` (23 MB, sha256 `f5667806f56cfd5d7dc927540a29dcbb3ef21ad89a2ec3693673746472109fbf`):
+The Docker image downloads the PR #10053 renderer build from a GitHub release asset and checks its sha256. The build must include the render-profile parameters (`renderScale`, `hdr`, `shadowMap`, `postProcessing` in `PreviewConfiguration.cs`) or the manifest's `rendering.quality` has no effect and every frame is drawn at twice the size. The tarball is at `tools/artifacts/renderer-build.tar.gz` (23 MB, sha256 `f5667806f56cfd5d7dc927540a29dcbb3ef21ad89a2ec3693673746472109fbf`):
 
 ```sh
 gh release create renderer-build-1 tools/artifacts/renderer-build.tar.gz \

@@ -222,7 +222,7 @@ function watchPage(page: Page, log: RenderLog): void {
 }
 
 export function previewUrl(engine: "unity" | "babylon" = "unity"): string {
-  const { profile, background, skin } = manifest.rendering;
+  const { profile, background, skin, quality } = manifest.rendering;
   const url = new URL("index.html", PREVIEW_URL);
   // unity=true mode=builder profile type=avatar camera=static disableAutoRotate disableFadeEffect background skin — the wrapper logs "Unknown parameter in URL" for several of these; the load event still reports unity, so the warnings are noise
   // mode=builder or the blob item is silently ignored (profile mode loads a stock avatar)
@@ -235,7 +235,12 @@ export function previewUrl(engine: "unity" | "babylon" = "unity"): string {
     disableAutoRotate: "true",
     disableFadeEffect: "true",
     background,
-    skin
+    skin,
+    // the render profile: Unity reads the page URL itself (PreviewConfiguration.RecreateFrom), so these never pass through the wrapper
+    renderScale: String(quality.renderScale),
+    hdr: String(quality.hdr),
+    shadowMap: String(quality.shadowMapPx),
+    postProcessing: String(quality.postProcessing)
   }).toString();
   return url.toString();
 }
