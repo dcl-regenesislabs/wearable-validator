@@ -1,6 +1,8 @@
 // Cloudflare Workers Builds config: the validator website at wearable-validator.dclregenesislabs.xyz, behind Cloudflare Access,
 // with /api/* forwarded to the run server by packages/web/worker.ts.
 // Dashboard build command: "npm ci && npm run build -w wearable-validator-web"; deploy command: "npx wrangler deploy".
+// wrangler is an exact-pinned root devDependency so that deploy uses the lockfile copy: an ad-hoc npx download of a
+// just-published release once arrived broken ("SyntaxError: Invalid Unicode escape sequence") and failed the deploy.
 {
   "name": "wearable-validator",
   "main": "packages/web/worker.ts",

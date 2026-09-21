@@ -18,5 +18,8 @@
     "samples": "npm run samples -w wearable-validator-tools",
     "serve": "npm run build -w wearable-validator-web && npm start -w wearable-validator-server --",
     "review": "npm run review -w wearable-validator-server --"
+  },
+  "devDependencies": {
+    "wrangler": "4.136.0"
   }
 }
