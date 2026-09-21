@@ -272,6 +272,21 @@ AI (`packages/wearable-validator/src/adapters/ai.ts` unless noted):
 
 ---
 
+## Render performance: what worked and what does not
+
+Measured on a four-core container, one wearable, twelve views.
+
+| Change | Result |
+| --- | --- |
+| Evidence at 512 px instead of 1024 | twelve views in 92 s instead of a run that never finished; each view is a full software render and the stability check repeats it until two frames match, so the cost grows faster than the pixel count |
+| One browser per run instead of per capture call | 3 s: booting the browser is cheap, loading the avatar is not |
+| One browser kept warm between runs | **wrong evidence.** The same item rendered in a session that had already drawn another item produced male item-alone views pixel-identical to the previous item's female views |
+| Both body shapes in parallel, one browser each | **slower and different pixels.** 91 s against 58 s serial, because two software renderers contend for the same cores, and a lane that only ever sees one body shape frames the item-alone views differently |
+
+What is left, in order: the stability loop takes at least two full renders per view and often more, so a cheaper settle signal is the next real win; after that, hardware rendering removes the whole problem, which is why the abgen service uses a GPU.
+
+The item-alone framing is the fragile part of all of this: it depends on what the session drew before, which is why `sessionOrder` loads item-alone views first and why neither reuse nor splitting is safe.
+
 ## 6. What is still open
 
 - The Rule Book's larger recipe — 8-step turntable, six animation clips, outfit combinations, the chroma-key clipping pass, contact sheets — is not built. The renderer already accepts `pose` on a capture request, so animated poses are a recipe change plus a prompt bump when a labeled fixture set shows rest-pose views miss real clipping.

@@ -744,8 +744,6 @@ export interface RendererOptions {
   timeouts?: Partial<RenderTimeouts>;
   /** Chromium profile to keep between browsers, so the next cold start reuses the compiled WASM and shaders. */
   profileDirectory?: string;
-  /** Browsers to render with at once, one body shape each (default 1). Each needs a core and about a gigabyte. */
-  maxSessions?: number;
 }
 
 export type RenderTimeouts = Pick<Manifest["rendering"], "navigationTimeoutMs" | "loadTimeoutMs" | "commandTimeoutMs" | "timeoutMs">;
@@ -763,49 +761,26 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     binaries: [...assets].map(([path, asset]) => [path, asset.sha256])
   });
   const timeouts: RenderTimeouts = { ...manifest.rendering, ...options.timeouts };
-  // Chromium locks a profile, so parallel lanes each get their own and both stay warm across runs
-  const openFor = (key: string): OpenPreview =>
-    options.open ??
-    openPreview({
-      assets,
-      ...browserOptions,
-      log: options.onLog,
-      settings: timeouts,
-      profileDirectory: options.profileDirectory && (options.maxSessions ?? 1) > 1 ? `${options.profileDirectory}-${key}` : options.profileDirectory
-    });
+  const open = options.open ?? openPreview({ assets, ...browserOptions, log: options.onLog, settings: timeouts, profileDirectory: options.profileDirectory });
   const active = new Map<AbortController, Promise<CaptureRecord[]>>();
   const pending = new Map<string, Promise<CaptureRecord[]>>();
   let stopped = false;
 
-  // One browser per lane for the whole renderer, not one per capture(): booting the engine and loading the avatar
-  // is most of the cost, and a run asks for its views in two calls. With maxSessions > 1 each body shape is its own
-  // lane and they render at the same time. stop() closes them all.
+  // One browser for the whole renderer, not one per capture(): booting the engine and loading the avatar is most of
+  // the cost, and a run asks for its views in two calls (the first rule's views, then the rest). stop() closes it.
   const lifetime = new AbortController();
-  const maxSessions = Math.max(1, Math.floor(options.maxSessions ?? 1));
-  interface Lane {
-    session?: Promise<PreviewSession>;
-    queued: Promise<unknown>;
-  }
-  const lanes = new Map<string, Lane>();
+  let session: Promise<PreviewSession> | undefined;
+  let queued: Promise<unknown> = Promise.resolve();
 
-  const laneOf = (key: string): Lane => {
-    const lane = lanes.get(key) ?? { queued: Promise.resolve() };
-    lanes.set(key, lane);
-    return lane;
-  };
-
-  /** One lane when rendering serially; one per body shape when the host has cores to spare. */
-  const laneKey = (request: CaptureRequest): string => (maxSessions > 1 ? request.bodyShape : "one");
-
-  async function currentSession(lane: Lane, key: string): Promise<PreviewSession> {
-    lane.session ??= openFor(key)(lifetime.signal);
-    return lane.session;
+  async function currentSession(): Promise<PreviewSession> {
+    session ??= open(lifetime.signal);
+    return session;
   }
 
   /** After a failure the engine's state is unknown: the next capture starts from a new browser. */
-  async function dropSession(lane: Lane): Promise<void> {
-    const opening = lane.session;
-    lane.session = undefined;
+  async function dropSession(): Promise<void> {
+    const opening = session;
+    session = undefined;
     if (!opening) return;
     const closed = opening.then((value) => value.close()).catch(() => {});
     // a browser that never finished opening must not hold stop() forever; the abort already told it to close
@@ -828,17 +803,11 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     });
   }
 
-  /** A lane has one engine, so its captures run one after another even when two callers ask at once. */
-  function serialize<T>(lane: Lane, work: () => Promise<T>): Promise<T> {
-    const result = lane.queued.then(work, work);
-    lane.queued = result.catch(() => {});
+  /** Views share one engine, so captures run one after another even when two callers ask at once. */
+  function serialize<T>(work: () => Promise<T>): Promise<T> {
+    const result = queued.then(work, work);
+    queued = result.catch(() => {});
     return result;
-  }
-
-  /** Requests in the order the caller asked for them, whichever lane produced each one. */
-  function inRequestOrder(requests: CaptureRequest[], captures: CaptureRecord[]): CaptureRecord[] {
-    const byId = new Map(captures.map((capture) => [capture.request.id, capture]));
-    return requests.map((request) => byId.get(request.id)).filter((capture): capture is CaptureRecord => capture !== undefined);
   }
 
   // one browser per capture() — open → capture → close in finally; identical un-signalled requests share one promise; stop() aborts and rejects further work
@@ -873,28 +842,18 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     const abort = () => controller.abort();
     const timeout = setTimeout(abort, timeouts.timeoutMs);
     signal?.addEventListener("abort", abort, { once: true });
-    const groups = new Map<string, CaptureRequest[]>();
-    for (const request of requests) groups.set(laneKey(request), [...(groups.get(laneKey(request)) ?? []), request]);
     try {
-      const rendered = await Promise.all(
-        [...groups].map(([key, group]) => {
-          const lane = laneOf(key);
-          return serialize(lane, async () => {
-            const preview = await untilAborted(currentSession(lane, key), controller.signal);
-            controller.signal.throwIfAborted();
-            // the site URL selects Babylon and a WebGPU fallback is not Unity evidence — a non-unity load closes the browser
-            if (preview.engine !== "unity") {
-              throw new Error(`The preview loaded the ${preview.engine} engine. Visual evidence requires the configured Unity build.`);
-            }
-            return await captureAll(preview, input, group, controller.signal, options.onCapture, options.onLog);
-          }).catch(async (error: unknown) => {
-            await dropSession(lane);
-            throw error;
-          });
-        })
-      );
-      return inRequestOrder(requests, rendered.flat());
+      return await serialize(async () => {
+        const preview = await untilAborted(currentSession(), controller.signal);
+        controller.signal.throwIfAborted();
+        // the site URL selects Babylon and a WebGPU fallback is not Unity evidence — a non-unity load closes the browser
+        if (preview.engine !== "unity") {
+          throw new Error(`The preview loaded the ${preview.engine} engine. Visual evidence requires the configured Unity build.`);
+        }
+        return await captureAll(preview, input, requests, controller.signal, options.onCapture, options.onLog);
+      });
     } catch (error) {
+      await dropSession();
       if (signal?.aborted) throw error; // the caller cancelled: let its AbortError through untouched
       if (controller.signal.aborted) {
         throw new Error(stopped
@@ -911,10 +870,10 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
   async function stop(): Promise<void> {
     stopped = true;
     for (const controller of active.keys()) controller.abort();
-    // the browsers close first: in-flight previewer calls only fail once they are gone, and waiting first would deadlock
+    // the browser closes first: in-flight previewer calls only fail once it is gone, and waiting first would deadlock
     lifetime.abort();
     await Promise.allSettled(active.values());
-    await Promise.all([...lanes.values()].map((lane) => dropSession(lane)));
+    await dropSession();
   }
 
   return { buildId, capture, stop };
