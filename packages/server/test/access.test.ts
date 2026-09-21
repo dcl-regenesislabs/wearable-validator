@@ -138,7 +138,7 @@ describe("Cloudflare Access verifier", () => {
 });
 
 describe("the certs fetch", () => {
-  it("gives up on a hanging certs endpoint within the timeout instead of holding every sign-in", { timeout: 20_000 }, async () => {
+  it("gives up on a hanging certs endpoint within the timeout instead of holding every sign-in", async () => {
     const original = globalThis.fetch;
     const seen: { url: string; aborted: Promise<string> }[] = [];
     // a certs endpoint that never answers: only the request's own signal can end the wait
@@ -149,16 +149,19 @@ describe("the certs fetch", () => {
       seen.push({ url: String(input), aborted });
       return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
     };
+    // AbortSignal.timeout does not hold the event loop open, so a bare wait can outlive the test runner
+    const keepAlive = setInterval(() => {}, 20);
     try {
-      const verify = createAccessVerifier({ teamDomain: TEAM, audience: AUD });
+      const verify = createAccessVerifier({ teamDomain: TEAM, audience: AUD, certsTimeoutMs: 200 });
       const began = Date.now();
       await assert.rejects(verify.verify(token(current, claims())), /TimeoutError|aborted/i);
       const elapsed = Date.now() - began;
-      assert.ok(elapsed >= 4_000 && elapsed < 10_000, `answered after ${elapsed} ms`);
+      assert.ok(elapsed >= 150 && elapsed < 5_000, `answered after ${elapsed} ms`);
       assert.equal(seen.length, 1);
       assert.equal(seen[0].url, certsUrl(TEAM));
       assert.equal(await seen[0].aborted, "TimeoutError");
     } finally {
+      clearInterval(keepAlive);
       globalThis.fetch = original;
     }
   });
