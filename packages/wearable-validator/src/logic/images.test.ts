@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { decode as decodePng } from "fast-png";
 import { decode as decodeJpeg, encode as encodeJpeg } from "jpeg-js";
 import { manifest } from "../manifest/index.js";
-import { decodePngSafe, fitsDecodeBudget, imageDimensions, jpegPrecision } from "./images.js";
+import { decodePngSafe, imageDimensions, jpegPrecision, pngHasAlpha } from "./images.js";
 import { jpegWithFillBytes, pngBytes, pngHeaderBytes, pngWithLeadingChunk } from "#test/helpers/synthetic.js";
 
 const jpeg = (size: number): Uint8Array => new Uint8Array(encodeJpeg({ width: size, height: size, data: new Uint8Array(size * size * 4).fill(128) }, 80).data);
@@ -29,6 +29,14 @@ describe("imageDimensions", () => {
     assert.equal(jpegPrecision(crafted), 8);
   });
 
+  it("reads a header whose file has trailing bytes or is cut short after the header", () => {
+    const trailing = new Uint8Array(pngBytes(8, 8).length + 1);
+    trailing.set(pngBytes(8, 8));
+    assert.deepEqual(imageDimensions(trailing), { width: 8, height: 8 });
+    assert.deepEqual(imageDimensions(pngBytes(8, 8).subarray(0, 33)), { width: 8, height: 8 });
+    assert.equal(decodePngSafe(trailing), undefined, "decoding still needs a whole, well-formed file");
+  });
+
   it("answers undefined for a header it cannot read, never a size", () => {
     assert.equal(imageDimensions(new Uint8Array([1, 2, 3])), undefined);
     const noHeader = new Uint8Array(40);
@@ -38,16 +46,15 @@ describe("imageDimensions", () => {
   });
 });
 
-describe("fitsDecodeBudget", () => {
-  it("lets images within the budget through and honours a custom budget", () => {
-    const small = pngBytes(16, 16);
-    assert.equal(fitsDecodeBudget(small), true);
-    assert.equal(fitsDecodeBudget(small, 100), false);
-    assert.equal(fitsDecodeBudget(pngHeaderBytes(12000, 12000)), false);
-  });
-
-  it("refuses an unreadable header instead of trusting the decoder", () => {
-    assert.equal(fitsDecodeBudget(new Uint8Array([1, 2, 3])), false);
+describe("pngHasAlpha", () => {
+  it("reads the color type from IHDR wherever it sits, not from a fixed offset", () => {
+    const rgba = pngBytes(2, 2);
+    assert.equal(pngHasAlpha(rgba), true);
+    assert.equal(pngHasAlpha(pngWithLeadingChunk(rgba)), true);
+    const rgb = pngHeaderBytes(2, 2);
+    rgb[25] = 2;
+    assert.equal(pngHasAlpha(rgb), false);
+    assert.equal(pngHasAlpha(new Uint8Array([1, 2, 3])), false);
   });
 });
 

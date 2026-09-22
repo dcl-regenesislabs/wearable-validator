@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   validate,
   unpackZip,
+  inputTooLarge,
+  InputLimitError,
   checks as checkRegistry,
   details,
   explanations,
@@ -75,7 +77,14 @@ interface Sample {
 }
 
 export async function zipRuleContext(bytes: Uint8Array): Promise<Pick<Loaded, "zipCategory" | "zipHides" | "zipMetadata" | "zipMetadataSource" | "zipFiles">> {
-  const { files: zipFiles } = await unpackZip(bytes);
+  let zipFiles: Map<string, Uint8Array>;
+  try {
+    zipFiles = (await unpackZip(bytes)).files;
+  } catch (error) {
+    // a crossed limit stops the drop here; a zip that will not open is validation's finding, in its own words
+    if (error instanceof InputLimitError) throw error;
+    return {};
+  }
   try {
     const name = zipFiles.has("wearable.json") ? "wearable.json" : "emote.json";
     const bytes = zipFiles.get(name);
@@ -187,7 +196,7 @@ export function App() {
   const onFile = useCallback(
     async (file: File) => {
       try {
-        if (file.size > manifest.fileSize.maxInputBytes) throw new Error(`The file exceeds the ${manifest.fileSize.maxInputBytes / 1048576} MB input limit.`);
+        if (file.size > manifest.fileSize.maxInputBytes) throw new Error(inputTooLarge(file.size));
         const bytes = new Uint8Array(await file.arrayBuffer());
         const isBareGlb = bytes.length >= 4 && bytes[0] === 0x67 && bytes[1] === 0x6c && bytes[2] === 0x54 && bytes[3] === 0x46;
         if (location.search) history.pushState({}, "", location.pathname);
