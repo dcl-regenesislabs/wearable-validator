@@ -74,7 +74,7 @@ export interface Options {
   /** Renderer/reviewer adapters for the rendering group — see /rendering and /ai. */
   services?: Services;
   signal?: AbortSignal;
-  /** Called as each check starts and finishes — for live UIs; never affects the result. */
+  /** Called as each check starts and finishes — for live UIs; never affects the result. When set, validate() yields to the event loop after every check so the page can paint. */
   onProgress?: (event: ProgressEvent) => void;
 }
 

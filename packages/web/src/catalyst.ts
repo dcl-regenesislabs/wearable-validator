@@ -37,7 +37,7 @@ export function parseItemReference(raw: string): string[] | null {
 }
 
 export async function fetchItem(candidates: string[], onProgress: (msg: string) => void): Promise<CatalystItem> {
-  onProgress("looking up the item on catalyst…");
+  onProgress("Looking up the item on catalyst");
   interface ActiveEntity {
     pointers: string[];
     content: { file: string; hash: string }[];
@@ -64,7 +64,7 @@ export async function fetchItem(candidates: string[], onProgress: (msg: string) 
   const files = new Map<string, Uint8Array>();
   let done = 0;
   const queue = [...entity.content];
-  onProgress(`downloading ${queue.length} files…`);
+  onProgress(`Downloading ${queue.length} files`);
   const workers = Array.from({ length: CONCURRENCY }, async () => {
     for (;;) {
       const next = queue.shift();
@@ -73,7 +73,7 @@ export async function fetchItem(candidates: string[], onProgress: (msg: string) 
       if (!res.ok) throw new Error(`file download failed (${res.status}) for ${next.file}`);
       files.set(next.file, new Uint8Array(await res.arrayBuffer()));
       done++;
-      onProgress(`downloading files… ${done}/${entity!.content.length}`);
+      onProgress(`Downloading files · ${done}/${entity!.content.length}`);
     }
   });
   await Promise.all(workers);

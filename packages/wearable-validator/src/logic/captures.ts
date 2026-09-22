@@ -220,6 +220,13 @@ export async function recipeRequests(ctx: CheckContext, build: string): Promise<
   return requests;
 }
 
+/** How many views a full visual run asks the renderer for (recipe plus motion pass); 0 when the item cannot be rendered. */
+export async function plannedCaptures(ctx: CheckContext): Promise<number> {
+  const recipe = await recipeRequests(ctx, "");
+  const stress = await stressRequests(ctx, "");
+  return typeof recipe === "string" || typeof stress === "string" ? 0 : recipe.length + stress.length;
+}
+
 /** The label the model reads beside each image id: "BaseMale: avatar, azimuth 90 degrees[, clip fraction 0.5]". */
 export function captureLabel(request: CaptureRequest): string {
   const shape = request.bodyShape.split(":").pop() ?? request.bodyShape;

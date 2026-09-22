@@ -95,6 +95,8 @@ export async function validate(input: Input, options: Options = {}): Promise<Res
       });
       options.onProgress?.({ type: "check-finished", result: checkResults.at(-1)!, findings: [] });
     }
+    // a live UI gets one frame between checks; without a listener the loop stays synchronous
+    if (options.onProgress) await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   options.signal?.throwIfAborted();

@@ -1,16 +1,79 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runChip, runIdFrom, runLoadMessage, runUrl } from "../src/run-list.js";
+import { historyRow, isModifiedClick, routeFrom, routeUrl, runChip, runIdFrom, runLoadMessage, runUrl, tabFrom, waitText } from "../src/run-list.js";
 
 const run = (done: boolean, passed: boolean | null) => ({ id: "r", name: "item.zip", startedAt: 0, done, passed });
 
-describe("your runs chip", () => {
+describe("in-app links", () => {
+  const click = (patch: Partial<Parameters<typeof isModifiedClick>[0]> = {}) => ({ metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, button: 0, ...patch });
+  it("route plain clicks in place and leave modified ones to the browser", () => {
+    assert.equal(isModifiedClick(click()), false);
+    assert.equal(isModifiedClick(click({ metaKey: true })), true);
+    assert.equal(isModifiedClick(click({ ctrlKey: true })), true);
+    assert.equal(isModifiedClick(click({ shiftKey: true })), true);
+    assert.equal(isModifiedClick(click({ altKey: true })), true);
+    assert.equal(isModifiedClick(click({ button: 1 })), true);
+  });
+});
+
+describe("history chip", () => {
   it("shows a failure only for a failing verdict", () => {
     assert.deepEqual(runChip(run(false, null)), { status: "skipped", label: "Running" });
     assert.deepEqual(runChip({ ...run(false, null), queued: true }), { status: "skipped", label: "Waiting" });
     assert.deepEqual(runChip(run(true, true)), { status: "passed", label: "Passed" });
     assert.deepEqual(runChip(run(true, false)), { status: "failed", label: "Needs attention" });
     assert.deepEqual(runChip(run(true, null)), { status: "skipped", label: "No verdict" });
+  });
+});
+
+describe("history row", () => {
+  const now = Date.parse("2026-09-21T12:00:00Z");
+  it("names the sender only when the server did", () => {
+    const own = historyRow({ ...run(true, true), startedAt: now - 3 * 60_000 }, now);
+    assert.equal(own.sentBy, undefined);
+    assert.equal("sentBy" in own, false);
+    assert.equal(own.when, "3 minutes ago");
+    assert.equal(own.live, false);
+    const theirs = historyRow({ ...run(false, null), owner: "ana@example.test", startedAt: now - 20_000 }, now);
+    assert.equal(theirs.sentBy, "ana@example.test");
+    assert.equal(theirs.when, "now");
+    assert.equal(theirs.live, true);
+    assert.deepEqual(theirs.chip, { status: "skipped", label: "Running" });
+  });
+  it("says 'earlier' when the start time is unknown", () => {
+    assert.equal(historyRow(run(true, null), now).when, "earlier");
+  });
+});
+
+describe("wait text", () => {
+  it("rounds the estimate to minutes", () => {
+    assert.equal(waitText(null), "");
+    assert.equal(waitText(30_000), "under a minute");
+    assert.equal(waitText(150_000), "about 3 min");
+  });
+});
+
+describe("tabs and routes", () => {
+  const id = "0123456789abcdef0123456789abcdef";
+
+  it("opens Validate by default and History for ?tab=history or any ?run=", () => {
+    assert.equal(tabFrom(""), "validate");
+    assert.equal(tabFrom("?urn=urn:decentraland:x"), "validate");
+    assert.equal(tabFrom("?tab=history"), "history");
+    assert.equal(tabFrom(`?run=${id}`), "history");
+    assert.equal(tabFrom("?tab=other"), "validate");
+  });
+
+  it("reads and writes the whole route", () => {
+    assert.deepEqual(routeFrom(""), { tab: "validate", run: null, urn: null });
+    assert.deepEqual(routeFrom("?urn=urn:decentraland:x&tab=history"), { tab: "history", run: null, urn: "urn:decentraland:x" });
+    assert.equal(routeUrl({ tab: "validate", run: null, urn: null }), "/");
+    assert.equal(routeUrl({ tab: "history", run: null, urn: null }), "/?tab=history");
+    assert.equal(routeUrl({ tab: "history", run: id, urn: null }), `/?run=${id}`);
+    assert.equal(routeUrl({ tab: "validate", run: null, urn: "urn:decentraland:x" }), "/?urn=urn%3Adecentraland%3Ax");
+    for (const route of [{ tab: "history" as const, run: id, urn: "urn:decentraland:x" }, { tab: "history" as const, run: null, urn: null }]) {
+      assert.deepEqual(routeFrom(new URL(routeUrl(route), "https://example.test").search), route);
+    }
   });
 });
 

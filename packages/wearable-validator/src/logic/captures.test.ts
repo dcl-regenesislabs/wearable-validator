@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { captureRequest, digest, digestJson, inputDigest, recipeRequests, rendererBuild, resolveCaptures, stressRequests, validCapture } from "./captures.js";
+import { captureRequest, digest, digestJson, inputDigest, plannedCaptures, recipeRequests, rendererBuild, resolveCaptures, stressRequests, validCapture } from "./captures.js";
 import { manifest } from "../manifest/index.js";
 import type { CaptureRecord, CaptureRequest, CheckContext, Renderer } from "../types.js";
 import { pngBytes } from "#test/helpers/synthetic.js";
@@ -203,6 +203,43 @@ describe("stress poses", () => {
     assert.ok(Array.isArray(unknown));
     assert.deepEqual([...new Set(unknown.map((r) => r.pose))], stress.poses.body.map((pose) => pose.clip));
     assert.deepEqual(await stressRequests(context({ itemType: "emote" }), "build-a"), []);
+  });
+});
+
+describe("plannedCaptures", () => {
+  const item = (category: string, shapes: string[]): Partial<CheckContext> => ({ category, item: { category, representations: [{ bodyShapes: shapes, mainFile: "model.glb", contents: ["model.glb"] }] } });
+  const { views, azimuthDegrees, emoteFractions, stress } = manifest.rendering;
+  const recipeOf = (kind: "wearable" | "emote", shapes: number) => shapes * views[kind].length * azimuthDegrees[kind].length * (kind === "emote" ? emoteFractions.length : 1);
+  const stressOf = (poses: keyof typeof stress.poses, shapes: number) => shapes * stress.poses[poses].length * stress.azimuthDegrees.length;
+
+  async function agrees(ctx: CheckContext, expected: number): Promise<void> {
+    const recipe = await recipeRequests(ctx, "build-a");
+    const motion = await stressRequests(ctx, "build-a");
+    assert.ok(Array.isArray(recipe) && Array.isArray(motion));
+    assert.equal(recipe.length + motion.length, expected);
+    assert.equal(await plannedCaptures(ctx), expected);
+  }
+
+  it("counts the recipe plus the category's motion pass for a wearable on both shapes", async () => {
+    await agrees(context(item("upper_body", [MALE, FEMALE])), recipeOf("wearable", 2) + stressOf("arms", 2));
+    assert.equal(await plannedCaptures(context(item("upper_body", [MALE, FEMALE]))), 20);
+  });
+
+  it("uses the head poses for a hat and halves everything for a one-shape wearable", async () => {
+    await agrees(context(item("hat", [MALE, FEMALE])), recipeOf("wearable", 2) + stressOf("head", 2));
+    await agrees(context(item("hat", [MALE])), recipeOf("wearable", 1) + stressOf("head", 1));
+    assert.equal(await plannedCaptures(context(item("hat", [MALE]))), 10);
+  });
+
+  it("counts every clip fraction and no motion pass for an emote", async () => {
+    await agrees(context({ itemType: "emote", ...item("fun", [MALE, FEMALE]) }), recipeOf("emote", 2));
+    assert.equal(await plannedCaptures(context({ itemType: "emote", ...item("fun", [MALE, FEMALE]) })), 20);
+  });
+
+  it("answers 0 when the item cannot be rendered", async () => {
+    assert.equal(await plannedCaptures(context({ category: undefined })), 0);
+    assert.equal(await plannedCaptures(context({ files: new Map() })), 0);
+    assert.equal(await plannedCaptures(context({ item: { category: "hat", representations: [] } })), 0);
   });
 });
 

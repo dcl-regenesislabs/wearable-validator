@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { basename, extname } from "node:path";
 import { START_COMPONENT, STOP_COMPONENT, type IBaseComponent, type IConfigComponent, type ILoggerComponent, type IMetricsComponent } from "@well-known-components/interfaces";
-import { loadInput, registry, validate, type Renderer, type Result } from "@dcl-regenesislabs/wearable-validator";
+import { loadInput, plannedCaptures, registry, validate, type CheckContext, type Renderer, type Result } from "@dcl-regenesislabs/wearable-validator";
 import { appLogger, type AppLogger } from "../adapters/log-buffer.js";
 import type { IRendererComponent } from "../adapters/renderer.js";
 import type { IReviewerComponent } from "../adapters/reviewer.js";
@@ -145,6 +145,14 @@ const frameOf = (event: RunEvent): string => `id: ${event.id}\nevent: ${event.ty
 
 const summarize = ({ id, owner, name, dir, startedAt, done, passed, rendered }: StoredRun): StoredRun => ({ id, owner, name, dir, startedAt, done, passed, rendered });
 
+/** The rendering stage names what the site should expect: how many capture events, on which body shapes. */
+async function renderingStage(ctx: CheckContext | undefined): Promise<{ text: string; views: number; bodyShapes: string[] }> {
+  const views = ctx ? await plannedCaptures(ctx) : 0;
+  const bodyShapes = [...new Set(ctx?.item.representations?.flatMap((rep) => rep.bodyShapes) ?? [])].map((urn) => urn.split(":").pop() ?? urn);
+  const where = bodyShapes.length ? ` on ${bodyShapes.join(" and ")}` : "";
+  return { text: `Rendering ${views} view${views === 1 ? "" : "s"}${where}`, views, bodyShapes };
+}
+
 function logEvent(log: AppLogger, run: Run, type: RunEventType, data: unknown): void {
   const d = (data ?? {}) as Record<string, unknown>;
   const ms = Date.now() - run.startedAt;
@@ -247,7 +255,8 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
   }
 
   function finish(run: Run, data: { result?: Result; skipped?: boolean; message?: string }, wire: Record<string, unknown> = data): void {
-    run.passed = data.result ? verdict(data.result) : null;
+    // a standalone run renders past a failed gate: its visual-only Result never carries the code verdict
+    run.passed = data.result ? (run.gate?.passed === false ? false : verdict(data.result)) : null;
     run.outcome = data.result && !data.skipped ? (run.passed === null ? "no-verdict" : run.passed ? "passed" : "failed") : "gate";
     metrics.increment("runs_finished_total", { status: run.outcome });
     emit(run, "done", run.zipUrl ? { ...wire, zipUrl: run.zipUrl } : wire);
@@ -347,7 +356,7 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
       // on disk now, not at the end with writeRun(): the site shows it beside the views while they are still rendering
       if (thumbnail) await runStore.writeThumbnail(run.dir, thumbnail);
       const inputSha = createHash("sha256").update(bytes).digest("hex");
-      await runStore.writeInput(run.dir, { id: run.id, owner: run.owner, name: run.name, startedAt: run.startedAt, sha256: inputSha });
+      await runStore.writeInput(run.dir, { id: run.id, owner: run.owner, name: run.name, startedAt: run.startedAt, sha256: inputSha, gatePassed: run.gate?.passed });
       // an earlier run of the same file: show its photos now; only stale or missing views get rendered again
       const earlier = runStore.previousRun(inputSha);
       const captures = earlier && earlier !== run.dir ? await runStore.readRun(earlier).catch(() => []) : [];
@@ -360,7 +369,7 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
       emit(run, "stage", { text: "Starting the renderer" });
       browser = await renderer.forRun(io);
       const model = reviewer.forRun(io);
-      emit(run, "stage", { text: "Rendering the item on both body shapes" });
+      emit(run, "stage", await renderingStage(loaded.ctx));
       const result = await validate(bytes, {
         checks: VISUAL_CHECKS,
         captures,

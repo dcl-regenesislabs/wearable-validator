@@ -106,7 +106,7 @@ The thumbnail and the views are uploaded privately to the app (`files.getUploadU
 
 1. Two curators sign in at wearable-validator.dclregenesislabs.xyz (Access login). The Visual review panel header says **Signed in as <email>**.
 2. Each drops a zip and gets a streamed run.
-3. Each sees only their own run under **Your runs** (`GET /api/runs`).
+3. Each sees only their own runs on the **History** tab (`GET /api/runs`); operators see everyone's (`GET /api/runs?all=1`).
 4. Paste the other person's run URL (`/api/runs/<id>/events`) into the browser: `404 { "message": "Unknown run." }`.
 5. `curl https://api.wearable-validator.dclregenesislabs.xyz/api/health` answers `{ "ok": true, …, "owner": null }`; `curl …/api/runs` answers 401.
 

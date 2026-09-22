@@ -119,7 +119,7 @@ describe("run server", () => {
   after(() => stopAndClean(server));
 
   it("reports its capabilities, without identity, and names the caller when it can", async () => {
-    const health = (await (await fetch(`${base}/api/health`)).json()) as { ok: boolean; visual: { renderer: boolean; reviewer: string }; checks: string[]; rulesVersion: string; owner: string | null; build: { version: string; commit: string; builtAt: string | null; startedAt: number } };
+    const health = (await (await fetch(`${base}/api/health`)).json()) as { ok: boolean; visual: { renderer: boolean; reviewer: string }; checks: string[]; rulesVersion: string; owner: string | null; operator: boolean; build: { version: string; commit: string; builtAt: string | null; startedAt: number } };
     assert.equal(health.build.commit, "dev", "a checkout has no build-info.json: the Docker image writes one from .git/HEAD");
     assert.equal(health.build.builtAt, null);
     assert.ok(health.build.startedAt > 0 && typeof health.build.version === "string");
@@ -128,10 +128,13 @@ describe("run server", () => {
     assert.deepEqual(health.checks, ["render-valid", "thumbnail-honesty", "visual-quality", "emote-quality"]);
     assert.equal(health.rulesVersion, manifest.version);
     assert.equal(health.owner, null);
-    const known = (await (await fetch(`${base}/api/health`, { headers: alice })).json()) as { owner: string | null };
-    assert.equal(known.owner, "alice");
-    const service = (await (await fetch(`${base}/api/health`, { headers: bot })).json()) as { owner: string | null };
-    assert.equal(service.owner, null, "a service token is not a person: the site never greets it");
+    assert.equal(health.operator, false);
+    const known = (await (await fetch(`${base}/api/health`, { headers: alice })).json()) as { owner: string | null; operator: boolean };
+    assert.deepEqual([known.owner, known.operator], ["alice", false]);
+    const operator = (await (await fetch(`${base}/api/health`, { headers: { ...alice, "x-test-operator": "1" } })).json()) as { owner: string | null; operator: boolean };
+    assert.deepEqual([operator.owner, operator.operator], ["alice", true], "the site asks for everyone's runs only for an operator who is a person");
+    const service = (await (await fetch(`${base}/api/health`, { headers: bot })).json()) as { owner: string | null; operator: boolean };
+    assert.deepEqual([service.owner, service.operator], [null, false], "a service token is not a person: the site never greets it");
   });
 
   it("answers 401 on every other route without an identity, and keeps those refusals out of the operator log", async () => {
@@ -229,6 +232,17 @@ describe("run server", () => {
     assert.equal(events.filter((e) => e.type === "capture").length, 20);
   });
 
+  it("announces a one-shape item's plan on its single body shape", async () => {
+    const data = { category: "hat", tags: ["test"], hides: [], replaces: [], representations: [{ bodyShapes: ["urn:decentraland:off-chain:base-avatars:BaseMale"], mainFile: "model.glb", contents: ["model.glb"] }] };
+    const zip = await syntheticZip({ manifest: { name: "One shape", description: "synthetic", rarity: "common", data } });
+    const id = await startRun(base, zip, "?model=0&standalone=1");
+    const events = await readEvents(`${base}/api/runs/${id}/events`);
+    const captures = events.filter((e) => e.type === "capture").length;
+    const rendering = events.find((e) => e.type === "stage" && e.data.views !== undefined)!;
+    assert.deepEqual(rendering.data, { text: `Rendering ${captures} views on BaseMale`, views: captures, bodyShapes: ["BaseMale"] });
+    assert.equal(captures, 10, "half the two-shape recipe");
+  });
+
   it("streams every capture, the prompt and the answer, and serves the images", async () => {
     const zip = await syntheticZip();
     const id = await startRun(base, zip, "?standalone=1", { ...alice, "x-file-name": "shirt.zip" });
@@ -237,6 +251,8 @@ describe("run server", () => {
     const captures = events.filter((e) => e.type === "capture");
     assert.equal(captures.length, 20);
     assert.ok(captures.some((c) => c.data.id === "BaseMale-wearable-000"), "the item-alone front view is among them");
+    const rendering = events.find((e) => e.type === "stage" && e.data.views !== undefined)!;
+    assert.deepEqual(rendering.data, { text: "Rendering 20 views on BaseMale and BaseFemale", views: captures.length, bodyShapes: ["BaseMale", "BaseFemale"] }, "the site sizes its placeholders from the stage event");
     const reviews = events.filter((e) => e.type === "review").map((e) => `${e.data.check}:${e.data.phase}`);
     assert.deepEqual(reviews, ["thumbnail-honesty:request", "thumbnail-honesty:answer", "visual-quality:request", "visual-quality:answer"]);
     const done = events.at(-1)!;
@@ -322,6 +338,15 @@ describe("run server", () => {
     assert.equal(runs[1].passed, true, "every visual row passed");
     assert.ok(runs[0].startedAt >= runs[1].startedAt);
     assert.deepEqual((await listAs(base, bob)).map((row) => row.id), [bobRun]);
+  });
+
+  it("lists a standalone run whose code checks failed as failed, whatever the visual rows say", async () => {
+    const id = await startRun(base, await syntheticZip({ glb: await syntheticGlb({ triangles: 2000 }) }), "?standalone=1", { ...alice, "x-file-name": "gated.zip" });
+    const events = await readEvents(`${base}/api/runs/${id}/events`);
+    assert.equal((events.find((e) => e.type === "gate")!.data as { passed: boolean | null }).passed, false);
+    const result = (events.at(-1)!.data as { result: { checks: { status: string }[] } }).result;
+    assert.ok(result.checks.every((row) => row.status === "passed"), "the visual rows alone would pass");
+    assert.equal((await listAs(base, alice)).find((row) => row.id === id)!.passed, false, "the code gate still decides the verdict");
   });
 
   it("shows an earlier run's photos at once and renders nothing again for the same file", async () => {
@@ -683,8 +708,10 @@ describe("runs outlive memory and restarts", () => {
     const capture = live.find((e) => e.type === "capture")!.data.url as string;
     const bobs = await startRun(first.base, zip, "?standalone=1", { ...bob, "x-file-name": "bobs.zip" });
     await readEvents(`${first.base}/api/runs/${bobs}/events`, bob);
-    // the server keeps 50 runs in memory: fifty quick gated runs push the first two out, leaving only their folders
     const filler = await syntheticZip({ glb: await syntheticGlb({ triangles: 2000 }) });
+    const gated = await startRun(first.base, filler, "?standalone=1", { ...bob, "x-file-name": "gated.zip" });
+    await readEvents(`${first.base}/api/runs/${gated}/events`, bob);
+    // the server keeps 50 runs in memory: fifty quick gated runs push the first ones out, leaving only their folders
     for (let i = 0; i < 50; i++) await readEvents(`${first.base}/api/runs/${await startRun(first.base, filler, "", carol)}/events`, carol);
     const reloaded = (await (await fetch(`${first.base}/api/runs/${evicted}`, { headers: alice })).json()) as { id: string; name: string; done: boolean; events: Frame[] };
     assert.equal(reloaded.done, true);
@@ -705,7 +732,7 @@ describe("runs outlive memory and restarts", () => {
     try {
       const runs = await listAs(second.base, alice);
       assert.deepEqual(runs.map((row) => [row.id, row.name, row.done, row.passed]), [[evicted, "first.zip", true, true]]);
-      assert.deepEqual((await listAs(second.base, bob)).map((row) => row.id), [bobs]);
+      assert.deepEqual((await listAs(second.base, bob)).map((row) => [row.id, row.passed]), [[gated, false], [bobs, true]], "the index rebuilt from input.json keeps the gate verdict");
       assert.equal((await listAs(second.base, carol)).length, 50);
       const restored = (await (await fetch(`${second.base}/api/runs/${evicted}`, { headers: alice })).json()) as { done: boolean; events: Frame[] };
       assert.equal(restored.done, true);
@@ -739,6 +766,10 @@ describe("operators", () => {
       const every = (await (await fetch(`${base}/api/runs?all=1`, { headers: bot })).json()) as { runs: { id: string; owner: string }[] };
       assert.deepEqual(every.runs.map((run) => [run.id, run.owner]), [[b, "bob"], [a, "alice"]]);
       assert.equal((await listAs(base, bot)).length, 0, "without all=1 an operator lists only its own runs");
+      const person = { ...carol, "x-test-operator": "1" };
+      const asPerson = (await (await fetch(`${base}/api/runs?all=1`, { headers: person })).json()) as { runs: { id: string; owner?: string }[] };
+      assert.deepEqual(asPerson.runs.map((run) => run.owner), ["bob", "alice"], "a signed-in operator (the one /api/health reports) sees who sent each run");
+      assert.ok((await listAs(base, alice)).every((run) => !("owner" in run)), "a curator's own list names no owner");
       assert.equal((await fetch(`${base}/api/runs/${b}`, { headers: bot })).status, 200);
       assert.equal((await fetch(`${base}/api/runs/${a}/events`, { headers: bot })).status, 200);
 
