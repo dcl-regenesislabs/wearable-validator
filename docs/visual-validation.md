@@ -125,7 +125,7 @@ Written by `packages/server/src/logic/run-store.ts` (`writeRun`) for both the CL
 ```
 packages/server/artifacts/visual-upper_body-k3Qx9a/
 ├── index.html                  gallery: verdict, summary, usage/cost; findings each linking #<captureId>;
-│                               thumbnail beside the 12 captures captioned by id; <details> for prompt, context, answer
+│                               thumbnail beside the captures captioned by id; <details> for prompt, context, answer
 ├── result.json                 the validate() Result verbatim, capture bytes replaced by `file`
 ├── thumbnail.png               the thumbnail as reviewed (after --thumbnail override)
 ├── captures/                   shared by every visual rule in the run; the PNG files ARE the cache
@@ -205,15 +205,20 @@ How it is reviewed:
 },
 "ai": {                             // the one call, shared by every AI-backed rule — read only by ai.ts (+ maxTextLength by parsers)
   "model": "claude-sonnet-5",
-  "maxOutputTokens": 4096, "maxInputTokens": 40000, "maxImages": 13, "timeoutMs": 120000, "maxRetries": 0,
+  "maxOutputTokens": 4096, "maxInputTokens": 40000, "maxImages": 21, "timeoutMs": 120000, "maxRetries": 0,
   "thinkingBudgetTokens": 1024, "imagePixelsPerToken": 750, "textCharactersPerToken": 3, "maxTextLength": 1200
 },
 "thumbnailHonesty": {               // V-05 only — a flat per-topic block beside thumbnail / hands / emote, HEAD style
   "promptVersion": 4, "recipeVersion": 1,
   "views": { "wearable": ["avatar", "wearable"], "emote": ["avatar"] },
   "azimuthDegrees": { "wearable": [0, 90, 180], "emote": [0, 90] },     // 180 added after rear art was mistaken for the front
-  "emoteFractions": [0, 0.5, 1],
-  "maxCaptures": 12, "maxFindings": 8
+  "stress": {                       // V-02's motion pass: worn, front and side, two clip moments per category, skin chroma green
+    "skin": "00ff00", "azimuthDegrees": [0, 90],
+    "poses": { "arms": [dab 0.5, clap 0.5], "legs": [run 0.25, jump 0.75], "head": [head-explode 0.25, dab 0.5], "body": [dab 0.5, run 0.25] },
+    "categoryPoses": { "upper_body": "arms", "lower_body": "legs", "hat": "head", … }   // unlisted categories use "body"
+  },
+  "emoteFractions": [0, 0.25, 0.5, 0.75, 1],           // five moments: the quarter frames are where mid-motion clipping and sliding show
+  "maxCaptures": 20, "maxFindings": 8
 }
 ```
 
@@ -293,7 +298,7 @@ The item-alone framing is the fragile part of all of this: it depends on what th
 
 ## 6. What is still open
 
-- The Rule Book's larger recipe — 8-step turntable, six animation clips, outfit combinations, the chroma-key clipping pass, contact sheets — is not built. The renderer already accepts `pose` on a capture request, so animated poses are a recipe change plus a prompt bump when a labeled fixture set shows rest-pose views miss real clipping.
+- Of the Rule Book's larger recipe, the animation clips and the chroma-key clipping pass exist as the motion pass (`rendering.stress`: two clip moments per category, worn, front and side, skin chroma green, judged by `visual-quality`); the 8-step turntable, outfit combinations and contact sheets are not built. The renderer already accepts `pose` on a capture request, so animated poses are a recipe change plus a prompt bump when a labeled fixture set shows rest-pose views miss real clipping.
 - Accuracy is measured on two items only. A labeled set of known-good and known-bad items is the next thing to build before any finding can become more than advisory.
 - Aggregation and policy (`Result.identity`, shadow / advisory / review / block profiles) do not exist; `passed` stays null for every visual run.
 - The run API knows curators only (Cloudflare Access email). ADR-44 signed fetch for the Builder (owner = wallet) is the next `Identify` provider in `packages/server/src/adapters/identity.ts`. Also open: run retention, a daily spend cap ([deployment.md](deployment.md)).

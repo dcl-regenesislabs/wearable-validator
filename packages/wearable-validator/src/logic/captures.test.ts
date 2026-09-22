@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { captureRequest, digest, digestJson, inputDigest, rendererBuild, resolveCaptures, validCapture } from "./captures.js";
+import { captureRequest, digest, digestJson, inputDigest, recipeRequests, rendererBuild, resolveCaptures, stressRequests, validCapture } from "./captures.js";
 import { manifest } from "../manifest/index.js";
 import type { CaptureRecord, CaptureRequest, CheckContext, Renderer } from "../types.js";
 import { pngBytes } from "#test/helpers/synthetic.js";
@@ -122,12 +122,14 @@ describe("captures", () => {
     assert.ok(Array.isArray(captures));
     assert.equal(captures.length, 1);
     assert.equal(captures[0].request.id, "BaseMale-avatar-000");
-    // one shape × two views × three azimuths, the asked view first and only once
+    // one shape × two views × three azimuths plus the motion pass (a hat: two head poses × two azimuths), the asked view first and only once
+    const { stress } = manifest.rendering;
+    const expected = 6 + stress.poses[stress.categoryPoses.hat].length * stress.azimuthDegrees.length;
     assert.equal(rendered.length, 1);
-    assert.equal(rendered[0].length, 6);
+    assert.equal(rendered[0].length, expected);
     assert.equal(rendered[0][0].key, front.key);
-    assert.equal(new Set(rendered[0].map((req) => req.key)).size, 6);
-    assert.equal(ctx.captures.length, 6);
+    assert.equal(new Set(rendered[0].map((req) => req.key)).size, expected);
+    assert.equal(ctx.captures.length, expected);
     // the next rule finds every view already there
     const side = rendered[0].find((req) => req.id === "BaseMale-wearable-090")!;
     const again = await resolveCaptures(ctx, [side]);
@@ -176,6 +178,31 @@ describe("captures", () => {
     const ctx = context({ services: { renderer: fakeRenderer("build-a", rendered) }, signal: AbortSignal.abort() });
     await assert.rejects(resolveCaptures(ctx, [await request(ctx)]), /abort/i);
     assert.deepEqual(rendered, []);
+  });
+});
+
+describe("stress poses", () => {
+  it("adds worn front and side views at the category's two clip moments with green skin, and nothing for emotes", async () => {
+    const ctx = context({ category: "upper_body", item: { category: "upper_body", representations: [{ bodyShapes: [MALE, FEMALE], mainFile: "model.glb", contents: ["model.glb"] }] } });
+    const requests = await stressRequests(ctx, "build-a");
+    assert.ok(Array.isArray(requests));
+    const { stress } = manifest.rendering;
+    assert.equal(requests.length, 2 * stress.poses.arms.length * stress.azimuthDegrees.length);
+    assert.deepEqual(requests.map((r) => r.id).slice(0, 2), ["BaseMale-avatar-dab-000-t0.5", "BaseMale-avatar-dab-090-t0.5"]);
+    assert.ok(requests.every((r) => r.view === "avatar" && r.skin === stress.skin && r.pose && r.timeFraction !== undefined));
+    // the pose, the moment and the skin are all part of the key, and none of them collide with the rest-pose recipe
+    const recipe = await recipeRequests(ctx, "build-a");
+    assert.ok(Array.isArray(recipe));
+    assert.equal(new Set([...recipe, ...requests].map((r) => r.key)).size, recipe.length + requests.length);
+    assert.ok(recipe.length + requests.length <= manifest.rendering.maxCaptures);
+
+    const legs = await stressRequests(context({ category: "lower_body", item: { category: "lower_body", representations: [{ bodyShapes: [MALE], mainFile: "model.glb", contents: ["model.glb"] }] } }), "build-a");
+    assert.ok(Array.isArray(legs));
+    assert.deepEqual([...new Set(legs.map((r) => r.pose))], stress.poses.legs.map((pose) => pose.clip));
+    const unknown = await stressRequests(context({ category: "something_new", item: { category: "something_new", representations: [{ bodyShapes: [MALE], mainFile: "model.glb", contents: ["model.glb"] }] } }), "build-a");
+    assert.ok(Array.isArray(unknown));
+    assert.deepEqual([...new Set(unknown.map((r) => r.pose))], stress.poses.body.map((pose) => pose.clip));
+    assert.deepEqual(await stressRequests(context({ itemType: "emote" }), "build-a"), []);
   });
 });
 
