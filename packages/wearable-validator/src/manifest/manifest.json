@@ -57,7 +57,8 @@
     "maxEntryUncompressedBytes": 268435456
   },
   "images": {
-    "maxDecodePixels": 16777216
+    "maxDecodePixels": 16777216,
+    "inflateChunkBytes": 16384
   },
   "boundingBox": {
     "width": 2.42,

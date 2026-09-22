@@ -67,6 +67,22 @@ result.passed;    // true | false | null (advisory runs never mint a verdict)
 result.findings;  // every problem at once: message, where, measured vs limit, fix, docs
 ```
 
+## Security regressions
+
+Run `npm run build -w @dcl-regenesislabs/wearable-validator`, then
+`node --import tsx --test packages/wearable-validator/test/security.test.ts packages/server/test/security.test.ts packages/web/test/security.test.ts`.
+The tests reproduce cyclic GLB hierarchies, PNG inflation beyond the declared
+scanlines, duplicate PNG headers, cross-origin reads of the local API, and ZIP
+extraction before validation. The cycle test runs in a subprocess with a deadline;
+the API test uses a temporary loopback server and fake rendering/review services.
+
+PNG pixel measurements ignore embedded color profiles and text and bound inflation
+by the image's scanline layout, including Adam7. `pako` is pinned to 2.2.0 so the
+streaming inflation and truncated-input behavior used by this guard stay stable.
+ZIP metadata and previews use the package's `unpackZip()` bounds. The API is
+same-origin: the website's Worker or Vite proxy forwards `/api`; direct browser
+requests from other origins are unsupported. Terminal clients remain supported.
+
 ## Browser content-integrity regression
 
 Run `npm run test:browser -w wearable-validator-web`, then open

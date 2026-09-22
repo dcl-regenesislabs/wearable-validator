@@ -14,7 +14,7 @@ export interface Manifest {
     maxEntries: number; maxUncompressedBytes: number; maxEntryUncompressedBytes: number;
   };
   /** Header width × height above which no check decodes an image to pixels (a decoded image costs at least 4 bytes per pixel). */
-  images: { maxDecodePixels: number };
+  images: { maxDecodePixels: number; inflateChunkBytes: number };
   boundingBox: { width: number; height: number; depth: number };
   /** ADR-60 auto-hide set — the categories a skin is expected to hide. */
   skinAutoHideSet: string[];

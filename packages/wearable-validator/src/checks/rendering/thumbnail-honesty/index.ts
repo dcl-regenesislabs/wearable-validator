@@ -3,13 +3,12 @@
  * Previous hop: logic/captures.ts resolves the views the recipe asks for (supplied, else services.renderer).
  * Next hop: services.reviewer (/ai) answers the ReviewRequest built here; parseThumbnailAnswer() maps it to findings.
  */
-import { decode as decodePng } from "fast-png";
 import { imageSize } from "image-size";
 import { decode as decodeJpeg } from "jpeg-js";
 import { captureLabel, recipeRequests, rendererBuild, resolveCaptures } from "../../../logic/captures.js";
 import { askReviewer, errored, isExecution, skipped } from "../../../logic/review.js";
 import { emptyCaptures } from "../render-valid/index.js";
-import { isJpegBytes, isPngBytes } from "../../../logic/images.js";
+import { decodePngSafe, isJpegBytes, isPngBytes } from "../../../logic/images.js";
 import { manifest } from "../../../manifest/index.js";
 import {
   finding,
@@ -143,8 +142,9 @@ function readThumbnail(ctx: CheckContext): ReviewImage | string {
     if (!["png", "jpg"].includes(size.type ?? "") || !size.width || !size.height || Math.max(size.width, size.height) > thumbnailMaxSize) {
       return reason;
     }
-    if (size.type === "png") decodePng(bytes);
-    else decodeJpeg(bytes);
+    if (size.type === "png") {
+      if (!decodePngSafe(bytes)) return reason;
+    } else decodeJpeg(bytes);
     return { id: "thumbnail", label: "Original item thumbnail", bytes, mimeType: size.type === "png" ? "image/png" : "image/jpeg" };
   } catch {
     return reason;

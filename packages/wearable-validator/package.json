@@ -49,10 +49,12 @@
     "jpeg-js": "^0.4.4",
     "jsqr": "^1.4.0",
     "jszip": "^3.10.1",
-    "music-metadata": "^11.0.0"
+    "music-metadata": "^11.0.0",
+    "pako": "2.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pako": "2.0.4",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3",
     "@earendil-works/pi-ai": "0.84.1",

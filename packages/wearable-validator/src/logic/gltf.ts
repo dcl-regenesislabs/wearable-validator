@@ -6,8 +6,32 @@ const io = new WebIO().registerExtensions(ALL_EXTENSIONS);
 /** Parse a self-contained GLB. Returns the gltf-transform Document plus the raw JSON chunk. */
 export async function parseGlb(bytes: Uint8Array): Promise<{ doc: Document; json: Record<string, unknown> }> {
   const json = readGlbJsonChunk(bytes);
+  assertAcyclicNodes(json);
   const doc = await io.readBinary(bytes);
   return { doc, json };
+}
+
+function assertAcyclicNodes(json: Record<string, unknown>): void {
+  if (!Array.isArray(json.nodes)) return;
+  const nodes: unknown[] = json.nodes;
+  const parents = new Uint32Array(nodes.length);
+  const children = nodes.map((node) => {
+    if (!node || typeof node !== "object" || !("children" in node)) return [];
+    if (!Array.isArray(node.children)) throw new Error("The model has an invalid node hierarchy. Re-export it as GLB.");
+    return node.children.map((child: unknown) => {
+      if (typeof child !== "number" || !Number.isInteger(child) || child < 0 || child >= nodes.length) {
+        throw new Error("The model references a missing child node. Re-export it as GLB.");
+      }
+      parents[child]++;
+      return child;
+    });
+  });
+  const ready: number[] = [];
+  for (let i = 0; i < nodes.length; i++) if (parents[i] === 0) ready.push(i);
+  for (let next = 0; next < ready.length; next++) {
+    for (const child of children[ready[next]]) if (--parents[child] === 0) ready.push(child);
+  }
+  if (ready.length !== nodes.length) throw new Error("The model contains a cycle in its node hierarchy. Re-export it as GLB.");
 }
 
 /** Reads the JSON chunk of a GLB container without a full parse (cameras/extensions live here). */
@@ -25,8 +49,11 @@ export function isGlb(bytes: Uint8Array): boolean {
 
 /** Collider rule (pinned): a mesh is a collider when its node — or any ancestor — matches /collider/i. */
 export function isColliderNode(node: Node): boolean {
+  const seen = new Set<Node>();
   let current: Node | null = node;
   while (current) {
+    if (seen.has(current)) throw new Error("The model contains a cycle in its node hierarchy. Re-export it as GLB.");
+    seen.add(current);
     if (/collider/i.test(current.getName())) return true;
     const parent = current.listParents().find((p) => p.propertyType === "Node") as Node | undefined;
     current = parent ?? null;

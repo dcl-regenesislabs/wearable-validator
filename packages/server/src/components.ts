@@ -40,7 +40,6 @@ export async function createAppServer(config: IConfigComponent, logs: ILoggerCom
   return createServerComponent<GlobalContext>(
     { config, logs },
     {
-      cors: { maxAge: 36000, methods: ["GET", "HEAD", "POST", "DELETE", "OPTIONS"] },
       // a slow upload holds its buffers only this long; the body cap itself is the route's (MAX_UPLOAD_BYTES)
       requestTimeout: (await config.getNumber("UPLOAD_TIMEOUT_MS")) ?? 60000
     }
