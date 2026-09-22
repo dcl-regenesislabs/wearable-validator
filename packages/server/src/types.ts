@@ -52,7 +52,7 @@ export type Context<Path extends string = string> = IHttpServerComponent.PathAwa
 export interface Identity {
   owner: string;
   kind: "local" | "access" | "service";
-  /** Sees every run, the stats and the log: service tokens (the Slack bot) and the emails in OPERATORS. Local runs are always operators. */
+  /** Sees every run, the stats and the log: everyone Cloudflare Access lets in, service tokens (the Slack bot) and local runs. */
   operator: boolean;
   /** Service identities read everything and change nothing: they never start or cancel a run. */
   readOnly: boolean;
