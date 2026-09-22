@@ -53,7 +53,7 @@ npm run review -- packages/web/public/samples/upper_body.zip \
   --from packages/server/artifacts/visual-upper_body-XXXXXX            # with the token set: reuses the renders, two model calls
 ```
 
-Leave out the token and the server renders and writes the prompt without calling the model. The terminal shows one line per event (run accepted, code gate, each capture, the model request, the answer with tokens and cost); when hosted, the same process is configured with `PORT`, `HOST`, `ANTHROPIC_OAUTH_SETUP_TOKEN` (a year-long `claude setup-token`, no session file needed), `RENDERER_BUILD`, `ARTIFACTS_DIR`, the Cloudflare Access variables and logs JSON lines — see [docs/visual-validation.md](docs/visual-validation.md).
+Leave out the token and the server renders and writes the prompt without calling the model. The terminal shows one line per event (run accepted, code gate, each capture, the model request, the answer with tokens and cost); when hosted, the same process is configured with `PORT`, `HOST`, `ANTHROPIC_OAUTH_SETUP_TOKEN` (a year-long `claude setup-token`, no session file needed), `RENDERER_BUILD`, `ARTIFACTS_DIR`, the Cloudflare Access variables, `SLACK_BOT_TOKEN` + `SLACK_CHANNEL` + `SITE_URL` (one Slack message per finished run) and logs JSON lines — see [docs/visual-validation.md](docs/visual-validation.md).
 
 ## Deploy
 

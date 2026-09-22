@@ -15,6 +15,7 @@ import { renderedFrame } from "../../wearable-validator/test/helpers/frames.js";
 import type { IIdentityComponent, Identify } from "../src/adapters/identity.js";
 import type { IRendererComponent } from "../src/adapters/renderer.js";
 import { liveReviewer, recordingReviewer, type IReviewerComponent } from "../src/adapters/reviewer.js";
+import type { ISlackComponent } from "../src/adapters/slack.js";
 import { createAppServer, createBaseComponents } from "../src/components.js";
 import { metricDeclarations } from "../src/metrics.js";
 import { main } from "../src/service.js";
@@ -97,6 +98,8 @@ export interface TestServerOptions {
   identity?: IIdentityComponent;
   renderer?: IRendererComponent;
   reviewer?: IReviewerComponent;
+  /** A Slack component over a recording fetch; without one the notifier is off (no SLACK_BOT_TOKEN in the test env). */
+  slack?: ISlackComponent;
 }
 
 export interface TestServer {
@@ -142,7 +145,8 @@ export async function startTestServer(options: TestServerOptions = {}): Promise<
       server,
       identity: options.identity ?? { identify: testIdentify, kind: "test" },
       renderer: options.renderer ?? fakeRenderer({ services: 0, rendered: [] }),
-      reviewer: options.reviewer ?? fakeReviewer()
+      reviewer: options.reviewer ?? fakeReviewer(),
+      ...(options.slack ? { slack: options.slack } : {})
     })),
     localFetch: { fetch: (url, init) => fetch(new URL(String(url), base), init) }
   };

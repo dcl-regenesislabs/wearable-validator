@@ -20,6 +20,7 @@ import { Preview } from "./preview.js";
 import { MetadataValues } from "./metadata-values.js";
 import { fetchItem, parseItemReference } from "./catalyst.js";
 import { VisualReview } from "./visual-review.js";
+import { runIdFrom } from "./run-list.js";
 
 const GROUP_LABELS: Record<Group, string> = {
   files: "Files & metadata",
@@ -101,6 +102,10 @@ export function App() {
   const runSeq = useRef(0);
   const [samples, setSamples] = useState<Sample[]>([]);
   const [fetching, setFetching] = useState<string | null>(null);
+  // the `?run=<id>` of the URL: a visual review to open on top (read on load and on back/forward)
+  const [openRunId, setOpenRunId] = useState<string | null>(() => runIdFrom(location.search));
+  const loadedRef = useRef<Loaded | null>(null);
+  loadedRef.current = loaded;
 
   useEffect(() => {
     fetch("samples/index.json")
@@ -191,6 +196,7 @@ export function App() {
         const bytes = new Uint8Array(await file.arrayBuffer());
         const isBareGlb = bytes.length >= 4 && bytes[0] === 0x67 && bytes[1] === 0x6c && bytes[2] === 0x54 && bytes[3] === 0x46;
         if (location.search) history.pushState({}, "", location.pathname);
+        setOpenRunId(null);
         const next: Loaded = { name: file.name, bytes, isBareGlb };
         if (!isBareGlb && file.name.endsWith(".zip")) Object.assign(next, await zipRuleContext(bytes));
         setLoaded(next);
@@ -218,8 +224,10 @@ export function App() {
     if (urn) void onReference(urn, false);
     const onPop = () => {
       const shared = new URLSearchParams(location.search).get("urn");
+      setOpenRunId(runIdFrom(location.search));
       if (shared) void onReference(shared, false);
-      else reset();
+      // a dropped file has no URL of its own: backing out of a run modal must not throw its results away
+      else if (!loadedRef.current?.bytes) reset();
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -287,7 +295,7 @@ export function App() {
       {!loaded && !fetching && (
         <>
           <Dropzone dragging={dragging} onFile={onFile} samples={samples} onSample={onSample} onReference={onReference} />
-          <div className="landing-runs"><VisualReview name="" codeResult={null} /></div>
+          <div className="landing-runs"><VisualReview name="" codeResult={null} openRunId={openRunId} /></div>
         </>
       )}
       {fetching && (
@@ -486,7 +494,7 @@ export function App() {
                 </section>
               );
             })}
-            {!loaded.isBareGlb && !loaded.files && <VisualReview bytes={loaded.bytes} name={loaded.name} codeResult={result} />}
+            {!loaded.isBareGlb && !loaded.files && <VisualReview bytes={loaded.bytes} name={loaded.name} codeResult={result} openRunId={openRunId} />}
             <footer className="foot">
               Checks that don't apply to this item (wrong item type, or metadata a bare .glb can't carry) aren't shown — that's
               why fewer than {CODE_CHECK_COUNT} appear. Code checks never leave this page. The visual review, when a run server is

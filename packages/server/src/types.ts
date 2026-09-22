@@ -1,12 +1,13 @@
 import type { IFetchComponent, IHttpServerComponent } from "@dcl/core-commons";
 import type { IBaseComponent, IConfigComponent, ILoggerComponent, IMetricsComponent } from "@well-known-components/interfaces";
-import type { CaptureRecord } from "@dcl-regenesislabs/wearable-validator";
+import type { CaptureRecord, ItemType, Result } from "@dcl-regenesislabs/wearable-validator";
 import type { IIdentityComponent } from "./adapters/identity.js";
 import type { ILogBufferComponent } from "./adapters/log-buffer.js";
 import type { IRendererComponent } from "./adapters/renderer.js";
 import type { IReviewerComponent } from "./adapters/reviewer.js";
 import type { IBuildInfoComponent } from "./adapters/build-info.js";
 import type { ISiteComponent } from "./adapters/site.js";
+import type { ISlackComponent } from "./adapters/slack.js";
 import type { IQueueComponent } from "./logic/queue.js";
 import type { IRunStoreComponent } from "./logic/run-store.js";
 import type { IRunsComponent } from "./logic/runs.js";
@@ -29,6 +30,7 @@ export type BaseComponents = {
   queue: IQueueComponent;
   runs: IRunsComponent;
   site: ISiteComponent;
+  slack: ISlackComponent;
   buildInfo: IBuildInfoComponent;
 };
 
@@ -105,4 +107,43 @@ export interface QueueState {
   waiting: QueueEntry[];
   averageRunMs: number | null;
   maxConcurrentRuns: number;
+}
+
+/** How a run ended: the label runs_finished_total counts, minus "cancelled" (a cancelled run tells nobody). */
+export type RunOutcome = "passed" | "failed" | "no-verdict" | "gate" | "error";
+
+/** What a curator must do next, computed from the code gate and the visual review (logic/decision.ts). */
+export interface CuratorDecision {
+  /** ready: approve without looking; review: a curator's eyes are needed; blocked: the creator must fix errors first. */
+  state: "ready" | "review" | "blocked";
+  /** Short phrases in the order they were found: "2 warnings", "thumbnail-honesty: mismatch", "3 code errors". */
+  reasons: string[];
+}
+
+/** The item as its metadata names it; only what NormalizedItem has. */
+export interface RunItem {
+  name?: string;
+  category?: string;
+  itemType: ItemType;
+  rarity?: string;
+}
+
+/** Everything a notification (Slack today) needs about a run that just concluded; built once in conclude(). */
+export interface RunNotice {
+  id: string;
+  owner: string;
+  name: string;
+  dir: string;
+  startedAt: number;
+  beganAt?: number;
+  finishedAt: number;
+  outcome: RunOutcome;
+  passed: boolean | null;
+  decision: CuratorDecision;
+  gate?: Result;
+  visual?: Result;
+  item?: RunItem;
+  error?: string;
+  /** Relative "/api/runs/<id>/input.zip", present when the upload is still in the run folder. */
+  zipUrl?: string;
 }
