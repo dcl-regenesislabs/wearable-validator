@@ -28,10 +28,6 @@ Both peers are exact pins on purpose (the browser build and the provider API are
 
 ## Publishing
 
-The package version is the rules version (`manifest.version`); bump both together. A tag publishes:
+The package version is the rules version (`manifest.version`); bump both together in the PR that changes the rules. When that PR merges to `main`, `.github/workflows/release.yml` sees a version npm does not have yet and publishes it with `npm publish --provenance` through npm's trusted publishing (GitHub OIDC). No npm token lives anywhere and nothing is tagged; a merge that leaves the version alone publishes nothing.
 
-```
-git tag v0.4.0 && git push origin v0.4.0
-```
-
-`.github/workflows/release.yml` builds, tests and runs `npm publish --provenance` through npm's trusted publishing, so no npm token lives in the repository. The very first version of a new package has to be published once by hand (`npm publish -w @dcl-regenesislabs/wearable-validator` from a logged-in machine); after that, set the trusted publisher on npmjs.com (package → Settings → Trusted Publisher: this repository, workflow `release.yml`) and every later tag publishes itself.
+The very first version of a new package has to be published once by hand (`npm publish -w @dcl-regenesislabs/wearable-validator` from a logged-in machine); after that, set the trusted publisher on npmjs.com (package → Settings → Trusted Publisher: this repository, workflow `release.yml`) and every version bump publishes itself.

@@ -1,15 +1,22 @@
 name: Publish the library
 
-# A tag is the release act: v0.4.0 publishes @dcl-regenesislabs/wearable-validator 0.4.0 to npm through
-# npm's trusted publishing (GitHub OIDC), so the repository holds no npm token. Set the trusted publisher
-# once on npmjs.com (package → Settings → Trusted Publisher: this repository, workflow release.yml).
+# A merge to main that changes the package version publishes @dcl-regenesislabs/wearable-validator through
+# npm's trusted publishing (GitHub OIDC): no npm token anywhere, and nothing to tag. A merge that leaves the
+# version alone publishes nothing. Set the trusted publisher once on npmjs.com (package → Settings →
+# Trusted Publisher: this repository, workflow release.yml).
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: ["packages/wearable-validator/**", ".github/workflows/release.yml"]
+  workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
+
+concurrency:
+  group: publish-library
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -24,11 +31,18 @@ jobs:
       # trusted publishing needs npm 11.5 or newer
       - run: npm install -g npm@latest
       - run: npm ci
-      - name: The tag must name the package version
+      - name: Is this version already on npm?
+        id: version
         run: |
           version=$(node -p "require('./packages/wearable-validator/package.json').version")
-          [ "v$version" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} does not match package version $version"; exit 1; }
-      - run: npm run typecheck -w @dcl-regenesislabs/wearable-validator
-      - run: npm test -w @dcl-regenesislabs/wearable-validator
-      - run: npm run build -w @dcl-regenesislabs/wearable-validator
-      - run: npm publish --provenance --access public -w @dcl-regenesislabs/wearable-validator
+          published=$(npm view @dcl-regenesislabs/wearable-validator@"$version" version 2>/dev/null || true)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$published" = "$version" ]; then echo "publish=no" >> "$GITHUB_OUTPUT"; echo "$version is already published"; else echo "publish=yes" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.version.outputs.publish == 'yes'
+        run: npm run typecheck -w @dcl-regenesislabs/wearable-validator
+      - if: steps.version.outputs.publish == 'yes'
+        run: npm test -w @dcl-regenesislabs/wearable-validator
+      - if: steps.version.outputs.publish == 'yes'
+        run: npm run build -w @dcl-regenesislabs/wearable-validator
+      - if: steps.version.outputs.publish == 'yes'
+        run: npm publish --provenance --access public -w @dcl-regenesislabs/wearable-validator
