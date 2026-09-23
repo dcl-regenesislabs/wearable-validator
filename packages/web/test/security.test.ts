@@ -4,7 +4,7 @@ import JSZip from "jszip";
 import { inputTooLarge, manifest, validate } from "@dcl-regenesislabs/wearable-validator";
 import { oversizedManifestZip } from "../../wearable-validator/test/helpers/hostile-inputs.js";
 import { syntheticZip } from "../../wearable-validator/test/helpers/synthetic.js";
-import { zipRuleContext } from "../src/app.js";
+import { zipRuleContext } from "../src/item.js";
 import { buildItemWithBlobs } from "../src/preview.js";
 
 it("rejects oversized ZIP manifests before extracting display metadata", async () => {
