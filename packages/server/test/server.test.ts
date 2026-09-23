@@ -218,6 +218,7 @@ describe("run server", () => {
     assert.equal(types.filter((t) => t === "capture").length, 0, "no rendering");
     assert.equal(types.filter((t) => t === "review").length, 0, "no model call");
     assert.equal((events.at(-1)!.data as { skipped?: boolean }).skipped, true);
+    assert.equal((events.at(-1)!.data.gate as { passed: boolean }).passed, false, "the done event carries the code gate for History");
     assert.ok(types.filter((t) => t === "check").length > 10, "the code checks stream too");
     const forced = await startRun(base, zip, "?standalone=1");
     const forcedEvents = await readEvents(`${base}/api/runs/${forced}/events`);
@@ -260,6 +261,11 @@ describe("run server", () => {
     const result = done.data.result as { checks: { check: string; status: string }[]; captures: { url: string }[] };
     assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:passed", "visual-quality:passed"]);
     assert.equal(result.captures.length, 20);
+    const gate = done.data.gate as { passed: boolean; checks: { check: string }[]; captures: unknown[] };
+    assert.equal(gate.passed, true, "the done event carries the code gate beside the visual result");
+    assert.ok(gate.checks.some((row) => row.check === "triangle-count"));
+    assert.deepEqual(gate.captures, []);
+    assert.equal(JSON.parse(await readFile(join(server.artifacts, `visual-shirt-${id}`, "gate.json"), "utf8")).passed, true, "and gate.json keeps it for History");
     const image = await fetch(`${base}${captures[3].data.url}`, { headers: alice });
     assert.equal(image.status, 200);
     assert.equal(image.headers.get("content-type"), "image/png");
@@ -722,6 +728,7 @@ describe("runs outlive memory and restarts", () => {
     assert.deepEqual(result.checks.map((row) => `${row.check}:${row.status}`), ["render-valid:passed", "thumbnail-honesty:passed", "visual-quality:passed"]);
     assert.equal(result.captures.length, 20);
     assert.ok(result.captures.every((entry) => entry.url.startsWith(`/api/runs/${evicted}/captures/`) && entry.file === undefined));
+    assert.equal((reloaded.events[0].data.gate as { passed: boolean }).passed, true, "gate.json comes back with the run");
     const replay = await readEvents(`${first.base}/api/runs/${evicted}/events`);
     assert.deepEqual(replay.map((e) => e.type), ["done"]);
     assert.equal((await fetch(`${first.base}${capture}`, { headers: alice })).status, 200);
@@ -733,7 +740,9 @@ describe("runs outlive memory and restarts", () => {
       const runs = await listAs(second.base, alice);
       assert.deepEqual(runs.map((row) => [row.id, row.name, row.done, row.passed]), [[evicted, "first.zip", true, true]]);
       assert.deepEqual((await listAs(second.base, bob)).map((row) => [row.id, row.passed]), [[gated, false], [bobs, true]], "the index rebuilt from input.json keeps the gate verdict");
-      assert.equal((await listAs(second.base, carol)).length, 50);
+      const carols = await listAs(second.base, carol);
+      assert.equal(carols.length, 50);
+      assert.ok(carols.every((row) => row.passed === false), "a gate-stopped run keeps its verdict from gate.json across the restart");
       const restored = (await (await fetch(`${second.base}/api/runs/${evicted}`, { headers: alice })).json()) as { done: boolean; events: Frame[] };
       assert.equal(restored.done, true);
       assert.equal(restored.events[0].type, "done");

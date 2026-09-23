@@ -73,13 +73,20 @@ export type WireResult = Omit<Result, "captures"> & { captures: (Omit<CaptureRec
 export type RunEvent =
   | { type: "check"; data: ProgressEvent }
   | { type: "gate"; data: { result: Result; passed: boolean | null } }
-  /** `views` is the planned capture count and `bodyShapes` the shapes rendered; older servers send the text alone. */
-  | { type: "stage"; data: { text: string; views?: number; bodyShapes?: string[] } }
+  /**
+   * `views` is the planned capture count and `bodyShapes` the shapes rendered; older servers send the text alone.
+   * A reference run first fetches the item: `kind: "fetch"` stages carry `done`/`total` files.
+   */
+  | { type: "stage"; data: { text: string; kind?: string; done?: number; total?: number; views?: number; bodyShapes?: string[] } }
   | { type: "queue"; data: QueuePosition }
   | { type: "capture"; data: CaptureEvent }
   | { type: "review"; data: ReviewEvent }
-  /** `zipUrl` is the kept upload (`/api/runs/<id>/input.zip`); runs older than the server that keeps it carry none. */
-  | { type: "done"; data: { result?: WireResult; skipped?: boolean; message?: string; zipUrl?: string } }
+  /**
+   * `gate` is the server's code run, so History can list every check; `zipUrl` is the kept upload
+   * (`/api/runs/<id>/input.zip`). Runs older than the server that keeps them carry neither; reference runs have no zip
+   * but carry `reference` (the URN or URL they were started from) so a run replayed from disk still reads as a fetch.
+   */
+  | { type: "done"; data: { result?: WireResult; gate?: Result; skipped?: boolean; message?: string; zipUrl?: string; reference?: string } }
   | { type: "error"; data: { message: string; zipUrl?: string } };
 
 export type CheckRow = CheckResult & { findings: Finding[] };
@@ -140,15 +147,37 @@ export async function getRun(id: string): Promise<RunDetail> {
   return { id: body.id, name: body.name, done: body.done === true, events: body.events ?? [], ...(body.owner ? { owner: body.owner } : {}) };
 }
 
-/** `model: false` renders only; `standalone` asks the model even though the code checks failed. */
-export async function startRun(bytes: Uint8Array, name: string, options: { model: boolean; standalone: boolean }): Promise<{ id: string }> {
+/** What a run starts from: the zip's bytes, or a published item the server fetches itself. */
+export type RunInput = Uint8Array | { reference: string };
+
+export interface RunOptions {
+  /** `false` renders only. */
+  model: boolean;
+  /** Ask the model even though the code checks failed. */
+  standalone: boolean;
+}
+
+/** The request `startRun` sends, built apart from fetch so a test can read it. */
+export function runRequest(input: RunInput, name: string, options: RunOptions): { url: string; init: RequestInit } {
   const query = new URLSearchParams({ ...(options.model ? {} : { model: "0" }), ...(options.standalone ? { standalone: "1" } : {}) }).toString();
-  const res = await fetch(`/api/runs${query ? `?${query}` : ""}`, {
-    method: "POST",
-    // a plain ArrayBuffer: the body type fetch accepts everywhere
-    body: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
-    headers: { "content-type": "application/zip", "x-file-name": encodeURIComponent(name) }
-  });
+  const url = `/api/runs${query ? `?${query}` : ""}`;
+  if (input instanceof Uint8Array) {
+    return {
+      url,
+      init: {
+        method: "POST",
+        // a plain ArrayBuffer: the body type fetch accepts everywhere
+        body: input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength) as ArrayBuffer,
+        headers: { "content-type": "application/zip", "x-file-name": encodeURIComponent(name) }
+      }
+    };
+  }
+  return { url, init: { method: "POST", body: JSON.stringify({ reference: input.reference }), headers: { "content-type": "application/json" } } };
+}
+
+export async function startRun(input: RunInput, name: string, options: RunOptions): Promise<{ id: string }> {
+  const { url, init } = runRequest(input, name, options);
+  const res = await fetch(url, init);
   const body = (await res.json()) as { id?: string; message?: string };
   if (!res.ok || !body.id) throw new Error(body.message ?? `The run server answered ${res.status}.`);
   return { id: body.id };

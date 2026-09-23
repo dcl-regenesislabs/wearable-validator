@@ -1,33 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { validate, checks as checkRegistry, fixes, manifest, registry, type Finding, type Group, type ProgressEvent, type Result } from "@dcl-regenesislabs/wearable-validator";
-import { cancelRun, followRun, startRun } from "./api.js";
-import { fetchItem, parseItemReference } from "./catalyst.js";
+import { fetchCatalystItem, manifest, parseItemReference, validate, type ProgressEvent, type Result } from "@dcl-regenesislabs/wearable-validator";
+import { cancelRun, followRun, startRun, type RunInput } from "./api.js";
 import { formatBytes, inputKind, isGlb, isPng, itemBytes, zipRuleContext, type Loaded, type Sample } from "./item.js";
-import { limitFor } from "./limits.js";
-import { MetadataValues } from "./metadata-values.js";
 import { Preview } from "./preview.js";
-import { CODE_GROUPS, EMPTY_VISUAL, GROUP_LABELS, codeSteps, combinedVerdict, isRunning, reduceVisual, visualRows, type Step, type VisualEvent, type VisualState } from "./progress.js";
-import { CheckAbout, FindingCard, Notice, RESULT_FILTERS, RuleColumns, StatusChip, filterStatuses } from "./rules.js";
-import { RunView } from "./run-view.js";
+import { EMPTY_VISUAL, codeSteps, isRunning, reduceVisual, type Step, type VisualEvent, type VisualState } from "./progress.js";
+import { CODE_CHECK_COUNT, Results } from "./results.js";
+import { Notice } from "./rules.js";
 import { isModifiedClick, type Route } from "./run-list.js";
 import type { Server } from "./server.js";
 import { Stepper } from "./stepper.js";
 
 /**
  * The Validate tab: the landing drop zone, the progress view while a file is read and its checks run, then the
- * results — rail (item, preview) and main (verdict, rule groups, the visual review of this item). History lives
- * on its own tab; nothing about other runs is shown here.
+ * results — rail (item, preview) and main (the shared Results: verdict, rule groups, the visual review of this
+ * item). History lives on its own tab; nothing about other runs is shown here.
  */
 
-const GROUP_INTROS: Record<Group, string> = {
-  files: "The cheapest checks run first: the package's files, sizes, metadata and integrity — everything knowable without opening the 3D model.",
-  model: "The 3D model itself: geometry budgets, textures, materials, skeleton and skinning — parsed from the GLB and measured exactly.",
-  emote: "The animation data: length, clips, bone targets, root motion and sound — measured from the keyframes.",
-  rendering: "Real renders reviewed against the thumbnail — rendered by the run server and streamed here as they happen.",
-  content: "Deterministic content screening."
-};
 const CATEGORIES = Object.keys(manifest.triangles.perCategory).concat(manifest.facialCategories);
-const CODE_CHECK_COUNT = registry.filter((check) => check.group !== "rendering").length;
 
 interface Reading {
   label: string;
@@ -139,8 +128,10 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
       setResult(null);
       setReading({ label: "Fetching the published item", detail: "Looking up the item" });
       try {
-        const item = await fetchItem(candidates, (detail) => {
-          if (id === loadSeq.current) setReading({ label: "Fetching the published item", detail });
+        const item = await fetchCatalystItem(candidates, {
+          onProgress: ({ text, done, total }) => {
+            if (id === loadSeq.current) setReading({ label: "Fetching the published item", detail: total === undefined ? text : `${done ?? 0}/${total} files` });
+          }
         });
         if (id !== loadSeq.current) return;
         if (updateHistory) navigate({ tab: "validate", run: null, urn: item.urn });
@@ -243,16 +234,19 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
 
   const startVisual = useCallback(async () => {
     const item = loadedRef.current;
-    if (!item?.bytes || item.isBareGlb || item.files) return;
+    if (!item || item.isBareGlb) return;
+    // a published item is sent as its URN: the server fetches it from the catalyst itself
+    const input: RunInput | null = item.urn ? { reference: item.urn } : item.bytes ? item.bytes : null;
+    if (!input) return;
     const seq = ++visualSeq.current;
     stopRef.current?.();
-    setVisual(reduceVisual(EMPTY_VISUAL, { type: "upload-started" }));
+    setVisual(reduceVisual(EMPTY_VISUAL, { type: "upload-started", reference: Boolean(item.urn) }));
     try {
       // the server may have been restarted with other flags since the page loaded
       const health = await refreshHealth();
       if (seq !== visualSeq.current) return;
       if (!health) throw new Error("The run server is not reachable. Start it with npm run serve at the repo root.");
-      const { id } = await startRun(item.bytes, item.name, { model: true, standalone: resultRef.current?.passed !== true });
+      const { id } = await startRun(input, item.name, { model: true, standalone: resultRef.current?.passed !== true });
       if (seq !== visualSeq.current) {
         void cancelRun(id);
         return;
@@ -272,7 +266,7 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
     void cancelRun(visual.id);
   }, [emit, visual.id]);
 
-  const reviewable = Boolean(loaded?.bytes && !loaded.isBareGlb && !loaded.files);
+  const reviewable = Boolean(loaded && !loaded.isBareGlb && (loaded.bytes || loaded.urn));
   // clean code checks: render and ask right away. Code errors: the creator has things to fix first, so nothing
   // runs (no minute of screenshots nobody will use) until they press the button.
   useEffect(() => {
@@ -290,11 +284,6 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
   }, [visual.phase, refreshRuns]);
 
   // ── derived ─────────────────────────────────────────────────────────────────
-  const findingsByCheck = useMemo(() => {
-    const map = new Map<string, Finding[]>();
-    for (const f of result?.findings ?? []) map.set(f.check, [...(map.get(f.check) ?? []), f]);
-    return map;
-  }, [result]);
   const resolvedCategory = useMemo(() => {
     const meta = loaded?.metadata as { data?: { category?: string } } | undefined;
     return meta?.data?.category ?? loaded?.zipCategory ?? (category || undefined);
@@ -313,8 +302,6 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
     return [first, ...codeSteps(events, !running && result !== null)];
   }, [reading, loaded, events, running, result]);
 
-  const statuses = filterStatuses(filter);
-  const visualRowsNow = visualRows(visual);
   const modelKnown = server.capabilities?.reviewer === "pi";
 
   const progressCard = (
@@ -425,104 +412,34 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
 
           <main>
             {running && progressCard}
-            <Verdict result={result} visual={visualRowsNow} visualPhase={visual.phase} bare={loaded.isBareGlb} reviewable={reviewable && server.known} />
-            {loaded.isBareGlb && <p className="glb-scope">Results cover the uploaded GLB. Choose its type and category to check the right limits. Package metadata and publishing checks are not part of this analysis.</p>}
-            <div className="rules-toolbar">
-              <div>
-                <h1>Rule results</h1>
-                <p>Compare your values with the requirements. Open a rule for findings and fix steps.</p>
-              </div>
-              <div className="eui-seg" role="group" aria-label="Filter rule results">
-                {RESULT_FILTERS.map((option) => {
-                  const total = result.checks.filter((row) => option.statuses.includes(row.status)).length + visualRowsNow.filter((row) => option.statuses.includes(row.status)).length;
-                  return (
-                    <button key={option.key} type="button" className={`eui-seg-btn${filter === option.key ? " active" : ""}`} aria-pressed={filter === option.key} onClick={() => setFilter(option.key)}>
-                      {option.label} <span className="ct">{total}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            {!result.checks.some((row) => statuses.includes(row.status)) && !visualRowsNow.some((row) => statuses.includes(row.status)) && (
-              <p className="empty-results" role="status">No rules in this view. Choose All rules to see every result.</p>
-            )}
-            {CODE_GROUPS.map((group, gi) => {
-              const groupRows = result.checks.filter((c) => c.group === group);
-              const rows = groupRows.filter((row) => statuses.includes(row.status));
-              if (rows.length === 0) return null;
-              const passed = groupRows.filter((r) => r.status === "passed").length;
-              const notApplicable = registry.filter((c) => c.group === group).length - groupRows.length;
-              return (
-                <section className="group" key={group} style={{ animationDelay: `${gi * 0.05}s` }}>
-                  <div className="group-head" title={GROUP_INTROS[group]}>
-                    <h2>{GROUP_LABELS[group]}</h2>
-                    <span className="tally">
-                      {passed}/{groupRows.length} passed{notApplicable > 0 && <> · {notApplicable} n/a</>}
-                    </span>
-                  </div>
-                  <RuleColumns />
-                  <div className="group-list">
-                    {rows.map((row) => {
-                      const findings = findingsByCheck.get(row.check) ?? [];
-                      const def = checkRegistry[row.check];
-                      const requirement = limitFor(row.check, resolvedCategory, hides);
-                      const unavailable = row.status === "skipped" || row.status === "errored";
-                      return (
-                        <details className={`check ${row.status}`} key={row.check}>
-                          <summary>
-                            <span className="check-title">{def?.title ?? row.check}</span>
-                            <span className={`rule-value${row.measured === undefined ? " unavailable" : ""}`}>
-                              <span className="mobile-label">Your value</span>
-                              {row.measured ?? (unavailable ? "Not measured" : "No measurement reported")}
-                            </span>
-                            <span className="rule-requirement">
-                              <span className="mobile-label">Requirement</span>
-                              {requirement ?? def?.describe ?? "—"}
-                            </span>
-                            <StatusChip status={row.status} />
-                            <span className="rule-chevron" aria-hidden="true">›</span>
-                          </summary>
-                          <div className="check-body">
-                            {row.status === "skipped" && <p className="skip-note">skipped — {row.skipReason}</p>}
-                            {row.status === "errored" && <p className="skip-note">check crashed — {row.skipReason}</p>}
-                            {findings.map((f, fi) => <FindingCard finding={f} key={fi} />)}
-                            {(row.status === "failed" || row.status === "warning") && fixes[row.check] && (
-                              <p className="fix-hint">
-                                <span className="fix-label">How to fix</span>
-                                {fixes[row.check]}
-                              </p>
-                            )}
-                            {row.check === "metadata" && (
-                              <MetadataValues
-                                value={loaded.metadata ?? loaded.zipMetadata}
-                                source={loaded.metadata !== undefined ? "Published entity" : loaded.zipMetadataSource ?? "Package metadata"}
-                              />
-                            )}
-                            <CheckAbout check={row.check} rule={def?.rule} collapsed={findings.length > 0 || row.check === "metadata"} />
-                          </div>
-                        </details>
-                      );
-                    })}
-                  </div>
-                </section>
-              );
-            })}
-            {reviewable && server.known && (
-              <RunView
-                state={visual}
-                aiChecks={server.aiChecks}
-                modelKnown={modelKnown}
-                filter={filter}
-                onCancel={visual.id && isRunning(visual.phase) ? cancelVisual : undefined}
-                onRunAgain={() => void startVisual()}
-                gate={<GateRow passed={result.passed === true} onStart={() => void startVisual()} />}
-              />
-            )}
-            <footer className="foot">
-              Checks that don't apply to this item (wrong item type, or metadata a bare .glb can't carry) aren't shown — that's
-              why fewer than {CODE_CHECK_COUNT} appear. Code checks never leave this page. The visual review, when a run server is
-              connected, uploads the zip to it and streams the screenshots back.
-            </footer>
+            <Results
+              key={loaded.name + (loaded.bytes?.length ?? loaded.files?.size ?? 0)}
+              scope="validate"
+              result={result}
+              visual={visual}
+              aiChecks={server.aiChecks}
+              modelKnown={modelKnown}
+              filter={filter}
+              onFilter={setFilter}
+              item={{
+                metadata: loaded.metadata ?? loaded.zipMetadata,
+                metadataSource: loaded.metadata !== undefined ? "Published entity" : loaded.zipMetadataSource,
+                category: resolvedCategory,
+                hides
+              }}
+              bare={loaded.isBareGlb}
+              visualShown={reviewable && server.known}
+              onCancel={visual.id && isRunning(visual.phase) ? cancelVisual : undefined}
+              onRunAgain={() => void startVisual()}
+              gate={<GateRow passed={result.passed === true} onStart={() => void startVisual()} />}
+              footer={
+                <footer className="foot">
+                  Checks that don't apply to this item (wrong item type, or metadata a bare .glb can't carry) aren't shown — that's
+                  why fewer than {CODE_CHECK_COUNT} appear. Code checks never leave this page. The visual review, when a run server is
+                  connected, sends the zip (or the published item's URN) to it and streams the screenshots back.
+                </footer>
+              }
+            />
           </main>
         </div>
       )}
@@ -616,38 +533,6 @@ function Landing({ onFile, samples, onSample, onReference, earlierRuns, onHistor
           </a>
         </p>
       )}
-    </div>
-  );
-}
-
-function Verdict({ result, visual, visualPhase, bare, reviewable }: { result: Result; visual: ReturnType<typeof visualRows>; visualPhase: VisualState["phase"]; bare: boolean; reviewable: boolean }) {
-  const { errors, warnings, checked } = result.summary;
-  const verdict = combinedVerdict(result, visual);
-  const visualErrors = visual.flatMap((row) => row.findings).filter((f) => f.severity === "error").length;
-  const visualWarnings = visual.flatMap((row) => row.findings).filter((f) => f.severity === "warning").length;
-  let stamp: ReactNode;
-  if (bare) stamp = <span className="stamp analysis">Model checks</span>;
-  else if (verdict === "passed") stamp = <span className="stamp pass">Passed</span>;
-  else if (verdict === "failed") stamp = <span className="stamp fail">Failed</span>;
-  else stamp = <span className="stamp none">Incomplete</span>;
-  const visualNote = !reviewable || bare ? null : visualPhase === "idle" ? "visual review not started" : isRunning(visualPhase) ? "visual review in progress" : visualPhase === "done" ? `${visual.length} visual ${visual.length === 1 ? "check" : "checks"}` : `visual review ${visualPhase}`;
-  return (
-    <div className="verdict">
-      <div className="verdict-word">
-        <span className="eui-overline">{bare ? "GLB analysis" : "Verdict"}</span>
-        {stamp}
-      </div>
-      <div className="verdict-facts">
-        <div>
-          <span className={`n${errors + visualErrors ? " err" : ""}`}>{errors + visualErrors}</span> errors ·{" "}
-          <span className={`n${warnings + visualWarnings ? " wrn" : ""}`}>{warnings + visualWarnings}</span> warnings
-        </div>
-        <div>
-          <span className="n">{checked}</span> of {CODE_CHECK_COUNT} code checks apply
-          {result.summary.skipped > 0 && <> · {result.summary.skipped} skipped</>}
-          {visualNote && <> · {visualNote}</>}
-        </div>
-      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import type { ILogBufferComponent } from "./adapters/log-buffer.js";
 import type { IRendererComponent } from "./adapters/renderer.js";
 import type { IReviewerComponent } from "./adapters/reviewer.js";
 import type { IBuildInfoComponent } from "./adapters/build-info.js";
+import type { ICatalystComponent } from "./adapters/catalyst.js";
 import type { ISiteComponent } from "./adapters/site.js";
 import type { ISlackComponent } from "./adapters/slack.js";
 import type { IQueueComponent } from "./logic/queue.js";
@@ -26,6 +27,7 @@ export type BaseComponents = {
   identity: IIdentityComponent;
   renderer: IRendererComponent;
   reviewer: IReviewerComponent;
+  catalyst: ICatalystComponent;
   runStore: IRunStoreComponent;
   queue: IQueueComponent;
   runs: IRunsComponent;
@@ -146,4 +148,6 @@ export interface RunNotice {
   error?: string;
   /** Relative "/api/runs/<id>/input.zip", present when the upload is still in the run folder. */
   zipUrl?: string;
+  /** The URN the item was fetched under when the run started from a marketplace reference instead of an upload. */
+  reference?: string;
 }

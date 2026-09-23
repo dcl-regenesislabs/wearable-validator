@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { details, docsUrl, explanations, sourceLinks, type CheckStatus, type Finding } from "@dcl-regenesislabs/wearable-validator";
 
 /** The words and small pieces every rule row shares — the code groups on Validate and the rendering rows of a run. */
@@ -43,6 +43,32 @@ export function Spinner({ size = "sm", decorative = false, label = "Loading" }: 
         <circle className="arc" cx="25" cy="25" r="20" fill="none" strokeWidth="5" strokeLinecap="round" strokeDasharray="90 160" />
       </svg>
     </span>
+  );
+}
+
+/** dcl-editor's tree caret: the twisty around it rotates it from "closed" (right) to "open" (down). */
+function Caret() {
+  return (
+    <svg width="8" height="8" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <path d="M4 2.5L8.5 6L4 9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** A collapsible header row: the whole row toggles, except its own buttons and links; the chevron stays the keyboard control. */
+export function headToggle(onToggle: () => void): (event: MouseEvent<HTMLElement>) => void {
+  return (event) => {
+    if ((event.target as Element).closest("button, a, input, select, summary")) return;
+    onToggle();
+  };
+}
+
+/** The collapse toggle in a section header: a real button beside the clickable row, the body it hides keeps the header's tally. */
+export function SectionToggle({ name, controls, collapsed, onToggle }: { name: string; controls: string; collapsed: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" className="eui-btn icon section-toggle" aria-expanded={!collapsed} aria-controls={controls} aria-label={`${collapsed ? "Expand" : "Collapse"} ${name}`} onClick={onToggle}>
+      <span className={`twisty${collapsed ? "" : " open"}`}><Caret /></span>
+    </button>
   );
 }
 

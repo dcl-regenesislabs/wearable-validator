@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { cancelRun, followRun, getRun } from "./api.js";
-import { EMPTY_VISUAL, isRunning, reduceVisual, type VisualState } from "./progress.js";
+import { EMPTY_VISUAL, codeResultOf, isRunning, itemContextOf, itemTypeOf, reduceVisual, type VisualState } from "./progress.js";
+import { Results } from "./results.js";
 import { elapsedText, historyRow, isModifiedClick, relativeTime, waitText, type HistoryRow } from "./run-list.js";
-import { Notice, Spinner, StateBlock, StatusChip } from "./rules.js";
-import { RunView } from "./run-view.js";
+import { Notice, SectionToggle, Spinner, StateBlock, StatusChip, headToggle } from "./rules.js";
 import type { Server } from "./server.js";
 
 /**
  * The History tab: the shared render line, then every run as a table; a row (or a `?run=<id>` link) opens the run
- * in place — the same RunView the Validate tab shows, nothing is uploaded.
+ * in place — the same Results layout the Validate tab shows (every code check from the saved gate, then the visual
+ * review), nothing is uploaded.
  */
 
 const MAX_LISTED_QUEUE = 6;
@@ -24,7 +25,7 @@ export interface HistoryViewProps {
 export function HistoryView({ server, runId, onOpen, onBack }: HistoryViewProps) {
   const rows = server.runs.map((run) => historyRow(run, server.now));
   return (
-    <div className="history">
+    <div className={`history${runId ? " open" : ""}`}>
       <QueueStrip server={server} />
       {runId ? (
         <RunDetail key={runId} id={runId} server={server} row={rows.find((row) => row.id === runId)} onBack={onBack} />
@@ -169,6 +170,8 @@ function RunDetail({ id, server, row, onBack }: { id: string; server: Server; ro
   const [error, setError] = useState<string | null>(null);
   // the id is seeded, not streamed: the thumbnail figure keys on it and no server event carries it
   const [state, setState] = useState<VisualState>({ ...EMPTY_VISUAL, id });
+  const [filter, setFilter] = useState("all");
+  const [headCollapsed, setHeadCollapsed] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -220,43 +223,92 @@ function RunDetail({ id, server, row, onBack }: { id: string; server: Server; ro
   const owner = opened?.owner ?? row?.sentBy;
   const startedAt = row?.startedAt ?? 0;
   const live = isRunning(state.phase);
+  const name = opened?.name ?? row?.name ?? "Loading";
+  const code = codeResultOf(state) ?? null;
+  const itemType = itemTypeOf(state);
+  const { category, hides } = itemContextOf(code);
+  const input = state.reference ? "published item" : state.zipUrl ? "zip package" : undefined;
+  const headBody = "history-run-body";
   return (
-    <div className="run-detail">
-      <section className="eui-panel history-card">
-        <div className="eui-panel-head">
-          <div className="eui-head-text">
-            <span className="eui-overline">Run</span>
-            <span className="eui-title">{opened?.name ?? row?.name ?? "Loading"}</span>
+    <div className="run-detail results">
+      <aside className="rail">
+        <section className="eui-panel history-card">
+          <div className="eui-panel-head collapsible" onClick={headToggle(() => setHeadCollapsed((current) => !current))}>
+            <div className="eui-head-text">
+              <span className="eui-overline">Run</span>
+              <span className="eui-title">{name}</span>
+            </div>
+            <div className="eui-head-actions">
+              {state.zipUrl && <a className="eui-ds-btn ghost sm" href={state.zipUrl} download>Download zip</a>}
+              {back}
+              <SectionToggle name="run details" controls={headBody} collapsed={headCollapsed} onToggle={() => setHeadCollapsed((current) => !current)} />
+            </div>
           </div>
-          <div className="eui-head-actions">
-            {state.zipUrl && <a className="eui-ds-btn ghost sm" href={state.zipUrl} download>Download zip</a>}
-            {back}
+          <div id={headBody} hidden={headCollapsed}>
+            {(input || itemType || category) && (
+              <div className="eui-panel-body rail-body">
+                <dl className="item-facts">
+                  {input && (
+                    <>
+                      <dt>Input</dt>
+                      <dd>{input}</dd>
+                    </>
+                  )}
+                  {itemType && (
+                    <>
+                      <dt>Type</dt>
+                      <dd>{itemType}</dd>
+                    </>
+                  )}
+                  {category && (
+                    <>
+                      <dt>Category</dt>
+                      <dd>{category}</dd>
+                    </>
+                  )}
+                </dl>
+              </div>
+            )}
+            <div className="run-meta">
+              {owner && owner !== server.owner && <span>Sent by <b>{owner}</b></span>}
+              {startedAt > 0 && (
+                <span>
+                  <time dateTime={new Date(startedAt).toISOString()} title={new Date(startedAt).toLocaleString("en")}>{relativeTime(startedAt, server.now)}</time>
+                </span>
+              )}
+              {row && <StatusChip status={row.chip.status} label={row.chip.label} busy={row.live} />}
+            </div>
           </div>
-        </div>
-        <div className="eui-panel-body run-meta">
-          {owner && owner !== server.owner && <span>Sent by <b>{owner}</b></span>}
-          {startedAt > 0 && (
-            <span>
-              <time dateTime={new Date(startedAt).toISOString()} title={new Date(startedAt).toLocaleString("en")}>{relativeTime(startedAt, server.now)}</time>
-            </span>
-          )}
-          {row && <StatusChip status={row.chip.status} label={row.chip.label} busy={row.live} />}
-        </div>
-      </section>
-      <RunView
-        state={state}
-        aiChecks={server.aiChecks}
-        modelKnown={server.capabilities?.reviewer === "pi"}
-        onCancel={
-          live
-            ? () => {
-                // the server answers a cancel with a plain error event; only this flag tells it apart from a failure
-                setState((s) => reduceVisual(s, { type: "cancel-requested" }));
-                void cancelRun(id);
-              }
-            : undefined
-        }
-      />
+        </section>
+      </aside>
+      <main>
+        {state.phase === "idle" ? (
+          <p className="loading-hint" role="status">
+            <Spinner size="sm" decorative /> Loading the run
+          </p>
+        ) : (
+          <Results
+            scope="history"
+            result={code}
+            visual={state}
+            aiChecks={server.aiChecks}
+            modelKnown={server.capabilities?.reviewer === "pi"}
+            filter={filter}
+            onFilter={setFilter}
+            item={{ category, hides }}
+            visualShown
+            onCancel={
+              live
+                ? () => {
+                    // the server answers a cancel with a plain error event; only this flag tells it apart from a failure
+                    setState((s) => reduceVisual(s, { type: "cancel-requested" }));
+                    void cancelRun(id);
+                  }
+                : undefined
+            }
+          />
+        )}
+      </main>
     </div>
   );
 }

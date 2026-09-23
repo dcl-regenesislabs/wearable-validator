@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { CaptureRequest, CheckResult, Finding, ProgressEvent, Result } from "@dcl-regenesislabs/wearable-validator";
 import type { RunEvent, WireResult } from "../src/api.js";
-import { codeSteps, combinedVerdict, expectedReviews, reduceVisual, stepAnnouncement, visualSteps, visualStepsOf, visualVerdict, EMPTY_VISUAL, type Step, type VisualEvent } from "../src/progress.js";
+import { categoryOf, codeResultOf, codeSteps, combinedVerdict, expectedReviews, itemContextOf, reduceVisual, stepAnnouncement, visualSteps, visualStepsOf, visualVerdict, EMPTY_VISUAL, type Step, type VisualEvent } from "../src/progress.js";
 
 // ── recorded sequences ───────────────────────────────────────────────────────
 
@@ -306,6 +306,109 @@ describe("visual stepper", () => {
     assert.equal(upto(rendering + 10), upto(rendering));
     assert.equal(stepAnnouncement(visualSteps(events, AI_CHECKS)), "Verdict done");
     assert.equal(stepAnnouncement(visualSteps([{ type: "upload-started" }, { type: "error", data: { message: "down" } }], AI_CHECKS)), "Uploading failed");
+  });
+
+  it("fetches a published item first: the reference run's first step counts files, not an upload", () => {
+    const gate = codeResult([row("file-format", "files")], true);
+    const events: VisualEvent[] = [
+      { type: "upload-started", reference: true },
+      { type: "upload-finished", id: "u" },
+      { type: "stage", data: { text: "Fetching the item from the catalyst", kind: "fetch" } },
+      { type: "stage", data: { text: "Downloading the item's files", kind: "fetch", done: 0, total: 12 } },
+      { type: "stage", data: { text: "Downloading the item's files", kind: "fetch", done: 3, total: 12 } },
+      { type: "check", data: started("file-format", "files") },
+      { type: "check", data: finished("file-format", "files") },
+      { type: "gate", data: { result: gate, passed: true } },
+      { type: "queue", data: { position: 0, ahead: 0, running: 1, averageRunMs: null, etaMs: 0 } }
+    ];
+    const upto = (n: number) => visualSteps(events.slice(0, n), AI_CHECKS);
+    assert.equal(upto(1)[0].label, "Fetching from the catalyst");
+    assert.equal(upto(1)[0].state, "active");
+    // the server accepted the reference but is still fetching: not at the gate yet
+    assert.equal(upto(2)[0].state, "active");
+    assert.equal(upto(3)[0].detail, undefined);
+    assert.equal(upto(4)[0].detail, "0/12 files");
+    assert.equal(upto(5)[0].detail, "3/12 files");
+    assert.equal(at(upto(5), "gate").state, "todo");
+    const gating = upto(6);
+    assert.equal(gating[0].state, "done");
+    assert.equal(gating[0].detail, "12 files");
+    assert.equal(at(gating, "gate").state, "active");
+    assert.equal(at(upto(8), "gate").detail, "Starting");
+    assert.equal(at(upto(9), "gate").detail, "Passed");
+    assert.equal(upto(9)[0].detail, "12 files");
+    // an upload keeps its own words
+    assert.equal(visualSteps([{ type: "upload-started" }], AI_CHECKS)[0].label, "Uploading");
+    assert.equal(visualSteps([{ type: "upload-started" }, { type: "upload-finished", id: "z" }], AI_CHECKS)[0].state, "done");
+  });
+
+  it("recognises a replayed reference run from its fetch stages alone", () => {
+    const state = [
+      { type: "stage", data: { text: "Downloading the item's files", kind: "fetch", done: 5, total: 5 } } as VisualEvent,
+      { type: "check", data: started("file-format", "files") } as VisualEvent
+    ].reduce(reduceVisual, { ...EMPTY_VISUAL, id: "h" });
+    assert.equal(state.reference, true);
+    assert.equal(state.phase, "gate");
+    assert.equal(visualStepsOf(state, AI_CHECKS)[0].label, "Fetching from the catalyst");
+    assert.equal(visualStepsOf(state, AI_CHECKS)[0].detail, "5 files");
+    // a fetch failure stops the run on that first step
+    const failed = visualSteps([{ type: "upload-started", reference: true }, { type: "error", data: { message: "No published item found for that reference." } }], AI_CHECKS);
+    assert.equal(failed[0].state, "failed");
+    assert.equal(failed[0].detail, "No published item found for that reference.");
+  });
+
+  it("recognises a finished reference run replayed from disk: a lone done event carries the reference", () => {
+    const gate = codeResult([row("file-format", "files")], true);
+    const replayed = reduceVisual({ ...EMPTY_VISUAL, id: "h" }, { type: "done", data: { gate, reference: "urn:decentraland:matic:collections-v2:0xabc:1" } });
+    assert.equal(replayed.reference, true);
+    assert.equal(visualStepsOf(replayed, AI_CHECKS)[0].label, "Fetching from the catalyst");
+    assert.equal(visualStepsOf(replayed, AI_CHECKS)[0].state, "done");
+    // an upload's done event has no reference and does not turn the run into a fetch
+    const upload = reduceVisual({ ...EMPTY_VISUAL, id: "h" }, { type: "done", data: { gate, zipUrl: "/api/runs/h/input.zip" } });
+    assert.equal(upload.reference, false);
+    assert.equal(visualStepsOf(upload, AI_CHECKS)[0].label, "Uploading");
+    // a live reference run stays one once done, whether or not the server repeats the reference
+    const live = visualSteps([{ type: "upload-started", reference: true }, { type: "done", data: { gate } }], AI_CHECKS);
+    assert.equal(live[0].label, "Fetching from the catalyst");
+  });
+
+  it("keeps the server's code run from the gate event and from a finished run's done event", () => {
+    const events = wearableRun();
+    const streamed = events.reduce(reduceVisual, EMPTY_VISUAL);
+    assert.equal(streamed.gate?.passed, true);
+    assert.equal(codeResultOf(streamed), streamed.gate);
+    const done = events.at(-1)! as Extract<VisualEvent, { type: "done" }>;
+    const gate = codeResult([row("file-format", "files"), row("triangle-count", "model", "warning")], true);
+    const replayed = reduceVisual(EMPTY_VISUAL, { type: "done", data: { ...done.data, gate } });
+    assert.equal(replayed.gate, gate);
+    assert.equal(codeResultOf(replayed), gate);
+    assert.equal(codeResultOf(replayed)?.checks.length, 2);
+    // a run stopped at the gate ends with the code result as its result
+    const code = codeResult([row("file-format", "files", "failed")], false);
+    const stopped = reduceVisual(EMPTY_VISUAL, { type: "done", data: { skipped: true, result: { ...code, captures: [] } } });
+    assert.equal(codeResultOf(stopped)?.passed, false);
+    // an old run without a saved gate has no code checks to show
+    const old = reduceVisual(EMPTY_VISUAL, { type: "done", data: { result: done.data.result } });
+    assert.equal(old.gate, undefined);
+    assert.equal(codeResultOf(old), undefined);
+    assert.equal(codeResultOf(reduceVisual(EMPTY_VISUAL, { type: "done", data: { skipped: true, message: "nothing saved" } })), undefined);
+  });
+
+  it("reads the category a gate finding names, when any does", () => {
+    const named: Result = { ...codeResult([row("triangle-count", "model", "failed")], false), findings: [{ check: "triangle-count", group: "model", severity: "error", message: "m", rule: "M-01", docs: "https://docs.decentraland.org/creator/wearables/creating-wearables/", data: { category: "upper_body", hides: [] } }] };
+    assert.equal(categoryOf(named), "upper_body");
+    assert.equal(categoryOf(codeResult([row("file-format", "files")], true)), undefined);
+    assert.equal(categoryOf(undefined), undefined);
+  });
+
+  it("reads the category and hidden slots a gate finding names, so History shows Validate's limits", () => {
+    const finding = (data: Finding["data"]): Finding => ({ check: "triangle-count", group: "model", severity: "error", message: "m", rule: "M-01", docs: "https://docs.decentraland.org/creator/wearables/creating-wearables/", data });
+    const named: Result = { ...codeResult([row("triangle-count", "model", "failed")], false), findings: [finding({ category: "upper_body", hides: ["lower_body", "feet"] })] };
+    assert.deepEqual(itemContextOf(named), { category: "upper_body", hides: ["lower_body", "feet"] });
+    const unnamed: Result = { ...codeResult([row("file-format", "files", "failed")], false), findings: [finding({ where: "model.glb" })] };
+    assert.deepEqual(itemContextOf(unnamed), {});
+    assert.deepEqual(itemContextOf(undefined), {});
+    assert.deepEqual(itemContextOf(null), {});
   });
 
   it("keeps the captures a done event carries, without duplicating streamed ones", () => {

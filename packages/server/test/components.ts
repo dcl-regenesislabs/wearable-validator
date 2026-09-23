@@ -12,6 +12,7 @@ import { createConfigComponent } from "@well-known-components/env-config-provide
 import { START_COMPONENT, STOP_COMPONENT, type ILoggerComponent } from "@well-known-components/interfaces";
 import { digest, manifest, type CaptureRecord, type Renderer, type Reviewer } from "@dcl-regenesislabs/wearable-validator";
 import { renderedFrame } from "../../wearable-validator/test/helpers/frames.js";
+import type { ICatalystComponent } from "../src/adapters/catalyst.js";
 import type { IIdentityComponent, Identify } from "../src/adapters/identity.js";
 import type { IRendererComponent } from "../src/adapters/renderer.js";
 import { liveReviewer, recordingReviewer, type IReviewerComponent } from "../src/adapters/reviewer.js";
@@ -98,6 +99,8 @@ export interface TestServerOptions {
   identity?: IIdentityComponent;
   renderer?: IRendererComponent;
   reviewer?: IReviewerComponent;
+  /** A catalyst over a fake fetch (test/helpers/entity.ts catalystFetch); without one a reference run would reach the real peer. */
+  catalyst?: ICatalystComponent;
   /** A Slack component over a recording fetch; without one the notifier is off (no SLACK_BOT_TOKEN in the test env). */
   slack?: ISlackComponent;
 }
@@ -146,6 +149,7 @@ export async function startTestServer(options: TestServerOptions = {}): Promise<
       identity: options.identity ?? { identify: testIdentify, kind: "test" },
       renderer: options.renderer ?? fakeRenderer({ services: 0, rendered: [] }),
       reviewer: options.reviewer ?? fakeReviewer(),
+      ...(options.catalyst ? { catalyst: options.catalyst } : {}),
       ...(options.slack ? { slack: options.slack } : {})
     })),
     localFetch: { fetch: (url, init) => fetch(new URL(String(url), base), init) }

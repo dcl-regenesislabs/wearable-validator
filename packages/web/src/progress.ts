@@ -79,10 +79,10 @@ export function codeSteps(events: ProgressEvent[], finished = false): Step[] {
 
 // ── the visual review ────────────────────────────────────────────────────────
 
-/** The server's events plus the three the browser adds: the upload it makes and the cancel it asks for. */
+/** The server's events plus the three the browser adds: the upload (or reference) it sends and the cancel it asks for. */
 export type VisualEvent =
   | RunEvent
-  | { type: "upload-started" }
+  | { type: "upload-started"; reference?: boolean }
   | { type: "upload-finished"; id: string }
   | { type: "cancel-requested" };
 
@@ -98,7 +98,11 @@ export interface Review {
 export interface VisualState {
   phase: VisualPhase;
   id?: string;
-  /** The server's own code run, once the gate event lands. */
+  /** The run started from a published item's reference: the server fetches it instead of taking an upload. */
+  reference: boolean;
+  /** Files fetched so far, from the server's fetch stages. */
+  fetched?: { done?: number; total?: number };
+  /** The server's own code run, once the gate event lands (or the done event of a finished run carries it). */
   gate?: Result;
   gateChecks: number;
   gateCurrent?: string;
@@ -123,14 +127,15 @@ export interface VisualState {
   stoppedDuring?: VisualPhase;
 }
 
-export const EMPTY_VISUAL: VisualState = { phase: "idle", gateChecks: 0, waited: false, captures: [], reviews: {}, asked: [], rows: new Map(), skipped: false, cancelling: false };
+export const EMPTY_VISUAL: VisualState = { phase: "idle", reference: false, gateChecks: 0, waited: false, captures: [], reviews: {}, asked: [], rows: new Map(), skipped: false, cancelling: false };
 
 export function reduceVisual(state: VisualState, event: VisualEvent): VisualState {
   switch (event.type) {
     case "upload-started":
-      return { ...EMPTY_VISUAL, phase: "uploading" };
+      return { ...EMPTY_VISUAL, phase: "uploading", reference: event.reference === true };
     case "upload-finished":
-      return { ...state, phase: "gate", id: event.id };
+      // a reference run is still fetching the item after the server accepted it
+      return { ...state, phase: state.reference ? "uploading" : "gate", id: event.id };
     case "cancel-requested":
       return { ...state, cancelling: true };
     case "check": {
@@ -150,6 +155,10 @@ export function reduceVisual(state: VisualState, event: VisualEvent): VisualStat
     case "queue":
       return event.data.position === 0 ? { ...state, phase: "rendering", queue: event.data } : { ...state, phase: "queued", waited: true, queue: event.data };
     case "stage":
+      if (event.data.kind === "fetch") {
+        const before = state.phase === "idle" || state.phase === "uploading" || state.phase === "gate";
+        return { ...state, phase: before ? "uploading" : state.phase, reference: true, fetched: { done: event.data.done, total: event.data.total } };
+      }
       return {
         ...state,
         phase: state.phase === "reviewing" ? state.phase : "rendering",
@@ -173,12 +182,51 @@ export function reduceVisual(state: VisualState, event: VisualEvent): VisualStat
       const replayed = (event.data.result?.captures ?? [])
         .filter(({ request }) => !known.has(request.id))
         .map(({ request, sha256, url }): CaptureEvent => ({ id: request.id, request, sha256, url }));
-      return { ...state, phase: "done", captures: [...state.captures, ...replayed], result: event.data.result, skipped: event.data.skipped === true, message: event.data.message, zipUrl: event.data.zipUrl };
+      return {
+        ...state,
+        phase: "done",
+        reference: event.data.reference !== undefined || state.reference,
+        captures: [...state.captures, ...replayed],
+        gate: event.data.gate ?? state.gate,
+        result: event.data.result,
+        skipped: event.data.skipped === true,
+        message: event.data.message,
+        zipUrl: event.data.zipUrl
+      };
     }
     case "error":
       return { ...state, phase: state.cancelling ? "cancelled" : "failed", stoppedDuring: state.phase, message: event.data.message, zipUrl: event.data.zipUrl };
   }
 }
+
+/** Everything of a code result but the captures: the browser's own run, the server's gate, or a done event's result. */
+export type CodeResult = Omit<Result, "captures">;
+
+/** The code checks of a run: the saved gate, or the code result a run stopped at the gate ends with. Undefined when nothing was kept. */
+export function codeResultOf(state: VisualState): CodeResult | undefined {
+  if (state.gate) return state.gate;
+  return state.skipped && state.result ? state.result : undefined;
+}
+
+/** The category a gate finding names, when any does; History has no metadata to read it from. */
+export function categoryOf(result: CodeResult | null | undefined): string | undefined {
+  return itemContextOf(result).category;
+}
+
+/** What the gate findings say about the item — its category and hidden slots — so History shows the same limits Validate does. */
+export function itemContextOf(result: CodeResult | null | undefined): { category?: string; hides?: string[] } {
+  const context: { category?: string; hides?: string[] } = {};
+  for (const finding of result?.findings ?? []) {
+    const { category, hides } = finding.data ?? {};
+    if (context.category === undefined && typeof category === "string" && category) context.category = category;
+    if (context.hides === undefined && Array.isArray(hides) && hides.every((slot) => typeof slot === "string")) context.hides = hides;
+  }
+  return context;
+}
+
+/** The Rendering group has something to show: rows, photos, or a renderer at work. */
+export const renderingGroupShown = (state: VisualState): boolean =>
+  visualRows(state).length > 0 || state.captures.length > 0 || state.phase === "rendering" || state.phase === "reviewing";
 
 /** The rendering-group rows of a run; a run that stopped at the code gate carries the code result, which is not shown here. */
 export function visualRows(state: VisualState): CheckRow[] {
@@ -208,7 +256,7 @@ export function verdictWord(passed: boolean | null): string {
 export type Verdict = "passed" | "failed" | "incomplete";
 
 /** The stamp over the results: code and visual rows together — "passed" only when every row passed or warned. */
-export function combinedVerdict(code: Result, visual: CheckResult[]): Verdict {
+export function combinedVerdict(code: Pick<Result, "passed">, visual: CheckResult[]): Verdict {
   if (code.passed === null) return "incomplete";
   if (code.passed === false) return "failed";
   if (visual.some((row) => row.status === "failed")) return "failed";
@@ -243,6 +291,8 @@ const STEP_LABELS: Record<(typeof STEP_KEYS)[number], string> = {
   review: "Asking the model",
   verdict: "Verdict"
 };
+/** The first step of a reference run: the server fetches the item instead of taking an upload. */
+const FETCH_LABEL = "Fetching from the catalyst";
 
 /** The six steps of a visual review, from the reduced state. `aiChecks` are the server's model-backed checks. */
 export function visualStepsOf(state: VisualState, aiChecks: string[]): Step[] {
@@ -279,7 +329,12 @@ export function visualStepsOf(state: VisualState, aiChecks: string[]): Step[] {
   const verdict: Step = { key: "verdict", label: STEP_LABELS.verdict, state: stateAt(5) };
   if (verdict.state === "done") verdict.detail = verdictWord(visualVerdict(rows));
 
-  const steps: Step[] = [{ key: "upload", label: STEP_LABELS.upload, state: stateAt(0) }, gate, queue, render, review, verdict];
+  const upload: Step = { key: "upload", label: state.reference ? FETCH_LABEL : STEP_LABELS.upload, state: stateAt(0) };
+  const { done: fetchedDone, total: fetchedTotal } = state.fetched ?? {};
+  if (upload.state === "active" && fetchedTotal !== undefined) upload.detail = `${fetchedDone ?? 0}/${fetchedTotal} files`;
+  else if (upload.state === "done" && state.reference && fetchedTotal !== undefined) upload.detail = count(fetchedTotal, "file");
+
+  const steps: Step[] = [upload, gate, queue, render, review, verdict];
   if (halted) {
     const failed = steps.find((step) => step.state === "failed");
     if (failed) failed.detail = stoppedMessage;
