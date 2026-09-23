@@ -1,0 +1,34 @@
+name: Publish the library
+
+# A tag is the release act: v0.4.0 publishes @dcl-regenesislabs/wearable-validator 0.4.0 to npm through
+# npm's trusted publishing (GitHub OIDC), so the repository holds no npm token. Set the trusted publisher
+# once on npmjs.com (package → Settings → Trusted Publisher: this repository, workflow release.yml).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      # trusted publishing needs npm 11.5 or newer
+      - run: npm install -g npm@latest
+      - run: npm ci
+      - name: The tag must name the package version
+        run: |
+          version=$(node -p "require('./packages/wearable-validator/package.json').version")
+          [ "v$version" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} does not match package version $version"; exit 1; }
+      - run: npm run typecheck -w @dcl-regenesislabs/wearable-validator
+      - run: npm test -w @dcl-regenesislabs/wearable-validator
+      - run: npm run build -w @dcl-regenesislabs/wearable-validator
+      - run: npm publish --provenance --access public -w @dcl-regenesislabs/wearable-validator
