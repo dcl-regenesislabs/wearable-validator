@@ -54,6 +54,14 @@ The first build takes a few minutes: it pulls the Playwright image, installs Chr
 4. Redeploy after a merge: `git pull && docker compose -f deploy/docker-compose.yml up -d --build`.
 5. The named volumes keep run folders and Chromium's profile across restarts, so a restarted container renders warm (the App Platform disk forgot both).
 
+Everything else has a default in `packages/server/.env.default`; the ones a deployment may want to change:
+
+| Variable | Value |
+| --- | --- |
+| `CATALYST_URL` | the catalyst a run started from a shop item URL or URN fetches the published item from; default `https://peer.decentraland.org` |
+| `CATALYST_TIMEOUT_MS` | how long the whole catalyst fetch (lookup and every file) may take before the run ends with "The catalyst did not answer in time — try again in a moment."; default 60000 |
+| `MAX_CONCURRENT_RUNS` | renders at once, about one per 2 GB of RAM; default 1 |
+
 ### 3b. Deploy on merge
 
 A merge to `main` redeploys the run server through `.github/workflows/deploy.yml`: it connects to the droplet, fast-forwards the checkout, rebuilds the image and waits for `/api/health` to answer, printing the container log if it does not. `.github/workflows/ci.yml` runs typecheck, tests and the build on every pull request.
@@ -106,7 +114,7 @@ The thumbnail and the views are uploaded privately to the app (`files.getUploadU
 
 1. Two curators sign in at wearable-validator.dclregenesislabs.xyz (Access login). The Visual review panel header says **Signed in as <email>**.
 2. Each drops a zip and gets a streamed run.
-3. Each sees only their own run under **Your runs** (`GET /api/runs`).
+3. Each sees only their own runs on the **History** tab (`GET /api/runs`); operators see everyone's (`GET /api/runs?all=1`).
 4. Paste the other person's run URL (`/api/runs/<id>/events`) into the browser: `404 { "message": "Unknown run." }`.
 5. `curl https://api.wearable-validator.dclregenesislabs.xyz/api/health` answers `{ "ok": true, …, "owner": null }`; `curl …/api/runs` answers 401.
 

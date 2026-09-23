@@ -11,6 +11,7 @@ import { createRendererComponent } from "./adapters/renderer.js";
 import { runSelfTest } from "./adapters/self-test.js";
 import { createReviewerComponent } from "./adapters/reviewer.js";
 import { createBuildInfoComponent } from "./adapters/build-info.js";
+import { createCatalystComponent } from "./adapters/catalyst.js";
 import { createSiteComponent } from "./adapters/site.js";
 import { createSlackComponent } from "./adapters/slack.js";
 import { createQueueComponent } from "./logic/queue.js";
@@ -47,7 +48,7 @@ export async function createAppServer(config: IConfigComponent, logs: ILoggerCom
   );
 }
 
-export type ComponentOverrides = Partial<Pick<BaseComponents, "server" | "identity" | "renderer" | "reviewer" | "slack">>;
+export type ComponentOverrides = Partial<Pick<BaseComponents, "server" | "identity" | "renderer" | "reviewer" | "catalyst" | "slack">>;
 
 export async function createBaseComponents(config: IConfigComponent, logs: ILoggerComponent, metrics: AppComponents["metrics"], overrides: ComponentOverrides = {}): Promise<Omit<AppComponents, "statusChecks">> {
   const server = overrides.server ?? (await createAppServer(config, logs));
@@ -57,6 +58,7 @@ export async function createBaseComponents(config: IConfigComponent, logs: ILogg
   const identity = overrides.identity ?? (await createIdentityComponent({ config, logs: logBuffer }));
   const renderer = overrides.renderer ?? (await createRendererComponent({ config, logs: logBuffer }));
   const reviewer = overrides.reviewer ?? (await createReviewerComponent({ config, logs: logBuffer }));
+  const catalyst = overrides.catalyst ?? (await createCatalystComponent({ config, logs: logBuffer }));
   const runStore = await createRunStoreComponent({ config, logs: logBuffer });
   const queue = createQueueComponent({
     maxConcurrent: (await config.getNumber("MAX_CONCURRENT_RUNS")) ?? 1,
@@ -64,7 +66,7 @@ export async function createBaseComponents(config: IConfigComponent, logs: ILogg
     maxActivePerOwner: (await config.getNumber("MAX_ACTIVE_RUNS_PER_OWNER")) ?? 3
   });
   const slack = overrides.slack ?? (await createSlackComponent({ config, logs: logBuffer }));
-  const runs = await createRunsComponent({ config, logs: logBuffer, metrics, runStore, queue, renderer, reviewer, notifier: slack });
+  const runs = await createRunsComponent({ config, logs: logBuffer, metrics, runStore, queue, renderer, reviewer, catalyst, notifier: slack });
   const site = await createSiteComponent({ config, logs: logBuffer });
   const buildInfo = await createBuildInfoComponent();
 
@@ -74,6 +76,7 @@ export async function createBaseComponents(config: IConfigComponent, logs: ILogg
     renderer: renderer.available ? "local Unity build" : "none",
     reviewer: reviewer.kind,
     model: reviewer.model,
+    catalyst: catalyst.peer,
     identity: identity.kind,
     concurrentRuns: queue.maxConcurrent,
     slack: slack.enabled ? slack.channel : "off",
@@ -88,7 +91,7 @@ export async function createBaseComponents(config: IConfigComponent, logs: ILogg
   // the port is already open: a slow probe must not delay the health check, and its answer is in the log either way
   if (renderer.available && (await config.getString("RENDERER_SELF_TEST")) !== "0") void runSelfTest({ logs: logBuffer }).catch(() => {});
 
-  return { config, logs: logBuffer, logBuffer, server, metrics, identity, renderer, reviewer, runStore, queue, runs, site, slack, buildInfo };
+  return { config, logs: logBuffer, logBuffer, server, metrics, identity, renderer, reviewer, catalyst, runStore, queue, runs, site, slack, buildInfo };
 }
 
 export async function initComponents(): Promise<AppComponents> {

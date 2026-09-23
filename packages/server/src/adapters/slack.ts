@@ -69,9 +69,18 @@ function approvalLine(notice: RunNotice): string {
   }
 }
 
+/** The marketplace page of a collections-v2 URN (chain, contract, item id); undefined for any other URN shape. */
+export function marketplaceUrl(urn: string): string | undefined {
+  const match = /^urn:decentraland:(?:matic|ethereum):collections-v2:(0x[0-9a-f]{40}):(\d+)$/i.exec(urn);
+  return match ? `https://decentraland.org/marketplace/contracts/${match[1].toLowerCase()}/items/${match[2]}` : undefined;
+}
+
 function itemLine(notice: RunNotice): string {
   const parts = notice.item ? [notice.item.category, notice.item.itemType, notice.item.rarity].filter((part): part is string => Boolean(part)) : [];
-  return `${escapeMrkdwn(displayName(notice))}${parts.length ? ` (${escapeMrkdwn(parts.join(" · "))})` : ""}`;
+  const line = `${escapeMrkdwn(displayName(notice))}${parts.length ? ` (${escapeMrkdwn(parts.join(" · "))})` : ""}`;
+  if (!notice.reference) return line;
+  const url = marketplaceUrl(notice.reference);
+  return `${line} · from the marketplace ${url ? `<${url}|${escapeMrkdwn(notice.reference)}>` : `\`${escapeMrkdwn(notice.reference)}\``}`;
 }
 
 /** Errors before warnings, gate before visual; at most MAX_FINDINGS bullet lines within one section's limit. */

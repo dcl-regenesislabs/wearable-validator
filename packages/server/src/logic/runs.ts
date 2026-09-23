@@ -2,7 +2,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { basename, extname } from "node:path";
 import { START_COMPONENT, STOP_COMPONENT, type IBaseComponent, type IConfigComponent, type ILoggerComponent, type IMetricsComponent } from "@well-known-components/interfaces";
-import { loadInput, registry, validate, type Renderer, type Result } from "@dcl-regenesislabs/wearable-validator";
+import { loadInput, plannedCaptures, registry, validate, type CheckContext, type Input, type Renderer, type Result } from "@dcl-regenesislabs/wearable-validator";
+import type { ICatalystComponent } from "../adapters/catalyst.js";
 import { appLogger, type AppLogger } from "../adapters/log-buffer.js";
 import type { IRendererComponent } from "../adapters/renderer.js";
 import type { IReviewerComponent } from "../adapters/reviewer.js";
@@ -12,7 +13,7 @@ import type { Identity, QueueState, RunEvent, RunEventType, RunItem, RunNotice, 
 import { curatorDecision } from "./decision.js";
 import { QueueFullError, TooManyListenersError, TooManyRunsError } from "./errors.js";
 import type { IQueueComponent } from "./queue.js";
-import { verdict, type IRunStoreComponent, type StoredRun } from "./run-store.js";
+import { readRunInput, verdict, type IRunStoreComponent, type StoredRun } from "./run-store.js";
 import { computeStats, type Stats } from "./stats.js";
 
 export const VISUAL_CHECKS = registry.filter((check) => check.group === "rendering").map((check) => check.name);
@@ -42,11 +43,20 @@ export function safeFileName(header: string | null | undefined): string | undefi
   return safe.length > MAX_NAME_CHARS ? safe.slice(0, MAX_NAME_CHARS - ext.length) + ext : safe;
 }
 
+/** The folder name a run started from a URN gets until the item is fetched: the URN's last two segments (contract and item id). */
+export function referenceName(urn: string): string {
+  const segments = urn.split(":").filter(Boolean);
+  return segments.slice(-2).join("-").replace(/[^\w.-]/g, "_").slice(0, MAX_NAME_CHARS) || "item";
+}
+
 export interface AcceptInput {
   identity: Identity;
-  /** Already through safeFileName(). */
+  /** Already through safeFileName() or referenceName(). */
   name: string;
-  bytes: Uint8Array;
+  /** The upload; absent when the run starts from a reference. */
+  bytes?: Uint8Array;
+  /** The URN candidates a shop URL or URN resolved to (parseItemReference); the run fetches the item itself. */
+  reference?: string[];
   /** false: render only (?model=0). */
   model: boolean;
   /** true: render and review even when the code gate fails (?standalone=1). */
@@ -114,6 +124,10 @@ interface Run extends StoredRun {
   outcome?: RunOutcome;
   /** Set once the upload is known to be in the folder; rides on the done event so the site can offer the zip. */
   zipUrl?: string;
+  /** A reference run: the first candidate URN until the catalyst answers, then the one the item was found under. */
+  reference?: string;
+  /** The fetched entity's id: the key its views are remembered under, as the sha256 is for an upload. */
+  entityId?: string;
 }
 
 interface Mode {
@@ -129,6 +143,7 @@ interface RunsComponents {
   queue: IQueueComponent;
   renderer: IRendererComponent;
   reviewer: IReviewerComponent;
+  catalyst: ICatalystComponent;
   /** Told once per concluded run; a disabled notifier resolves at once. */
   notifier: ISlackComponent;
 }
@@ -144,6 +159,14 @@ function serializeResult(run: Run, result: Result): unknown {
 const frameOf = (event: RunEvent): string => `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
 
 const summarize = ({ id, owner, name, dir, startedAt, done, passed, rendered }: StoredRun): StoredRun => ({ id, owner, name, dir, startedAt, done, passed, rendered });
+
+/** The rendering stage names what the site should expect: how many capture events, on which body shapes. */
+async function renderingStage(ctx: CheckContext | undefined): Promise<{ text: string; views: number; bodyShapes: string[] }> {
+  const views = ctx ? await plannedCaptures(ctx) : 0;
+  const bodyShapes = [...new Set(ctx?.item.representations?.flatMap((rep) => rep.bodyShapes) ?? [])].map((urn) => urn.split(":").pop() ?? urn);
+  const where = bodyShapes.length ? ` on ${bodyShapes.join(" and ")}` : "";
+  return { text: `Rendering ${views} view${views === 1 ? "" : "s"}${where}`, views, bodyShapes };
+}
 
 function logEvent(log: AppLogger, run: Run, type: RunEventType, data: unknown): void {
   const d = (data ?? {}) as Record<string, unknown>;
@@ -163,7 +186,7 @@ function logEvent(log: AppLogger, run: Run, type: RunEventType, data: unknown): 
       return;
     }
     case "stage":
-      log.info(clean(d.text, 200), { run: run.id, ms });
+      log.info(clean(d.text, 200), { run: run.id, ms, ...(typeof d.done === "number" ? { done: d.done, total: d.total } : {}) });
       return;
     case "queue":
       log.info(d.position === 0 ? "run started" : "waiting in line", { run: run.id, position: d.position, ahead: d.ahead, etaMs: d.etaMs, ms });
@@ -205,7 +228,7 @@ function logEvent(log: AppLogger, run: Run, type: RunEventType, data: unknown): 
 }
 
 export async function createRunsComponent(components: RunsComponents): Promise<IRunsComponent> {
-  const { config, logs, metrics, runStore, queue, renderer, reviewer, notifier } = components;
+  const { config, logs, metrics, runStore, queue, renderer, reviewer, catalyst, notifier } = components;
   const log = appLogger(logs, "runs");
   const maxListeners = (await config.getNumber("MAX_SSE_LISTENERS_PER_RUN")) ?? 5;
   const maxPerDay = (await config.getNumber("MAX_RUNS_PER_OWNER_PER_DAY")) ?? 40;
@@ -238,6 +261,8 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
   }
 
   function emit(run: Run, type: RunEventType, data: unknown): void {
+    // a concluded run never grows its log: a late download or check must not land after the error frame
+    if (run.done) return;
     const event: RunEvent = { id: run.events.length + 1, type, data };
     run.events.push(event);
     logEvent(log, run, type, data);
@@ -247,17 +272,18 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
   }
 
   function finish(run: Run, data: { result?: Result; skipped?: boolean; message?: string }, wire: Record<string, unknown> = data): void {
-    run.passed = data.result ? verdict(data.result) : null;
+    // a standalone run renders past a failed gate: its visual-only Result never carries the code verdict
+    run.passed = data.result ? (run.gate?.passed === false ? false : verdict(data.result)) : null;
     run.outcome = data.result && !data.skipped ? (run.passed === null ? "no-verdict" : run.passed ? "passed" : "failed") : "gate";
     metrics.increment("runs_finished_total", { status: run.outcome });
     emit(run, "done", run.zipUrl ? { ...wire, zipUrl: run.zipUrl } : wire);
   }
 
   function noticeOf(run: Run): RunNotice {
-    const { id, owner, name, dir, startedAt, beganAt, passed, gate, visual, item, error, zipUrl } = run;
+    const { id, owner, name, dir, startedAt, beganAt, passed, gate, visual, item, error, zipUrl, reference } = run;
     const outcome = run.outcome ?? "error";
     const decision = curatorDecision({ gate, visual, passed, error: outcome === "error" ? error ?? "The run failed." : undefined });
-    return { id, owner, name, dir, startedAt, beganAt, finishedAt: Date.now(), outcome, passed, decision, gate, visual, item, error, zipUrl };
+    return { id, owner, name, dir, startedAt, beganAt, finishedAt: Date.now(), outcome, passed, decision, gate, visual, item, error, zipUrl, reference };
   }
 
   /** The single exit of every run: closes the tabs, then tells the channel — never awaited, never in the run's way. */
@@ -301,16 +327,44 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
     if (run && !run.done) emit(run, "queue", position);
   });
 
+  /** The published item behind a reference, fetched inside the run so the stream shows the download; the folder keeps it like an upload. */
+  async function fetchItem(run: Run, candidates: string[]): Promise<Input> {
+    emit(run, "stage", { text: "Fetching the item from the catalyst", kind: "fetch" });
+    let reported: number | undefined;
+    const item = await catalyst.fetchItem(candidates, ({ text, done, total }) => {
+      // the library reports the lookup and every file; the stream carries one stage per file count
+      if (done === undefined || done === reported) return;
+      reported = done;
+      emit(run, "stage", { text, kind: "fetch", done, total });
+    }, run.controller.signal);
+    await runStore.writeEntity(run.dir, item);
+    run.reference = item.urn;
+    run.entityId = item.id;
+    run.name = clean(item.name, MAX_NAME_CHARS).trim() || run.name;
+    await runStore.writeInput(run.dir, { id: run.id, owner: run.owner, name: run.name, startedAt: run.startedAt, reference: item.urn });
+    remember(run);
+    return { files: item.files, metadata: item.metadata, content: item.content };
+  }
+
   /** The code gate runs at once (it costs nothing); only a run that needs the renderer joins the line. */
-  async function admit(run: Run, bytes: Uint8Array, mode: Mode): Promise<void> {
+  async function admit(run: Run, source: Uint8Array | string[], mode: Mode): Promise<void> {
     try {
-      if (await runStore.hasUpload(run.dir)) run.zipUrl = uploadUrl(run.id);
-      const code = await validate(bytes, { signal: run.controller.signal, onProgress: (event) => emit(run, "check", event) });
+      let input: Input;
+      if (source instanceof Uint8Array) {
+        if (await runStore.hasUpload(run.dir)) run.zipUrl = uploadUrl(run.id);
+        input = source;
+      } else {
+        input = await fetchItem(run, source);
+      }
+      const code = await validate(input, { signal: run.controller.signal, onProgress: (event) => emit(run, "check", event) });
       run.gate = code;
+      // on disk before the event: History reads gate.json for every run, live or long finished
+      await runStore.writeGate(run.dir, code);
       emit(run, "gate", { result: code, passed: code.passed });
       if (run.done) return;
       if (code.passed !== true && !mode.standalone) {
-        finish(run, { skipped: true, result: code, message: "Visual review was not started: fix the code checks first, or press Render and review anyway." });
+        const message = "Visual review was not started: fix the code checks first, or press Render and review anyway.";
+        finish(run, { skipped: true, result: code, message }, { skipped: true, result: code, gate: code, message });
         conclude(run);
         return;
       }
@@ -339,19 +393,21 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
       run.beganAt = began;
       run.rendered = true;
       remember(run);
-      // the upload waited on disk, not in memory: a full line costs folders, not RAM; it stays there for Download zip
-      const bytes = await runStore.readUpload(run.dir);
-      const loaded = await loadInput(bytes, {});
+      // the item waited on disk, not in memory: a full line costs folders, not RAM; an upload stays there for Download zip
+      const input = await runStore.readInput(run.dir);
+      const loaded = await loadInput(input, {});
       if (loaded.ctx) run.item = { name: loaded.ctx.item.name, category: loaded.ctx.category ?? loaded.ctx.item.category, itemType: loaded.ctx.itemType, rarity: loaded.ctx.item.rarity };
       const thumbnail = loaded.ctx?.files.get(loaded.ctx.item.thumbnailPath ?? "thumbnail.png");
       // on disk now, not at the end with writeRun(): the site shows it beside the views while they are still rendering
       if (thumbnail) await runStore.writeThumbnail(run.dir, thumbnail);
-      const inputSha = createHash("sha256").update(bytes).digest("hex");
-      await runStore.writeInput(run.dir, { id: run.id, owner: run.owner, name: run.name, startedAt: run.startedAt, sha256: inputSha });
-      // an earlier run of the same file: show its photos now; only stale or missing views get rendered again
-      const earlier = runStore.previousRun(inputSha);
+      const inputKey = input instanceof Uint8Array ? createHash("sha256").update(input).digest("hex") : run.entityId;
+      if (!inputKey) throw new Error("The run has no entity id to remember its views under.");
+      const origin = input instanceof Uint8Array ? { sha256: inputKey } : { entityId: inputKey, reference: run.reference };
+      await runStore.writeInput(run.dir, { id: run.id, owner: run.owner, name: run.name, startedAt: run.startedAt, ...origin, gatePassed: run.gate?.passed });
+      // an earlier run of the same item: show its photos now; only stale or missing views get rendered again
+      const earlier = runStore.previousRun(inputKey);
       const captures = earlier && earlier !== run.dir ? await runStore.readRun(earlier).catch(() => []) : [];
-      runStore.rememberRun(inputSha, run.dir);
+      runStore.rememberRun(inputKey, run.dir);
       const io = sink(run);
       if (captures.length) {
         emit(run, "stage", { text: `Reusing ${captures.length} views from an earlier run` });
@@ -360,8 +416,8 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
       emit(run, "stage", { text: "Starting the renderer" });
       browser = await renderer.forRun(io);
       const model = reviewer.forRun(io);
-      emit(run, "stage", { text: "Rendering the item on both body shapes" });
-      const result = await validate(bytes, {
+      emit(run, "stage", await renderingStage(loaded.ctx));
+      const result = await validate(input, {
         checks: VISUAL_CHECKS,
         captures,
         services: { renderer: browser, reviewer: mode.model ? model : undefined },
@@ -370,7 +426,7 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
       });
       await runStore.writeRun(run.dir, result, thumbnail);
       run.visual = result;
-      finish(run, { result }, { result: serializeResult(run, result), name: run.name });
+      finish(run, { result }, { result: serializeResult(run, result), name: run.name, ...(run.gate ? { gate: serializeResult(run, run.gate) } : {}) });
     } catch (error) {
       fail(run, error);
     } finally {
@@ -401,6 +457,11 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
     const data: Record<string, unknown> = result
       ? { result: { ...result, captures: result.captures.map(({ file, ...capture }) => ({ ...capture, url: captureUrl(stored.id, capture.request.id) })) }, name: stored.name }
       : { skipped: true, message: "This run finished without a saved result." };
+    const gate = await runStore.readGate(stored.dir);
+    if (gate) data.gate = gate;
+    // a published item's run replays as one: the site still needs to know it was fetched, not uploaded
+    const input = await readRunInput(stored.dir);
+    if (input?.reference) data.reference = input.reference;
     if (await runStore.hasUpload(stored.dir)) data.zipUrl = uploadUrl(stored.id);
     return { id: stored.id, owner: stored.owner, name: stored.name, dir: stored.dir, done: true, passed: stored.passed, events: [{ id: 1, type: "done", data }] };
   }
@@ -446,15 +507,16 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
 
     reserve,
 
-    async accept({ identity, name, bytes, model, standalone, reservation }) {
+    async accept({ identity, name, bytes, reference, model, standalone, reservation }) {
       const held = reservation ?? (await reserve(identity));
       const owner = identity.owner;
       try {
+        if (!bytes && !reference?.length) throw new Error("A run starts from the zip bytes or from a reference.");
         const id = randomBytes(16).toString("hex");
         const dir = await runStore.createRunDir(id, name);
-        const run: Run = { id, owner, name, dir, startedAt: Date.now(), done: false, passed: null, rendered: false, events: [], listeners: new Map(), controller: new AbortController() };
-        await runStore.writeInput(dir, { id, owner, name, startedAt: run.startedAt });
-        await runStore.writeUpload(dir, bytes);
+        const run: Run = { id, owner, name, dir, startedAt: Date.now(), done: false, passed: null, rendered: false, events: [], listeners: new Map(), controller: new AbortController(), reference: reference?.[0] };
+        await runStore.writeInput(dir, { id, owner, name, startedAt: run.startedAt, reference: run.reference });
+        if (bytes) await runStore.writeUpload(dir, bytes);
         runs.set(id, run);
         remember(run);
         for (const [oldId, old] of runs) {
@@ -462,8 +524,8 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
           if (old.done) runs.delete(oldId);
         }
         metrics.increment("runs_accepted_total");
-        log.info("run accepted", { run: id, owner, file: name, bytes: bytes.length, model, standalone, dir });
-        void admit(run, bytes, { model, standalone });
+        log.info("run accepted", { run: id, owner, file: name, bytes: bytes?.length, reference: run.reference, model, standalone, dir });
+        void admit(run, bytes ?? reference ?? [], { model, standalone });
         return { id, events: `/api/runs/${id}/events`, queue: "/api/queue" };
       } finally {
         // the run is in the map (or nothing was accepted) before the slot is freed: no await sits between the two
