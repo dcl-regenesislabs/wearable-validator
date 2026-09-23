@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createConfigComponent } from "@well-known-components/env-config-provider";
 import { manifest, type CaptureRecord, type Finding, type Result } from "@dcl-regenesislabs/wearable-validator";
 import { pngBytes } from "../../wearable-validator/test/helpers/synthetic.js";
-import { createSlackComponent, frontViews, runMessage, slackError, type RunMessage } from "../src/adapters/slack.js";
+import { createSlackComponent, frontViews, marketplaceUrl, runMessage, slackError, type RunMessage } from "../src/adapters/slack.js";
 import type { RunNotice } from "../src/types.js";
 import { recordingLogs, type RecordedLine } from "./components.js";
 
@@ -118,6 +118,19 @@ describe("runMessage", () => {
     assert.equal(blocks[0].text!.text, "My-Item");
     assert.deepEqual(blocks.map((block) => block.type), ["header", "section", "actions", "context"]);
     assert.equal(blocks[2].elements![0].url, `/?run=${notice().id}`);
+  });
+
+  it("says a marketplace item came from there, linking its page when the URN names a collections-v2 item", () => {
+    const contract = "0x" + "ab".repeat(20);
+    const urn = `urn:decentraland:matic:collections-v2:${contract}:12`;
+    const linked = sectionText(blocksOf(runMessage(notice({ reference: urn, item: { name: "Red Shirt", itemType: "wearable" } }), ""))[1]);
+    assert.ok(linked.includes(`*Item* Red Shirt (wearable) · from the marketplace <https://decentraland.org/marketplace/contracts/${contract}/items/12|${urn}>`), linked);
+    const other = "urn:decentraland:ethereum:collections-v1:some_collection:some_item";
+    const plain = sectionText(blocksOf(runMessage(notice({ reference: other }), ""))[1]);
+    assert.ok(plain.includes(`*Item* shirt · from the marketplace \`${other}\``), plain);
+    assert.equal(marketplaceUrl(other), undefined);
+    assert.equal(marketplaceUrl(`URN:decentraland:ethereum:collections-v2:${contract.toUpperCase()}:3`), `https://decentraland.org/marketplace/contracts/${contract}/items/3`);
+    assert.ok(!sectionText(blocksOf(runMessage(notice(), ""))[1]).includes("marketplace"), "an upload says nothing about it");
   });
 
   it("keeps the header under 150 characters and escapes what mrkdwn would read as markup", () => {

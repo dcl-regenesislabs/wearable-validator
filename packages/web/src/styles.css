@@ -160,6 +160,22 @@ button, input, select { font-family: inherit; }
 .eui-ds-btn.danger { background: none; border: 1px solid var(--divider); color: var(--error); }
 .eui-ds-btn.danger:hover:not(:disabled) { border-color: var(--error); background: var(--error-hover); }
 
+/* icon button + twisty: the editor's collapse toggle (.eui-btn.icon holding a rotating caret) */
+.eui-btn {
+  pointer-events: auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--control-h); padding: 0 10px; border-radius: var(--r-control);
+  background: transparent; border: none; color: var(--text);
+  font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap;
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+}
+.eui-btn:hover { background: var(--hover); }
+.eui-btn:focus-visible { outline: 2px solid var(--brand-hover); outline-offset: -2px; }
+.eui-btn.icon { width: 28px; padding: 0; color: var(--text-2); }
+.eui-btn.icon:hover { color: var(--text); }
+.eui-btn .twisty { width: 18px; height: 18px; flex: none; display: flex; align-items: center; justify-content: center; color: inherit; }
+.eui-btn .twisty svg { transition: transform var(--dur-fast) var(--ease-out); }
+.eui-btn .twisty.open svg { transform: rotate(90deg); }
+
 /* text action */
 .eui-link {
   background: none; border: none; padding: 0; color: var(--text-3);
@@ -488,6 +504,9 @@ select.category:focus { border-color: var(--primary-border); }
 .rules-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-3); margin: var(--space-5) 0 var(--space-4); }
 .rules-toolbar h1 { font-size: var(--fs-lg); font-weight: 700; margin: 0 0 var(--space-1); }
 .rules-toolbar p { color: var(--text-2); margin: 0; font-size: var(--fs-xs); }
+.rules-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.sections-action { white-space: nowrap; }
+.quiet-line { margin: 0 0 var(--space-4); font-size: var(--fs-xs); color: var(--text-3); }
 .empty-results { padding: var(--space-5); border: 1px solid var(--divider); border-radius: var(--r-panel); color: var(--text-2); }
 .group {
   background: var(--surface); border: 1px solid var(--divider); border-radius: var(--r-panel);
@@ -502,7 +521,7 @@ select.category:focus { border-color: var(--primary-border); }
   content: ""; position: absolute; left: var(--space-4); bottom: -1px; height: 1px; width: 56px;
   background: linear-gradient(90deg, var(--primary), transparent);
 }
-.group-head h2 { font: 600 var(--label-xs)/1 var(--font-family); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2); margin: 0; }
+.group-head h2 { font: 600 var(--label-xs)/1 var(--font-family); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2); margin: 0 auto 0 0; }
 .group-head .tally { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); white-space: nowrap; }
 .rule-columns, .check > summary {
   display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.2fr) 118px 12px;
@@ -621,7 +640,9 @@ footer.foot {
 .eui-ops-table th:first-child, .eui-ops-table td:first-child { padding-left: var(--space-4); }
 .eui-ops-table th:last-child, .eui-ops-table td:last-child { padding-right: var(--space-4); }
 .eui-ops-table tbody tr:last-child td { border-bottom: 0; }
-.run-detail { display: flex; flex-direction: column; gap: var(--space-4); }
+/* an open run reads like the Validate results: the run head in the rail, every check in the main column */
+.history.open { max-width: none; }
+.run-detail .rail-body + .run-meta { border-top: 1px solid var(--divider-soft); }
 .run-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-4); font-size: var(--fs-xs); color: var(--text-3); }
 .run-meta b { font-weight: 500; color: var(--text-2); }
 .run-meta time { font-family: var(--font-mono); font-size: var(--fs-2xs); }
@@ -639,3 +660,7 @@ footer.foot {
 .queue-pos { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); min-width: 2.5ch; }
 .queue-time { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); white-space: nowrap; }
 .queue-empty { color: var(--text-3); font-size: var(--fs-2xs); }
+
+/* a collapsible header row toggles its section; its own controls keep their jobs */
+.collapsible { cursor: pointer; user-select: none; }
+.collapsible:hover { background: var(--hover); }

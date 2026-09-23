@@ -54,6 +54,14 @@ The first build takes a few minutes: it pulls the Playwright image, installs Chr
 4. Redeploy after a merge: `git pull && docker compose -f deploy/docker-compose.yml up -d --build`.
 5. The named volumes keep run folders and Chromium's profile across restarts, so a restarted container renders warm (the App Platform disk forgot both).
 
+Everything else has a default in `packages/server/.env.default`; the ones a deployment may want to change:
+
+| Variable | Value |
+| --- | --- |
+| `CATALYST_URL` | the catalyst a run started from a shop item URL or URN fetches the published item from; default `https://peer.decentraland.org` |
+| `CATALYST_TIMEOUT_MS` | how long the whole catalyst fetch (lookup and every file) may take before the run ends with "The catalyst did not answer in time — try again in a moment."; default 60000 |
+| `MAX_CONCURRENT_RUNS` | renders at once, about one per 2 GB of RAM; default 1 |
+
 ### 3b. Deploy on merge
 
 A merge to `main` redeploys the run server through `.github/workflows/deploy.yml`: it connects to the droplet, fast-forwards the checkout, rebuilds the image and waits for `/api/health` to answer, printing the container log if it does not. `.github/workflows/ci.yml` runs typecheck, tests and the build on every pull request.

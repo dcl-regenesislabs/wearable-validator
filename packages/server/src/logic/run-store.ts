@@ -1,9 +1,9 @@
 /** Run folders on disk (docs/visual-validation.md §3) and the index of every run this server has seen. */
 import { mkdir, readdir, readFile, stat, writeFile, appendFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { Context } from "@earendil-works/pi-ai";
 import { START_COMPONENT, type IBaseComponent, type IConfigComponent, type ILoggerComponent } from "@well-known-components/interfaces";
-import { digest, type CaptureRecord, type CaptureRequest, type CheckResult, type Finding, type Result, type ReviewRequest } from "@dcl-regenesislabs/wearable-validator";
+import { digest, type CaptureRecord, type CaptureRequest, type CatalystItem, type CheckResult, type Finding, type Input, type Result, type ReviewRequest } from "@dcl-regenesislabs/wearable-validator";
 import { reviewMessages } from "@dcl-regenesislabs/wearable-validator/ai";
 import { appLogger } from "../adapters/log-buffer.js";
 import type { RunEvent } from "../types.js";
@@ -23,13 +23,18 @@ interface CaptureEntry {
   request: CaptureRequest;
 }
 
-/** input.json: who started the run and which zip it was — the server rebuilds its run index from it after a restart. */
+/** input.json: who started the run and which item it was — the server rebuilds its run index from it after a restart. */
 export interface RunInput {
   id: string;
   owner: string;
   name: string;
   startedAt: number;
+  /** The upload's hash, written once the run reaches the renderer: the key an earlier run of the same zip is found under. */
   sha256?: string;
+  /** The catalyst entity id, the same key for a run started from a reference. */
+  entityId?: string;
+  /** The URN a reference run fetched the item under. */
+  reference?: string;
   /** The code gate's verdict: a standalone run keeps rendering after a failed gate, and the index must still list it as failed. */
   gatePassed?: boolean | null;
 }
@@ -56,7 +61,94 @@ export async function readRunInput(dir: string): Promise<Partial<RunInput> | und
   if (!raw || typeof raw !== "object") return undefined;
   const value = raw as Record<string, unknown>;
   const str = (key: string): string | undefined => (typeof value[key] === "string" ? value[key] : undefined);
-  return { id: str("id"), owner: str("owner"), name: str("name"), startedAt: typeof value.startedAt === "number" ? value.startedAt : undefined, sha256: str("sha256"), gatePassed: typeof value.gatePassed === "boolean" ? value.gatePassed : undefined };
+  return {
+    id: str("id"), owner: str("owner"), name: str("name"), startedAt: typeof value.startedAt === "number" ? value.startedAt : undefined,
+    sha256: str("sha256"), entityId: str("entityId"), reference: str("reference"), gatePassed: typeof value.gatePassed === "boolean" ? value.gatePassed : undefined
+  };
+}
+
+/** entity.json: the published item a reference run fetched, minus its files (those live under item/). */
+export interface StoredEntity {
+  urn: string;
+  id: string;
+  name: string;
+  metadata: unknown;
+  content: { file: string; hash: string }[];
+}
+
+const ITEM_DIR = "item";
+
+/** Where a fetched file lands: one path inside item/, never a step outside it whatever the catalyst named the file. */
+function itemPath(dir: string, file: string): string {
+  const root = resolve(dir, ITEM_DIR);
+  const segments = file.split("/");
+  const unsafe = (segment: string) => segment === "" || segment === "." || segment === ".." || segment.includes("\0") || Buffer.byteLength(segment) > 255;
+  if (isAbsolute(file) || file.includes("\\") || segments.some(unsafe)) {
+    throw new Error(`The item lists a file path that cannot be stored: "${file}".`);
+  }
+  const target = resolve(root, file);
+  if (!target.startsWith(root + "/")) throw new Error(`The item lists a file path that cannot be stored: "${file}".`);
+  return target;
+}
+
+export async function writeEntity(dir: string, item: CatalystItem): Promise<void> {
+  // a case-insensitive file system (macOS) would keep one of two names and hand the renderer other bytes than the gate judged
+  const seen = new Set<string>();
+  for (const file of item.files.keys()) {
+    const key = file.toLowerCase();
+    if (seen.has(key)) throw new Error(`The item lists "${file}" twice with different letter case; the run folder cannot hold both.`);
+    seen.add(key);
+  }
+  for (const [file, bytes] of item.files) {
+    const target = itemPath(dir, file);
+    // a file listed beside a folder of the same name, or any other fs refusal: the creator sentence, never the server's path
+    try {
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, bytes);
+    } catch {
+      throw new Error(`The item lists a file path that cannot be stored: "${file}".`);
+    }
+  }
+  const entity: StoredEntity = { urn: item.urn, id: item.id, name: item.name, metadata: item.metadata, content: item.content };
+  await writeFile(join(dir, "entity.json"), JSON.stringify(entity, null, 2));
+}
+
+export async function readEntity(dir: string): Promise<StoredEntity | undefined> {
+  const text = await readFile(join(dir, "entity.json"), "utf8").catch(() => undefined);
+  if (text === undefined) return undefined;
+  try {
+    const raw = JSON.parse(text) as Partial<StoredEntity>;
+    return typeof raw.urn === "string" && typeof raw.id === "string" && Array.isArray(raw.content) ? { urn: raw.urn, id: raw.id, name: typeof raw.name === "string" ? raw.name : raw.urn, metadata: raw.metadata, content: raw.content } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The run's input as validate() takes it: the upload's bytes, or the fetched item rebuilt from entity.json and item/. */
+export async function readRunInputData(dir: string): Promise<Input> {
+  const zip = await readFile(join(dir, "input.zip")).catch(() => undefined);
+  if (zip) return new Uint8Array(zip);
+  const entity = await readEntity(dir);
+  if (!entity) throw new Error("The run folder holds neither input.zip nor entity.json: the item is gone.");
+  const files = new Map<string, Uint8Array>();
+  for (const { file } of entity.content) files.set(file, new Uint8Array(await readFile(itemPath(dir, file))));
+  return { files, metadata: entity.metadata, content: entity.content };
+}
+
+/** gate.json: the code gate's Result. The gate runs without a renderer, so it never carries captures. */
+export function writeGate(dir: string, result: Result): Promise<void> {
+  return writeFile(join(dir, "gate.json"), JSON.stringify({ ...result, captures: [] }, null, 2));
+}
+
+export async function readGate(dir: string): Promise<Result | undefined> {
+  const text = await readFile(join(dir, "gate.json"), "utf8").catch(() => undefined);
+  if (text === undefined) return undefined;
+  try {
+    const raw = JSON.parse(text) as Partial<Result>;
+    return Array.isArray(raw.checks) && Array.isArray(raw.findings) ? { ...(raw as Result), captures: [] } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function readRunResult(dir: string): Promise<StoredResult | undefined> {
@@ -218,9 +310,12 @@ export interface StoredRun {
   startedAt: number;
   done: boolean;
   passed: boolean | null;
-  /** Whether the run reached the renderer (input.json carries the zip's sha256 from that moment on): what the daily quota counts. */
+  /** Whether the run reached the renderer (input.json carries the zip's sha256 or the entity id from that moment on): what the daily quota counts. */
   rendered: boolean;
 }
+
+/** What identifies a run's input for view reuse: the zip's sha256 or the entity id. */
+export type InputKey = string;
 
 export interface IRunStoreComponent extends IBaseComponent {
   readonly root: string;
@@ -229,16 +324,22 @@ export interface IRunStoreComponent extends IBaseComponent {
   get(id: string): StoredRun | undefined;
   set(run: StoredRun): void;
   all(): StoredRun[];
-  previousRun(sha256: string): string | undefined;
-  rememberRun(sha256: string, dir: string): void;
+  previousRun(key: InputKey): string | undefined;
+  rememberRun(key: InputKey, dir: string): void;
   createRunDir(id: string, name: string): Promise<string>;
   writeInput(dir: string, input: RunInput): Promise<void>;
   /** The upload lives in the folder (input.zip): a waiting run holds no RAM, and the zip is served after the run. */
   writeUpload(dir: string, bytes: Uint8Array): Promise<void>;
   hasUpload(dir: string): Promise<boolean>;
+  /** A fetched item lives in the folder too: entity.json beside the files under item/, path-safe. */
+  writeEntity(dir: string, item: CatalystItem): Promise<void>;
+  /** The run's input, whichever form it took: zip bytes, or { files, metadata, content } from entity.json + item/. */
+  readInput(dir: string): Promise<Input>;
   /** The item's own thumbnail, on disk before the first render so the site can show it while the views arrive. */
   writeThumbnail(dir: string, bytes: Uint8Array): Promise<void>;
-  readUpload(dir: string): Promise<Uint8Array>;
+  /** The code gate's Result (gate.json), written the moment the gate finishes so History can show every check. */
+  writeGate(dir: string, result: Result): Promise<void>;
+  readGate(dir: string): Promise<Result | undefined>;
   appendEvent(dir: string, event: RunEvent): Promise<void>;
   /** One capture as it lands, before writeRun() lists them all; the id is checked to be a safe file stem. */
   writeCapture(dir: string, id: string, bytes: Uint8Array): Promise<void>;
@@ -253,27 +354,30 @@ export function resolveArtifactsDir(configured: string | undefined, env: NodeJS.
 }
 
 /**
- * Run folders remember which zip they came from and who started them (input.json): the newest per zip offers its
- * captures to the next run of the same file, and every owned folder is listed and served again after a restart.
+ * Run folders remember which item they came from and who started them (input.json): the newest per zip or entity offers
+ * its captures to the next run of the same item, and every owned folder is listed and served again after a restart.
  */
-async function indexRunFolders(root: string, previous: Map<string, string>, index: Map<string, StoredRun>): Promise<void> {
+async function indexRunFolders(root: string, previous: Map<InputKey, string>, index: Map<string, StoredRun>): Promise<void> {
   const entries = await readdir(root).catch(() => [] as string[]);
-  const reusable: { sha256: string; dir: string; mtime: number }[] = [];
+  const reusable: { key: InputKey; dir: string; mtime: number }[] = [];
   for (const entry of entries) {
     if (!entry.startsWith("visual-")) continue;
     const dir = join(root, entry);
     const input = await readRunInput(dir);
     if (!input) continue;
-    if (input.sha256) {
+    const key = input.sha256 ?? input.entityId;
+    if (key) {
       const info = await stat(join(dir, "captures", "captures.json")).catch(() => undefined);
-      if (info) reusable.push({ sha256: input.sha256, dir, mtime: info.mtimeMs });
+      if (info) reusable.push({ key, dir, mtime: info.mtimeMs });
     }
     if (input.id && input.owner && !index.has(input.id)) {
       const result = await readRunResult(dir);
-      index.set(input.id, { id: input.id, owner: input.owner, name: input.name ?? entry, dir, startedAt: input.startedAt ?? 0, done: true, passed: result ? (input.gatePassed === false ? false : verdict(result)) : null, rendered: input.sha256 !== undefined });
+      // a run that stopped at the code gate has no result.json: gate.json holds its verdict
+      const passed = result ? (input.gatePassed === false ? false : verdict(result)) : ((await readGate(dir))?.passed ?? null);
+      index.set(input.id, { id: input.id, owner: input.owner, name: input.name ?? entry, dir, startedAt: input.startedAt ?? 0, done: true, passed, rendered: key !== undefined });
     }
   }
-  for (const item of reusable.sort((a, b) => a.mtime - b.mtime)) if (!previous.has(item.sha256)) previous.set(item.sha256, item.dir);
+  for (const item of reusable.sort((a, b) => a.mtime - b.mtime)) if (!previous.has(item.key)) previous.set(item.key, item.dir);
 }
 
 export async function createRunStoreComponent(components: { config: IConfigComponent; logs: ILoggerComponent }): Promise<IRunStoreComponent> {
@@ -281,7 +385,7 @@ export async function createRunStoreComponent(components: { config: IConfigCompo
   const log = appLogger(logs, "run-store");
   const root = resolveArtifactsDir(await config.getString("ARTIFACTS_DIR"));
   const index = new Map<string, StoredRun>();
-  const previous = new Map<string, string>();
+  const previous = new Map<InputKey, string>();
   const indexed = indexRunFolders(root, previous, index).catch((error) => log.warn("could not index earlier runs", { error: error instanceof Error ? error.message : String(error) }));
 
   return {
@@ -291,8 +395,8 @@ export async function createRunStoreComponent(components: { config: IConfigCompo
     get: (id) => index.get(id),
     set: (run) => void index.set(run.id, run),
     all: () => [...index.values()],
-    previousRun: (sha256) => previous.get(sha256),
-    rememberRun: (sha256, dir) => void previous.set(sha256, dir),
+    previousRun: (key) => previous.get(key),
+    rememberRun: (key, dir) => void previous.set(key, dir),
     createRunDir: async (id, name) => {
       const dir = join(root, `visual-${name.replace(/\.zip$/i, "")}-${id}`);
       await mkdir(dir, { recursive: true });
@@ -302,7 +406,10 @@ export async function createRunStoreComponent(components: { config: IConfigCompo
     writeUpload: (dir, bytes) => writeFile(join(dir, "input.zip"), bytes),
     writeThumbnail: (dir, bytes) => writeFile(join(dir, "thumbnail.png"), bytes),
     hasUpload: (dir) => stat(join(dir, "input.zip")).then((info) => info.isFile(), () => false),
-    readUpload: async (dir) => new Uint8Array(await readFile(join(dir, "input.zip"))),
+    writeEntity,
+    readInput: readRunInputData,
+    writeGate,
+    readGate,
     appendEvent: (dir, event) => appendFile(join(dir, "events.jsonl"), JSON.stringify(event) + "\n"),
     writeCapture: async (dir, id, bytes) => {
       if (!/^[\w.-]+$/.test(id)) throw new Error(`Capture id "${id}" is not a safe file stem.`);
