@@ -59,16 +59,16 @@ function cookie(request: IdentityRequest, name: string): string | undefined {
 
 /**
  * The Access JWT arrives as a header through the Worker forward; the CF_Authorization cookie is the fallback for direct calls.
- * A service token (Access "Service Auth" policy) becomes owner "service:<name>", an operator and read-only; people are operators only when listed.
+ * Access itself is the allow-list: whoever it lets in is a curator, so every person is an operator and sees every run.
+ * A service token (Access "Service Auth" policy) becomes owner "service:<name>", an operator and read-only.
  */
-export function accessIdentity(verifier: AccessVerifier, operators: string[] = []): Identify {
-  const listed = new Set(operators.map((email) => email.trim().toLowerCase()).filter(Boolean));
+export function accessIdentity(verifier: AccessVerifier): Identify {
   return async (request) => {
     const token = request.headers.get("cf-access-jwt-assertion") ?? cookie(request, "CF_Authorization");
     if (!token) return undefined;
     const claims = await verifier.verify(token);
     if (!claims) return undefined;
-    if (claims.email) return { owner: claims.email, kind: "access", operator: listed.has(claims.email.toLowerCase()), readOnly: false };
+    if (claims.email) return { owner: claims.email, kind: "access", operator: true, readOnly: false };
     return claims.serviceName ? { owner: `service:${claims.serviceName}`, kind: "service", operator: true, readOnly: true } : undefined;
   };
 }
@@ -77,7 +77,6 @@ export interface IdentityConfig {
   host: string;
   teamDomain?: string;
   audience?: string;
-  operators?: string;
   operatorToken?: string;
   insecureAnonymous: boolean;
 }
@@ -90,8 +89,7 @@ export function chooseIdentity(config: IdentityConfig): IIdentityComponent {
   const withBot = (identify: Identify, kind: string): IIdentityComponent => ({ identify: bot ? firstOf(bot, identify) : identify, kind: bot ? `${kind} + operator token` : kind });
   if (teamDomain || audience) {
     if (!teamDomain || !audience) throw new Error("Set both CF_ACCESS_TEAM_DOMAIN (the team slug) and CF_ACCESS_AUD (the Access application audience tag).");
-    const operators = (config.operators ?? "").split(",").map((email) => email.trim()).filter(Boolean);
-    return withBot(accessIdentity(createAccessVerifier({ teamDomain, audience }), operators), `cloudflare-access (${teamDomain}${operators.length ? `, ${operators.length} operators` : ""})`);
+    return withBot(accessIdentity(createAccessVerifier({ teamDomain, audience })), `cloudflare-access (${teamDomain})`);
   }
   if (isLoopback(host)) return withBot(localIdentity(), "local");
   if (config.insecureAnonymous) return withBot(localIdentity("anonymous"), "anonymous");
@@ -105,7 +103,6 @@ export async function createIdentityComponent(components: { config: IConfigCompo
     host,
     teamDomain: await config.getString("CF_ACCESS_TEAM_DOMAIN"),
     audience: await config.getString("CF_ACCESS_AUD"),
-    operators: await config.getString("OPERATORS"),
     operatorToken: await config.getString("OPERATOR_TOKEN"),
     insecureAnonymous: (await config.getString("INSECURE_ANONYMOUS")) === "1"
   });

@@ -6,8 +6,10 @@ import { loadInput, registry, validate, type Renderer, type Result } from "@dcl-
 import { appLogger, type AppLogger } from "../adapters/log-buffer.js";
 import type { IRendererComponent } from "../adapters/renderer.js";
 import type { IReviewerComponent } from "../adapters/reviewer.js";
+import type { ISlackComponent } from "../adapters/slack.js";
 import type { metricDeclarations } from "../metrics.js";
-import type { Identity, QueueState, RunEvent, RunEventType, RunSink, RunSummary } from "../types.js";
+import type { Identity, QueueState, RunEvent, RunEventType, RunItem, RunNotice, RunOutcome, RunSink, RunSummary } from "../types.js";
+import { curatorDecision } from "./decision.js";
 import { QueueFullError, TooManyListenersError, TooManyRunsError } from "./errors.js";
 import type { IQueueComponent } from "./queue.js";
 import { verdict, type IRunStoreComponent, type StoredRun } from "./run-store.js";
@@ -104,6 +106,14 @@ interface Run extends StoredRun {
   controller: AbortController;
   /** When the render actually started; startedAt is when the upload was accepted. */
   beganAt?: number;
+  /** Kept for the notice conclude() sends: the code gate's Result, the visual Result, the item's metadata, the failure. */
+  gate?: Result;
+  visual?: Result;
+  item?: RunItem;
+  error?: string;
+  outcome?: RunOutcome;
+  /** Set once the upload is known to be in the folder; rides on the done event so the site can offer the zip. */
+  zipUrl?: string;
 }
 
 interface Mode {
@@ -119,7 +129,11 @@ interface RunsComponents {
   queue: IQueueComponent;
   renderer: IRendererComponent;
   reviewer: IReviewerComponent;
+  /** Told once per concluded run; a disabled notifier resolves at once. */
+  notifier: ISlackComponent;
 }
+
+const uploadUrl = (runId: string): string => `/api/runs/${runId}/input.zip`;
 
 const captureUrl = (runId: string, captureId: string): string => `/api/runs/${runId}/captures/${captureId}.png`;
 
@@ -191,7 +205,7 @@ function logEvent(log: AppLogger, run: Run, type: RunEventType, data: unknown): 
 }
 
 export async function createRunsComponent(components: RunsComponents): Promise<IRunsComponent> {
-  const { config, logs, metrics, runStore, queue, renderer, reviewer } = components;
+  const { config, logs, metrics, runStore, queue, renderer, reviewer, notifier } = components;
   const log = appLogger(logs, "runs");
   const maxListeners = (await config.getNumber("MAX_SSE_LISTENERS_PER_RUN")) ?? 5;
   const maxPerDay = (await config.getNumber("MAX_RUNS_PER_OWNER_PER_DAY")) ?? 40;
@@ -232,12 +246,21 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
     void runStore.appendEvent(run.dir, event).catch(() => {});
   }
 
-  function finish(run: Run, data: { result?: Result; skipped?: boolean; message?: string }, wire: unknown = data): void {
+  function finish(run: Run, data: { result?: Result; skipped?: boolean; message?: string }, wire: Record<string, unknown> = data): void {
     run.passed = data.result ? verdict(data.result) : null;
-    metrics.increment("runs_finished_total", { status: data.result && !data.skipped ? (run.passed === null ? "no-verdict" : run.passed ? "passed" : "failed") : "gate" });
-    emit(run, "done", wire);
+    run.outcome = data.result && !data.skipped ? (run.passed === null ? "no-verdict" : run.passed ? "passed" : "failed") : "gate";
+    metrics.increment("runs_finished_total", { status: run.outcome });
+    emit(run, "done", run.zipUrl ? { ...wire, zipUrl: run.zipUrl } : wire);
   }
 
+  function noticeOf(run: Run): RunNotice {
+    const { id, owner, name, dir, startedAt, beganAt, passed, gate, visual, item, error, zipUrl } = run;
+    const outcome = run.outcome ?? "error";
+    const decision = curatorDecision({ gate, visual, passed, error: outcome === "error" ? error ?? "The run failed." : undefined });
+    return { id, owner, name, dir, startedAt, beganAt, finishedAt: Date.now(), outcome, passed, decision, gate, visual, item, error, zipUrl };
+  }
+
+  /** The single exit of every run: closes the tabs, then tells the channel — never awaited, never in the run's way. */
   function conclude(run: Run): void {
     if (run.done) return;
     run.done = true;
@@ -247,14 +270,22 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
       listener.end();
     }
     run.listeners.clear();
-    void runStore.discardUpload(run.dir).catch(() => {});
+    // the upload stays in the folder: the site offers it as Download zip to the owner and to operators
+    const notice = run.outcome === "error" && run.controller.signal.aborted ? undefined : noticeOf(run);
+    // the results carry every capture's bytes: only the in-flight notice keeps them, not the fifty runs remembered here
+    run.visual = undefined;
+    run.gate = undefined;
+    // a cancelled run tells nobody; one that reached a verdict before the cancel landed is announced like any other
+    if (notice) void notifier.notify(notice).catch((error: unknown) => log.warn("slack notification failed", { run: run.id, reason: error instanceof Error ? error.message : String(error) }));
   }
 
   function fail(run: Run, error: unknown, message?: string): void {
     if (run.done) return;
     const cancelled = run.controller.signal.aborted;
+    run.outcome = "error";
+    run.error = message ?? (cancelled ? "The run was cancelled." : error instanceof Error ? error.message : "The run failed.");
     metrics.increment("runs_finished_total", { status: cancelled ? "cancelled" : "error" });
-    emit(run, "error", { message: message ?? (cancelled ? "The run was cancelled." : error instanceof Error ? error.message : "The run failed.") });
+    emit(run, "error", run.zipUrl ? { message: run.error, zipUrl: run.zipUrl } : { message: run.error });
   }
 
   /** Ends a run from outside its own flow (cancel, restart): the frame reaches the tabs before they are closed. */
@@ -273,7 +304,9 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
   /** The code gate runs at once (it costs nothing); only a run that needs the renderer joins the line. */
   async function admit(run: Run, bytes: Uint8Array, mode: Mode): Promise<void> {
     try {
+      if (await runStore.hasUpload(run.dir)) run.zipUrl = uploadUrl(run.id);
       const code = await validate(bytes, { signal: run.controller.signal, onProgress: (event) => emit(run, "check", event) });
+      run.gate = code;
       emit(run, "gate", { result: code, passed: code.passed });
       if (run.done) return;
       if (code.passed !== true && !mode.standalone) {
@@ -290,7 +323,9 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
       queue.enqueue({ id: run.id, owner: run.owner, name: run.name, since: run.startedAt }, () => execute(run, mode));
     } catch (error) {
       // the line filled while the gate ran: the caller was told 201, so the stream carries the refusal
-      emit(run, "error", { message: error instanceof TooManyRunsError || error instanceof QueueFullError ? error.message : "The run could not join the line." });
+      run.outcome = "error";
+      run.error = error instanceof TooManyRunsError || error instanceof QueueFullError ? error.message : "The run could not join the line.";
+      emit(run, "error", { message: run.error });
       conclude(run);
       return;
     }
@@ -304,10 +339,10 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
       run.beganAt = began;
       run.rendered = true;
       remember(run);
-      // the upload waited on disk, not in memory: a full line costs folders, not RAM; once read it is not needed there
+      // the upload waited on disk, not in memory: a full line costs folders, not RAM; it stays there for Download zip
       const bytes = await runStore.readUpload(run.dir);
-      await runStore.discardUpload(run.dir);
       const loaded = await loadInput(bytes, {});
+      if (loaded.ctx) run.item = { name: loaded.ctx.item.name, category: loaded.ctx.category ?? loaded.ctx.item.category, itemType: loaded.ctx.itemType, rarity: loaded.ctx.item.rarity };
       const thumbnail = loaded.ctx?.files.get(loaded.ctx.item.thumbnailPath ?? "thumbnail.png");
       // on disk now, not at the end with writeRun(): the site shows it beside the views while they are still rendering
       if (thumbnail) await runStore.writeThumbnail(run.dir, thumbnail);
@@ -334,6 +369,7 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
         onProgress: (event) => emit(run, "check", event)
       });
       await runStore.writeRun(run.dir, result, thumbnail);
+      run.visual = result;
       finish(run, { result }, { result: serializeResult(run, result), name: run.name });
     } catch (error) {
       fail(run, error);
@@ -362,9 +398,10 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
   // an evicted or pre-restart run comes back from its folder as one `done` event: the same shape the live stream ended with
   async function loadFinishedRun(stored: StoredRun): Promise<RunView> {
     const result = await runStore.readResult(stored.dir);
-    const data = result
+    const data: Record<string, unknown> = result
       ? { result: { ...result, captures: result.captures.map(({ file, ...capture }) => ({ ...capture, url: captureUrl(stored.id, capture.request.id) })) }, name: stored.name }
       : { skipped: true, message: "This run finished without a saved result." };
+    if (await runStore.hasUpload(stored.dir)) data.zipUrl = uploadUrl(stored.id);
     return { id: stored.id, owner: stored.owner, name: stored.name, dir: stored.dir, done: true, passed: stored.passed, events: [{ id: 1, type: "done", data }] };
   }
 

@@ -259,7 +259,7 @@ describe("run server", () => {
     assert.equal(input.name, "shirt.zip");
     assert.equal(input.startedAt, runs.find((row) => row.id === id)!.startedAt);
     assert.equal(typeof input.sha256, "string");
-    await assert.rejects(stat(join(server.artifacts, `visual-shirt-${id}`, "input.zip")), /ENOENT/, "the upload is gone once the run has it");
+    assert.ok((await stat(join(server.artifacts, `visual-shirt-${id}`, "input.zip"))).isFile(), "the upload stays in the folder: the site offers it as Download zip");
   });
 
   it("hides a run from everyone but its owner: 404 on the run, its events, its files and cancel", async () => {
@@ -422,7 +422,7 @@ describe("the waiting line", () => {
       assert.equal(told.ahead, 2);
       assert.deepEqual((await listAs(base, alice)).map((run) => [run.id, run.queued]), [[c, true], [a, false]]);
       await stat(join(server.artifacts, `visual-item-${c}`, "input.zip"));
-      await assert.rejects(stat(join(server.artifacts, `visual-item-${a}`, "input.zip")), /ENOENT/, "the running run read its upload and let it go");
+      await stat(join(server.artifacts, `visual-item-${a}`, "input.zip"));
 
       const cancelled = await fetch(`${base}/api/runs/${b}`, { method: "DELETE", headers: bob });
       assert.equal(cancelled.status, 202);
@@ -442,7 +442,7 @@ describe("the waiting line", () => {
       const cDone = await readEvents(`${base}/api/runs/${c}/events`);
       assert.equal(cDone.at(-1)?.type, "done");
       assert.deepEqual(cDone.filter((event) => event.type === "queue").map((event) => event.data.position), [2, 1, 0]);
-      await assert.rejects(stat(join(server.artifacts, `visual-item-${c}`, "input.zip")), /ENOENT/);
+      assert.equal(cDone.at(-1)?.data.zipUrl, `/api/runs/${c}/input.zip`);
       const after = await queueAs(base, alice);
       assert.deepEqual([after.running.length, after.waiting.length], [0, 0]);
       assert.ok(typeof after.averageRunMs === "number" && after.averageRunMs >= 0);

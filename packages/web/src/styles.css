@@ -470,6 +470,10 @@ footer.foot {
 .visual-modal-head { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4); height: var(--head-h); border-bottom: 1px solid var(--divider); position: sticky; top: 0; background: var(--surface); z-index: 1; }
 .visual-modal-title { font-weight: 600; color: var(--text); }
 .visual-modal-time { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); }
+.visual-modal-owner { font-size: var(--fs-2xs); color: var(--text-2); }
+.visual-modal-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
+.visual-modal-actions .visual-cancel { margin-left: 0; display: inline-flex; align-items: center; text-decoration: none; }
+.visual-open-error { font-size: var(--fs-xs); color: var(--error-text); margin: 0 0 var(--space-3); }
 
 /* the landing page: the signed-in curator's runs and the shared line, before any file is dropped */
 .landing-runs { max-width: 900px; margin: var(--space-6) auto 0; animation: rise var(--dur-mid) var(--ease-out) 0.15s backwards; }

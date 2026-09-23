@@ -1,5 +1,5 @@
 /** Run folders on disk (docs/visual-validation.md §3) and the index of every run this server has seen. */
-import { mkdir, readdir, readFile, rm, stat, writeFile, appendFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile, appendFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { Context } from "@earendil-works/pi-ai";
 import { START_COMPONENT, type IBaseComponent, type IConfigComponent, type ILoggerComponent } from "@well-known-components/interfaces";
@@ -231,12 +231,12 @@ export interface IRunStoreComponent extends IBaseComponent {
   rememberRun(sha256: string, dir: string): void;
   createRunDir(id: string, name: string): Promise<string>;
   writeInput(dir: string, input: RunInput): Promise<void>;
-  /** The queued upload stays on disk (input.zip) until its turn, so a waiting run holds no RAM. */
+  /** The upload lives in the folder (input.zip): a waiting run holds no RAM, and the zip is served after the run. */
   writeUpload(dir: string, bytes: Uint8Array): Promise<void>;
+  hasUpload(dir: string): Promise<boolean>;
   /** The item's own thumbnail, on disk before the first render so the site can show it while the views arrive. */
   writeThumbnail(dir: string, bytes: Uint8Array): Promise<void>;
   readUpload(dir: string): Promise<Uint8Array>;
-  discardUpload(dir: string): Promise<void>;
   appendEvent(dir: string, event: RunEvent): Promise<void>;
   /** One capture as it lands, before writeRun() lists them all; the id is checked to be a safe file stem. */
   writeCapture(dir: string, id: string, bytes: Uint8Array): Promise<void>;
@@ -299,8 +299,8 @@ export async function createRunStoreComponent(components: { config: IConfigCompo
     writeInput: writeRunInput,
     writeUpload: (dir, bytes) => writeFile(join(dir, "input.zip"), bytes),
     writeThumbnail: (dir, bytes) => writeFile(join(dir, "thumbnail.png"), bytes),
+    hasUpload: (dir) => stat(join(dir, "input.zip")).then((info) => info.isFile(), () => false),
     readUpload: async (dir) => new Uint8Array(await readFile(join(dir, "input.zip"))),
-    discardUpload: (dir) => rm(join(dir, "input.zip"), { force: true }),
     appendEvent: (dir, event) => appendFile(join(dir, "events.jsonl"), JSON.stringify(event) + "\n"),
     writeCapture: async (dir, id, bytes) => {
       if (!/^[\w.-]+$/.test(id)) throw new Error(`Capture id "${id}" is not a safe file stem.`);

@@ -12,6 +12,7 @@ import { runSelfTest } from "./adapters/self-test.js";
 import { createReviewerComponent } from "./adapters/reviewer.js";
 import { createBuildInfoComponent } from "./adapters/build-info.js";
 import { createSiteComponent } from "./adapters/site.js";
+import { createSlackComponent } from "./adapters/slack.js";
 import { createQueueComponent } from "./logic/queue.js";
 import { createRunStoreComponent } from "./logic/run-store.js";
 import { createRunsComponent } from "./logic/runs.js";
@@ -46,7 +47,7 @@ export async function createAppServer(config: IConfigComponent, logs: ILoggerCom
   );
 }
 
-export type ComponentOverrides = Partial<Pick<BaseComponents, "server" | "identity" | "renderer" | "reviewer">>;
+export type ComponentOverrides = Partial<Pick<BaseComponents, "server" | "identity" | "renderer" | "reviewer" | "slack">>;
 
 export async function createBaseComponents(config: IConfigComponent, logs: ILoggerComponent, metrics: AppComponents["metrics"], overrides: ComponentOverrides = {}): Promise<Omit<AppComponents, "statusChecks">> {
   const server = overrides.server ?? (await createAppServer(config, logs));
@@ -62,7 +63,8 @@ export async function createBaseComponents(config: IConfigComponent, logs: ILogg
     maxWaiting: (await config.getNumber("MAX_WAITING_RUNS")) ?? 20,
     maxActivePerOwner: (await config.getNumber("MAX_ACTIVE_RUNS_PER_OWNER")) ?? 3
   });
-  const runs = await createRunsComponent({ config, logs: logBuffer, metrics, runStore, queue, renderer, reviewer });
+  const slack = overrides.slack ?? (await createSlackComponent({ config, logs: logBuffer }));
+  const runs = await createRunsComponent({ config, logs: logBuffer, metrics, runStore, queue, renderer, reviewer, notifier: slack });
   const site = await createSiteComponent({ config, logs: logBuffer });
   const buildInfo = await createBuildInfoComponent();
 
@@ -74,6 +76,7 @@ export async function createBaseComponents(config: IConfigComponent, logs: ILogg
     model: reviewer.model,
     identity: identity.kind,
     concurrentRuns: queue.maxConcurrent,
+    slack: slack.enabled ? slack.channel : "off",
     rules: manifest.version,
     version: buildInfo.version,
     commit: buildInfo.commit,
@@ -85,7 +88,7 @@ export async function createBaseComponents(config: IConfigComponent, logs: ILogg
   // the port is already open: a slow probe must not delay the health check, and its answer is in the log either way
   if (renderer.available && (await config.getString("RENDERER_SELF_TEST")) !== "0") void runSelfTest({ logs: logBuffer }).catch(() => {});
 
-  return { config, logs: logBuffer, logBuffer, server, metrics, identity, renderer, reviewer, runStore, queue, runs, site, buildInfo };
+  return { config, logs: logBuffer, logBuffer, server, metrics, identity, renderer, reviewer, runStore, queue, runs, site, slack, buildInfo };
 }
 
 export async function initComponents(): Promise<AppComponents> {

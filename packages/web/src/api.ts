@@ -3,6 +3,7 @@
  * In dev, Vite proxies /api to it; on the static site there is no server and every call fails soft.
  */
 import type { CaptureRecord, CaptureRequest, CheckResult, Finding, ProgressEvent, Result, ReviewMetadata } from "@dcl-regenesislabs/wearable-validator";
+import { runLoadMessage } from "./run-list.js";
 
 export interface VisualCapabilities {
   renderer: boolean;
@@ -72,10 +73,20 @@ export type RunEvent =
   | { type: "queue"; data: QueuePosition }
   | { type: "capture"; data: CaptureEvent }
   | { type: "review"; data: ReviewEvent }
-  | { type: "done"; data: { result?: WireResult; skipped?: boolean; message?: string } }
-  | { type: "error"; data: { message: string } };
+  /** `zipUrl` is the kept upload (`/api/runs/<id>/input.zip`); runs older than the server that keeps it carry none. */
+  | { type: "done"; data: { result?: WireResult; skipped?: boolean; message?: string; zipUrl?: string } }
+  | { type: "error"; data: { message: string; zipUrl?: string } };
 
 export type CheckRow = CheckResult & { findings: Finding[] };
+
+/** One run as GET /api/runs/:id answers it; `owner` only when an operator asked. */
+export interface RunDetail {
+  id: string;
+  name: string;
+  done: boolean;
+  events: { id: number; type: RunEvent["type"]; data: unknown }[];
+  owner?: string;
+}
 
 export async function visualHealth(): Promise<VisualHealth | null> {
   try {
@@ -103,6 +114,20 @@ export async function listRuns(): Promise<RunSummary[]> {
   } catch {
     return [];
   }
+}
+
+/** A run by id, for the `?run=<id>` deep link. Throws a curator-facing sentence: unknown or another owner's run answers 404. */
+export async function getRun(id: string): Promise<RunDetail> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/runs/${encodeURIComponent(id)}`, { headers: { accept: "application/json" } });
+  } catch {
+    throw new Error(runLoadMessage(null));
+  }
+  if (!res.ok || !res.headers.get("content-type")?.includes("json")) throw new Error(runLoadMessage(res.ok ? null : res.status));
+  const body = (await res.json()) as Partial<RunDetail>;
+  if (typeof body.id !== "string" || typeof body.name !== "string") throw new Error(runLoadMessage(null));
+  return { id: body.id, name: body.name, done: body.done === true, events: body.events ?? [], ...(body.owner ? { owner: body.owner } : {}) };
 }
 
 /** `model: false` renders only; `standalone` asks the model even though the code checks failed. */

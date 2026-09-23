@@ -12,7 +12,7 @@ const verifier: AccessVerifier = {
   verify: async (token) => (token === "good-token" ? { email: "curator@example.com", sub: "user-1" } : token === "bot-token" ? { serviceName: "slack-bot", sub: "" } : undefined)
 };
 
-const curator = { owner: "curator@example.com", kind: "access", operator: false, readOnly: false };
+const curator = { owner: "curator@example.com", kind: "access", operator: true, readOnly: false };
 
 describe("identity providers", () => {
   it("localIdentity names every caller the same owner", async () => {
@@ -29,12 +29,10 @@ describe("identity providers", () => {
     assert.equal(await identify(request({ "cf-access-jwt-assertion": "bad-token" })), undefined);
   });
 
-  it("service tokens are read-only operators, listed emails are operators, other people are not", async () => {
-    const identify = accessIdentity(verifier, [" Lead@Example.com ", ""]);
+  it("service tokens are read-only operators; every person Access lets in is an operator who can still write", async () => {
+    const identify = accessIdentity(verifier);
     assert.deepEqual(await identify(request({ "cf-access-jwt-assertion": "bot-token" })), { owner: "service:slack-bot", kind: "service", operator: true, readOnly: true });
     assert.deepEqual(await identify(request({ "cf-access-jwt-assertion": "good-token" })), curator);
-    const lead: AccessVerifier = { verify: async () => ({ email: "lead@example.com", sub: "u" }) };
-    assert.deepEqual(await accessIdentity(lead, ["lead@example.com"])(request({ "cf-access-jwt-assertion": "x" })), { owner: "lead@example.com", kind: "access", operator: true, readOnly: false });
   });
 
   it("the header wins over the cookie, even when only the cookie would verify", async () => {
@@ -83,8 +81,8 @@ describe("choosing the provider from the configuration", () => {
     assert.throws(() => chooseIdentity({ host: "127.0.0.1", teamDomain: "team", insecureAnonymous: false }), /both CF_ACCESS_TEAM_DOMAIN/);
   });
 
-  it("names Cloudflare Access with its operators, and the operator token on top of any provider", async () => {
-    assert.equal(chooseIdentity({ host: "0.0.0.0", teamDomain: "team", audience: "aud", operators: "a@example.com, b@example.com", insecureAnonymous: false }).kind, "cloudflare-access (team, 2 operators)");
+  it("names Cloudflare Access, and the operator token on top of any provider", async () => {
+    assert.equal(chooseIdentity({ host: "0.0.0.0", teamDomain: "team", audience: "aud", insecureAnonymous: false }).kind, "cloudflare-access (team)");
     const withBot = chooseIdentity({ host: "127.0.0.1", operatorToken: secret, insecureAnonymous: false });
     assert.equal(withBot.kind, "local + operator token");
     assert.deepEqual(await withBot.identify(request({ authorization: `Bearer ${secret}` })), { owner: "service:bot", kind: "service", operator: true, readOnly: true });

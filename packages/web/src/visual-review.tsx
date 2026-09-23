@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { checks as checkRegistry, docsUrl, sourceLinks, type CheckResult, type CheckStatus, type Finding, type Result } from "@dcl-regenesislabs/wearable-validator";
-import { cancelRun, followRun, listRuns, queueState, startRun, visualHealth, type CaptureEvent, type CheckRow, type QueuePosition, type QueueState, type ReviewEvent, type RunEvent, type RunSummary, type VisualCapabilities, type WireResult } from "./api.js";
-import { runChip } from "./run-list.js";
+import { cancelRun, followRun, getRun, listRuns, queueState, startRun, visualHealth, type CaptureEvent, type CheckRow, type QueuePosition, type QueueState, type ReviewEvent, type RunEvent, type RunSummary, type VisualCapabilities, type WireResult } from "./api.js";
+import { runChip, runIdFrom, runUrl } from "./run-list.js";
 
 /**
  * Live view of a visual review: the run server renders the item, streams every screenshot as it lands, asks the
@@ -23,6 +23,16 @@ interface RunState {
   result?: WireResult;
   message?: string;
   queue?: QueuePosition;
+  /** The kept upload, once the run is done; absent on runs older than the server that keeps it. */
+  zipUrl?: string;
+}
+
+/** A run opened on top of the panel: from the list (startedAt known) or from a `?run=<id>` link (owner known to operators). */
+interface OpenedRun {
+  id: string;
+  name: string;
+  startedAt?: number;
+  owner?: string;
 }
 
 const EMPTY: RunState = { phase: "idle", stage: "", captures: [], reviews: {}, rows: new Map() };
@@ -106,10 +116,10 @@ function reduce(state: RunState, event: RunEvent): RunState {
       const replayed = (event.data.result?.captures ?? [])
         .filter(({ request }) => !known.has(request.id))
         .map(({ request, sha256, url }): CaptureEvent => ({ id: request.id, request, sha256, url }));
-      return { ...state, phase: "done", stage: event.data.message ?? "Finished", captures: [...state.captures, ...replayed], result: event.data.result, message: event.data.message };
+      return { ...state, phase: "done", stage: event.data.message ?? "Finished", captures: [...state.captures, ...replayed], result: event.data.result, message: event.data.message, zipUrl: event.data.zipUrl };
     }
     case "error":
-      return { ...state, phase: "failed", stage: event.data.message, message: event.data.message };
+      return { ...state, phase: "failed", stage: event.data.message, message: event.data.message, zipUrl: event.data.zipUrl };
   }
 }
 
@@ -280,8 +290,8 @@ function RunView({ state, modelKnown, onCancel, onRunAgain }: { state: RunState;
   );
 }
 
-/** An earlier run opened from the list, on top of whatever is running: its stream replays every event, nothing is uploaded. */
-function RunModal({ run, modelKnown, onClose }: { run: RunSummary; modelKnown: boolean; onClose: () => void }) {
+/** An earlier run opened from the list or a link, on top of whatever is running: its stream replays every event, nothing is uploaded. */
+function RunModal({ run, modelKnown, onClose }: { run: OpenedRun; modelKnown: boolean; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [state, setState] = useState<RunState>({ ...EMPTY, phase: "starting", id: run.id, stage: `Loading ${run.name}` });
   useEffect(() => {
@@ -293,21 +303,27 @@ function RunModal({ run, modelKnown, onClose }: { run: RunSummary; modelKnown: b
     <dialog ref={dialog} className="visual-modal" onClose={onClose} onClick={(e) => e.target === dialog.current && onClose()}>
       <div className="visual-modal-head">
         <span className="visual-modal-title">{run.name}</span>
-        <span className="visual-modal-time">{new Date(run.startedAt).toLocaleString("en")}</span>
-        <button className="visual-cancel" onClick={onClose}>Close</button>
+        {run.startedAt !== undefined && run.startedAt > 0 && <span className="visual-modal-time">{new Date(run.startedAt).toLocaleString("en")}</span>}
+        {run.owner && <span className="visual-modal-owner">Sent by {run.owner}</span>}
+        <span className="visual-modal-actions">
+          {state.zipUrl && <a className="visual-cancel" href={state.zipUrl} download>Download zip</a>}
+          <button className="visual-cancel" onClick={onClose}>Close</button>
+        </span>
       </div>
       <RunView state={state} modelKnown={modelKnown} onCancel={() => void cancelRun(run.id)} />
     </dialog>
   );
 }
 
-export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; name: string; codeResult: Result | null }) {
+/** `openRunId` is the `?run=<id>` of the page URL (the app reads it on load and on back/forward); the run opens on top. */
+export function VisualReview({ bytes, name, codeResult, openRunId = null }: { bytes?: Uint8Array; name: string; codeResult: Result | null; openRunId?: string | null }) {
   const [capabilities, setCapabilities] = useState<VisualCapabilities | null>(null);
   const [owner, setOwner] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [state, setState] = useState<RunState>(EMPTY);
-  const [opened, setOpened] = useState<RunSummary | null>(null);
+  const [opened, setOpened] = useState<OpenedRun | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
   const stop = useRef<(() => void) | null>(null);
 
   const refreshRuns = useCallback(() => {
@@ -386,8 +402,54 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
   /** Another run opens on top; the one on screen keeps streaming underneath. The run on screen itself is not reopened. */
   const follow = useCallback((run: RunSummary) => {
     if (bytes && run.id === state.id) return;
+    // every opened run has a shareable URL; the entry is ours, so closing goes back to the page as it was
+    if (runIdFrom(location.search) !== run.id) history.pushState({ run: run.id }, "", runUrl(run.id));
+    setOpenError(null);
     setOpened(run);
   }, [bytes, state.id]);
+
+  /** Closing restores the URL: back over the entry `follow` pushed, else (a link opened in a fresh tab) the plain page. */
+  const close = useCallback(() => {
+    setOpened(null);
+    setOpenError(null);
+    if (runIdFrom(location.search) === null) return;
+    const pushed = history.state as { run?: string } | null;
+    if (pushed?.run && pushed.run === runIdFrom(location.search)) history.back();
+    else {
+      history.replaceState({}, "", location.pathname);
+      // the app re-reads `?run=` on popstate, so a rewritten URL is announced the same way the back button is
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }
+  }, []);
+
+  // a `?run=<id>` link: load the run's name (and its owner, for operators) and open it; the list may not hold it
+  useEffect(() => {
+    if (!openRunId) {
+      setOpened(null);
+      setOpenError(null);
+      return;
+    }
+    let alive = true;
+    setOpenError(null);
+    void getRun(openRunId).then(
+      (run) => alive && setOpened({ id: run.id, name: run.name, ...(run.owner ? { owner: run.owner } : {}) }),
+      (error: unknown) => alive && setOpenError(error instanceof Error ? error.message : "This run could not be opened.")
+    );
+    return () => {
+      alive = false;
+    };
+  }, [openRunId]);
+
+  // Back over the entry `follow` pushed: the app's `?run=` stays null, so the modal itself has to hear the URL change
+  useEffect(() => {
+    const onPop = () => {
+      if (runIdFrom(location.search) !== null) return;
+      setOpened(null);
+      setOpenError(null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   // the list is a mirror of the server: re-read it whenever our run changes state (queued, running, done, failed)
   const phase = state.phase;
@@ -407,7 +469,8 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
   }, [serverKnown, bytes, codeResult]);
 
   if (!capabilities) return null;
-  if (!bytes && runs.length === 0 && !(queue && (queue.running.length > 0 || queue.waiting.length > 0))) return null;
+  const requested = Boolean(openRunId || opened || openError);
+  if (!bytes && !requested && runs.length === 0 && !(queue && (queue.running.length > 0 || queue.waiting.length > 0))) return null;
   const rows: CheckResult[] = (state.result?.checks ?? [...state.rows.values()]).filter((row) => checkRegistry[row.check]?.group === "rendering");
   const passed = rows.filter((row) => row.status === "passed").length;
   const modelKnown = capabilities.reviewer === "pi";
@@ -422,6 +485,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
           {owner && owner !== "local" ? ` · Signed in as ${owner}` : ""}
         </span>
       </div>
+      {openError && <p className="visual-open-error" role="alert">{openError}</p>}
       {queue && (queue.running.length > 0 || queue.waiting.length > 0) && (
         <div className="visual-queue" aria-label="Server activity">
           <span className="visual-queue-head">Rendering now</span>
@@ -488,7 +552,7 @@ export function VisualReview({ bytes, name, codeResult }: { bytes?: Uint8Array; 
 
       </div>}
       {bytes && <RunView state={state} modelKnown={modelKnown} onCancel={state.id ? () => void cancelRun(state.id!) : undefined} onRunAgain={() => void start()} />}
-      {opened && <RunModal run={opened} modelKnown={modelKnown} onClose={() => setOpened(null)} />}
+      {opened && <RunModal run={{ ...opened, startedAt: opened.startedAt ?? runs.find((run) => run.id === opened.id)?.startedAt }} modelKnown={modelKnown} onClose={close} />}
     </section>
   );
 }

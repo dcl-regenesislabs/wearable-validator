@@ -3,7 +3,7 @@
 - **Web** — wearable-validator.dclregenesislabs.xyz, Cloudflare Workers (`wrangler.jsonc`), behind Cloudflare Access: curators sign in with their email, then the site runs the code checks in the browser and the visual review through the run server.
 - **Worker** — `packages/web/worker.ts` forwards `/api/*` to `API_ORIGIN` = api.wearable-validator.dclregenesislabs.xyz, headers and streamed body intact (SSE included).
 - **Backend** — one container (the root `Dockerfile`) on DigitalOcean App Platform, proxied through Cloudflare.
-- **Identity** — the server verifies the Access JWT the Worker forwards (`packages/server/src/adapters/access.ts`); every run belongs to the email that started it, and the API only ever shows a caller their own runs. Service tokens (the Slack bot) and the emails in `OPERATORS` see everything; service tokens change nothing (`POST`/`DELETE` answer 403).
+- **Identity** — the server verifies the Access JWT the Worker forwards (`packages/server/src/adapters/access.ts`); every run belongs to the email that started it. Access itself is the allow-list, so everyone it lets in is a curator: an operator who sees every run, the stats and the log. Service tokens (the Slack bot) see everything too but change nothing (`POST`/`DELETE` answer 403).
 - **Which build is running** — the Docker build reads the commit from the checkout's `.git/HEAD` into `packages/server/build-info.json`; `/api/health` and `/api/stats` answer `build: { version, commit, builtAt, startedAt }`, the startup log line carries the same, and the Slack bot's `stats` question reports it.
 - **Self-test** — at startup the server checks the two things a render depends on and says so in the log: the hosts it must reach (`cdn.decentraland.org` for the pinned wrapper, `peer.decentraland.org` for the avatar the previewer loads) and whether Chromium gets a WebGPU device in this container. A render that hangs with an idle CPU is one of those two; `RENDERER_SELF_TEST=0` skips it.
 - **Logs** — one JSON line per event on stdout: every API request (caller, status, ms), each run's gate, queue, captures, model calls and result, and the browser's own story (launch, previewer load or failure with the last wrapper messages, page crashes, console errors, retried views). Operators can read the recent lines through `GET /api/logs`. Refused requests (bad Host, no sign-in, 403) are counted in the `refused_requests_total` metric and printed at debug level with the Host hashed; they never enter that log. `GET /metrics` serves the Prometheus registry (HTTP defaults, `runs_accepted_total`, `runs_finished_total{status}`, `render_duration_seconds`, `refused_requests_total{reason}`) on the server itself, outside the Host and sign-in checks: set `WKC_METRICS_BEARER_TOKEN` before exposing the port.
@@ -83,6 +83,25 @@ Check from a terminal: `curl -s -H "Authorization: Bearer <token>" https://api.w
 
 The token is read-only: it never starts or cancels a run (403), and `/api/health` reports `owner: null` for it. Operator endpoints, all JSON: `GET /api/stats` (totals, by day, by curator, average render time, queue), `GET /api/runs?all=1` (every run with its owner), `GET /api/runs/<id>` for any run, `GET /api/logs?limit=200&since=<ISO time>` (the server's recent log lines, kept in memory since the last restart). Rotating the secret is changing the two variables. Cloudflare Access service tokens (a "Service Auth" policy on the application) are also accepted as operators, for a caller that should not hold a shared secret.
 
+### 5b. Slack notifications
+
+Every finished run posts one message to the curators' channel: who sent it, the item's thumbnail, the verdict, whether a curator is needed (ready to approve / needs a curator / blocked, with the reasons), the first findings, an **Open run** button to `/?run=<id>` on the site (Cloudflare Access still gates it by email) and, in a thread, the two worn front views. Cancelled runs post nothing; a failed post is one `slack notification failed` warning in the log, the run itself is never affected.
+
+1. [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → From scratch, in the workspace.
+2. **OAuth & Permissions** → Bot Token Scopes: add `chat:write` and `files:write`.
+3. **Install to Workspace**, then copy the **Bot User OAuth Token** (`xoxb-…`).
+4. In the curators' channel: `/invite @<app name>`.
+5. Channel details (click the channel name) → copy the **Channel ID** at the bottom (`C…`).
+6. Set the three variables in `deploy/.env` and restart: `docker compose -f deploy/docker-compose.yml up -d`.
+
+| Variable | Value |
+| --- | --- |
+| `SLACK_BOT_TOKEN` | the Bot User OAuth Token; unset disables notifications (one info line at startup) |
+| `SLACK_CHANNEL` | the channel id (`C…` / `G…`); required with the token |
+| `SITE_URL` | the public site, `https://wearable-validator.dclregenesislabs.xyz`; unset makes the button link relative, with a startup warning |
+
+The thumbnail and the views are uploaded privately to the app (`files.getUploadURLExternal` → upload → `files.completeUploadExternal` without a channel) and shown through `slack_file` blocks; if Slack refuses that block the message is posted again without the picture. Slack's error codes are translated in the log: `not_in_channel` → invite the app, `channel_not_found` → wrong id, `invalid_auth` → wrong token, `missing_scope` → add the two scopes.
+
 ### 6. Smoke test
 
 1. Two curators sign in at wearable-validator.dclregenesislabs.xyz (Access login). The Visual review panel header says **Signed in as <email>**.
@@ -108,5 +127,5 @@ Leave the token out and the server renders and writes the prompt without calling
 ## What is not done yet
 
 - ADR-44 signed fetch identity for the Builder (owner = wallet address). The seam is `packages/server/src/adapters/identity.ts` (`Identify`); `localIdentity` and `accessIdentity` are the two providers today.
-- Run retention: nothing deletes old run folders, and the App Platform disk forgets them on every deploy.
+- Run retention: nothing deletes old run folders, and since the Slack notifications every folder also keeps the upload itself (`input.zip`, served at `/api/runs/<id>/input.zip` to the owner and operators as the site's **Download zip**): budget the volume for the zips as well as the captures.
 - A daily spend cap on model calls.
