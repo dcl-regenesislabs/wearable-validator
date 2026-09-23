@@ -6,6 +6,7 @@ import { STATE_WORD, stepAnnouncement, type Step, type StepState } from "./progr
 
 const MARK: Record<StepState, ReactNode> = {
   done: "✓",
+  warning: "!",
   active: <Spinner size="sm" decorative />,
   todo: "·",
   skipped: "–",

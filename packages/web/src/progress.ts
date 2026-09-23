@@ -19,7 +19,7 @@ export const CODE_GROUPS: Group[] = ["files", "model", "emote", "content"];
 /** Every group the results page lists, the visual one last. */
 export const GROUP_ORDER: Group[] = [...CODE_GROUPS, "rendering"];
 
-export type StepState = "todo" | "active" | "done" | "skipped" | "failed";
+export type StepState = "todo" | "active" | "done" | "warning" | "skipped" | "failed";
 
 export interface Step {
   key: string;
@@ -30,6 +30,7 @@ export interface Step {
 
 export const STATE_WORD: Record<StepState, string> = {
   done: "done",
+  warning: "needs attention",
   active: "in progress",
   todo: "not started",
   skipped: "not applicable",
@@ -285,7 +286,7 @@ const PHASE_RANK: Record<VisualPhase, number> = { idle: -1, uploading: 0, gate: 
 const STEP_KEYS = ["upload", "gate", "queue", "render", "review", "verdict"] as const;
 const STEP_LABELS: Record<(typeof STEP_KEYS)[number], string> = {
   upload: "Uploading",
-  gate: "Code checks on the server",
+  gate: "Code checks re-run on the server",
   queue: "In line",
   render: "Rendering",
   review: "Asking the model",
@@ -309,7 +310,13 @@ export function visualStepsOf(state: VisualState, aiChecks: string[]): Step[] {
 
   const gate: Step = { key: "gate", label: STEP_LABELS.gate, state: stateAt(1) };
   if (gate.state === "active") gate.detail = state.gateCurrent ? `Checking ${checkTitle(state.gateCurrent)}${state.gateChecks > 0 ? ` · ${state.gateChecks} done` : ""}` : "Starting";
-  else if (gate.state === "done") gate.detail = state.gate ? (state.gate.passed === true ? "Passed" : state.gate.passed === false ? "Did not pass" : count(state.gateChecks, "check")) : state.gateChecks > 0 ? count(state.gateChecks, "check") : undefined;
+  else if (gate.state === "done") {
+    // a green check beside "did not pass" reads as a contradiction: the item went on only because the creator asked
+    if (state.gate?.passed === false) {
+      gate.state = "warning";
+      gate.detail = `Did not pass · ${count(state.gate.summary.errors, "error")} · rendered anyway`;
+    } else gate.detail = state.gate ? (state.gate.passed === true ? "Passed" : count(state.gateChecks, "check")) : state.gateChecks > 0 ? count(state.gateChecks, "check") : undefined;
+  }
 
   const queue: Step = { key: "queue", label: STEP_LABELS.queue, state: stateAt(2) };
   if (queue.state === "active" && state.queue) {
@@ -327,7 +334,11 @@ export function visualStepsOf(state: VisualState, aiChecks: string[]): Step[] {
   else if (review.state === "done") review.detail = answered > 0 ? count(answered, "answer") : askedCount > 0 ? `${count(askedCount, "check")} asked · no answer` : "Model not asked";
 
   const verdict: Step = { key: "verdict", label: STEP_LABELS.verdict, state: stateAt(5) };
-  if (verdict.state === "done") verdict.detail = verdictWord(visualVerdict(rows));
+  if (verdict.state === "done") {
+    const passed = visualVerdict(rows);
+    verdict.detail = verdictWord(passed);
+    if (passed !== true) verdict.state = "warning";
+  }
 
   const upload: Step = { key: "upload", label: state.reference ? FETCH_LABEL : STEP_LABELS.upload, state: stateAt(0) };
   const { done: fetchedDone, total: fetchedTotal } = state.fetched ?? {};

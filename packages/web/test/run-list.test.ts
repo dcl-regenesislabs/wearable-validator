@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { historyRow, isModifiedClick, routeFrom, routeUrl, runChip, runIdFrom, runLoadMessage, runUrl, tabFrom, waitText } from "../src/run-list.js";
+import { captionFor } from "../src/run-view.js";
 
 const run = (done: boolean, passed: boolean | null) => ({ id: "r", name: "item.zip", startedAt: 0, done, passed });
 
@@ -105,5 +106,13 @@ describe("run deep link", () => {
     assert.equal(runLoadMessage(401), "Sign in to open this run.");
     assert.match(runLoadMessage(null), /not reachable/);
     assert.match(runLoadMessage(503), /503/);
+  });
+});
+
+describe("capture captions", () => {
+  it("names the green skin of a motion-pass frame so the colour reads as intended", () => {
+    const request = { id: "x", key: "x", inputDigest: "d", rendererBuild: "b", recipeVersion: 1, bodyShape: "urn:decentraland:off-chain:base-avatars:BaseMale", mainFile: "m.glb", view: "avatar" as const, azimuthDegrees: 0, size: 512 };
+    assert.equal(captionFor({ id: "x", request, sha256: "s", url: "/x" }), "BaseMale · avatar · 0°");
+    assert.equal(captionFor({ id: "y", request: { ...request, pose: "dab", timeFraction: 0.5, skin: "00ff00" }, sha256: "s", url: "/y" }), "BaseMale · avatar · dab · 0° · t=0.5 · green skin");
   });
 });
