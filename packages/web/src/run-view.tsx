@@ -32,7 +32,9 @@ export function captionFor(capture: CaptureEvent): string {
   const shape = request.bodyShape.split(":").pop() ?? request.bodyShape;
   const time = request.timeFraction === undefined ? "" : ` · t=${request.timeFraction}`;
   const pose = request.pose ? ` · ${request.pose}` : "";
-  return `${shape} · ${request.view}${pose} · ${request.azimuthDegrees}°${time}`;
+  // the motion pass paints the skin chroma green so clipping shows; say so, or the colour reads as a rendering fault
+  const skin = request.skin ? " · green skin" : "";
+  return `${shape} · ${request.view}${pose} · ${request.azimuthDegrees}°${time}${skin}`;
 }
 
 /** The "Your value" cell: what the item measures, or the model's one-word verdict with its finding count. */

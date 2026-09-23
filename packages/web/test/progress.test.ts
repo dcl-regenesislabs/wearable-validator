@@ -110,7 +110,7 @@ describe("code stepper", () => {
 
 describe("visual stepper", () => {
   it("has six steps with the fixed labels", () => {
-    assert.deepEqual(visualSteps([], AI_CHECKS).map((step) => step.label), ["Uploading", "Code checks on the server", "In line", "Rendering", "Asking the model", "Verdict"]);
+    assert.deepEqual(visualSteps([], AI_CHECKS).map((step) => step.label), ["Uploading", "Code checks re-run on the server", "In line", "Rendering", "Asking the model", "Verdict"]);
     assert.deepEqual(states(visualSteps([], AI_CHECKS)), ["todo", "todo", "todo", "todo", "todo", "todo"]);
   });
 
@@ -208,6 +208,17 @@ describe("visual stepper", () => {
     assert.equal(at(steps, "review").state, "done");
     assert.equal(at(steps, "review").detail, "2 checks asked · no answer");
     assert.equal(at(steps, "verdict").detail, "No verdict");
+    assert.equal(at(steps, "verdict").state, "warning", "a verdict other than Passed asks for attention, not a green check");
+  });
+
+  it("marks the server's code checks as needing attention when the item did not pass but was rendered anyway", () => {
+    const events = wearableRun(2);
+    const gate = events.find((event): event is Extract<VisualEvent, { type: "gate" }> => event.type === "gate")!;
+    const code = { ...gate.data.result, passed: false, summary: { ...gate.data.result.summary, errors: 2 } };
+    const steps = visualSteps(events.map((event) => (event === gate ? { type: "gate", data: { result: code, passed: false } } : event)), AI_CHECKS);
+    assert.equal(at(steps, "gate").state, "warning");
+    assert.equal(at(steps, "gate").detail, "Did not pass · 2 errors · rendered anyway");
+    assert.equal(at(steps, "render").state, "done", "the run went on past the gate");
   });
 
   it("stops at the gate: the gate step fails and nothing after it starts", () => {
@@ -299,7 +310,7 @@ describe("visual stepper", () => {
     const upto = (n: number) => stepAnnouncement(visualSteps(events.slice(0, n), AI_CHECKS));
     assert.equal(upto(0), "");
     assert.equal(upto(1), "Uploading in progress");
-    assert.equal(upto(2 + 3), "Code checks on the server in progress");
+    assert.equal(upto(2 + 3), "Code checks re-run on the server in progress");
     assert.equal(upto(2 + 9), upto(2 + 3));
     const rendering = 2 + WEARABLE_CODE.length + 5;
     assert.equal(upto(rendering), "Rendering in progress");

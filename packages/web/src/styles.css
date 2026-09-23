@@ -274,6 +274,8 @@ button, input, select { font-family: inherit; }
 .eui-publish-step.active { color: var(--text); font-weight: 600; }
 .eui-publish-step.done { color: var(--success); }
 .eui-publish-step.failed { color: var(--error-text); }
+.eui-publish-step.warning { color: var(--warning); }
+.eui-publish-step.warning .dt { color: var(--warning); }
 .eui-publish-step.skipped { color: var(--text-3); }
 .eui-publish-step .ic { width: 18px; display: inline-flex; justify-content: center; flex: none; }
 .eui-publish-step .lbl { min-width: 0; overflow-wrap: anywhere; }
