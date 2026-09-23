@@ -30,6 +30,8 @@ export interface RunInput {
   name: string;
   startedAt: number;
   sha256?: string;
+  /** The code gate's verdict: a standalone run keeps rendering after a failed gate, and the index must still list it as failed. */
+  gatePassed?: boolean | null;
 }
 
 /** result.json: the Result with capture bytes replaced by file paths inside the run folder. */
@@ -54,7 +56,7 @@ export async function readRunInput(dir: string): Promise<Partial<RunInput> | und
   if (!raw || typeof raw !== "object") return undefined;
   const value = raw as Record<string, unknown>;
   const str = (key: string): string | undefined => (typeof value[key] === "string" ? value[key] : undefined);
-  return { id: str("id"), owner: str("owner"), name: str("name"), startedAt: typeof value.startedAt === "number" ? value.startedAt : undefined, sha256: str("sha256") };
+  return { id: str("id"), owner: str("owner"), name: str("name"), startedAt: typeof value.startedAt === "number" ? value.startedAt : undefined, sha256: str("sha256"), gatePassed: typeof value.gatePassed === "boolean" ? value.gatePassed : undefined };
 }
 
 export async function readRunResult(dir: string): Promise<StoredResult | undefined> {
@@ -268,7 +270,7 @@ async function indexRunFolders(root: string, previous: Map<string, string>, inde
     }
     if (input.id && input.owner && !index.has(input.id)) {
       const result = await readRunResult(dir);
-      index.set(input.id, { id: input.id, owner: input.owner, name: input.name ?? entry, dir, startedAt: input.startedAt ?? 0, done: true, passed: result ? verdict(result) : null, rendered: input.sha256 !== undefined });
+      index.set(input.id, { id: input.id, owner: input.owner, name: input.name ?? entry, dir, startedAt: input.startedAt ?? 0, done: true, passed: result ? (input.gatePassed === false ? false : verdict(result)) : null, rendered: input.sha256 !== undefined });
     }
   }
   for (const item of reusable.sort((a, b) => a.mtime - b.mtime)) if (!previous.has(item.sha256)) previous.set(item.sha256, item.dir);

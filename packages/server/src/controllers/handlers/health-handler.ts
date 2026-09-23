@@ -5,6 +5,7 @@ import type { HandlerContextWithPath } from "../../types.js";
 export async function healthHandler(context: Pick<HandlerContextWithPath<"identity" | "renderer" | "reviewer" | "runs" | "buildInfo", "/api/health">, "components" | "request">) {
   const { identity, renderer, reviewer, runs, buildInfo } = context.components;
   const caller = await identity.identify(context.request).catch(() => undefined);
+  const person = caller && caller.kind !== "service" ? caller : undefined;
   return {
     status: 200,
     body: {
@@ -14,7 +15,8 @@ export async function healthHandler(context: Pick<HandlerContextWithPath<"identi
       rulesVersion: manifest.version,
       build: { version: buildInfo.version, commit: buildInfo.commit, builtAt: buildInfo.builtAt, startedAt: buildInfo.startedAt },
       // a service token is not a person: the site never greets it, and a leaked token reveals no owner name here
-      owner: caller && caller.kind !== "service" ? caller.owner : null
+      owner: person ? person.owner : null,
+      operator: person?.operator ?? false
     }
   };
 }

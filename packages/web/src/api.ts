@@ -15,6 +15,8 @@ export interface VisualHealth {
   checks: string[];
   /** Who the server thinks is calling: "local" without sign-in, an email behind Cloudflare Access. */
   owner: string | null;
+  /** Sees every curator's runs (GET /api/runs?all=1); false on servers that do not say. */
+  operator: boolean;
 }
 
 /** One of the caller's runs, as GET /api/runs lists them. */
@@ -25,6 +27,8 @@ export interface RunSummary {
   done: boolean;
   passed: boolean | null;
   queued?: boolean;
+  /** Who sent it — only when an operator listed everyone's runs. */
+  owner?: string;
 }
 
 /** What a waiting run is told as the line moves; position 0 means it is running. */
@@ -69,7 +73,8 @@ export type WireResult = Omit<Result, "captures"> & { captures: (Omit<CaptureRec
 export type RunEvent =
   | { type: "check"; data: ProgressEvent }
   | { type: "gate"; data: { result: Result; passed: boolean | null } }
-  | { type: "stage"; data: { text: string } }
+  /** `views` is the planned capture count and `bodyShapes` the shapes rendered; older servers send the text alone. */
+  | { type: "stage"; data: { text: string; views?: number; bodyShapes?: string[] } }
   | { type: "queue"; data: QueuePosition }
   | { type: "capture"; data: CaptureEvent }
   | { type: "review"; data: ReviewEvent }
@@ -92,23 +97,28 @@ export async function visualHealth(): Promise<VisualHealth | null> {
   try {
     const res = await fetch("/api/health", { headers: { accept: "application/json" } });
     if (!res.ok || !res.headers.get("content-type")?.includes("json")) return null;
-    const body = (await res.json()) as { visual: VisualCapabilities; checks: string[]; owner?: string | null };
-    return { visual: body.visual, checks: body.checks, owner: body.owner ?? null };
+    const body = (await res.json()) as { visual: VisualCapabilities; checks: string[]; owner?: string | null; operator?: boolean };
+    return { visual: body.visual, checks: body.checks, owner: body.owner ?? null, operator: body.operator === true };
   } catch {
     return null;
   }
 }
 
-/** The caller's runs, newest first. Fails soft: no server, not signed in, or an older server without the route → []. */
-export async function listRuns(): Promise<RunSummary[]> {
+/**
+ * Runs, newest first. `all` asks for every curator's runs (operators get an `owner` per run); a 403 falls back to the
+ * caller's own. Fails soft: no server, not signed in, or an older server without the route → [].
+ */
+export async function listRuns(options: { all?: boolean } = {}): Promise<RunSummary[]> {
   try {
-    const res = await fetch("/api/runs", { headers: { accept: "application/json" } });
+    const headers = { accept: "application/json" };
+    let res = await fetch(options.all ? "/api/runs?all=1" : "/api/runs", { headers });
+    if (res.status === 403 && options.all) res = await fetch("/api/runs", { headers });
     if (!res.ok || !res.headers.get("content-type")?.includes("json")) return [];
-    const body = (await res.json()) as { runs?: { id: string; name: string; startedAt: number | string; done: boolean; passed: boolean | null }[] };
+    const body = (await res.json()) as { runs?: { id: string; name: string; startedAt: number | string; done: boolean; passed: boolean | null; queued?: boolean; owner?: unknown }[] };
     return (body.runs ?? [])
-      .map((run) => {
+      .map(({ owner, ...run }) => {
         const startedAt = new Date(run.startedAt).getTime();
-        return { ...run, startedAt: Number.isFinite(startedAt) ? startedAt : 0 };
+        return { ...run, startedAt: Number.isFinite(startedAt) ? startedAt : 0, ...(typeof owner === "string" && owner ? { owner } : {}) };
       })
       .sort((a, b) => b.startedAt - a.startedAt);
   } catch {
@@ -152,8 +162,10 @@ export function followRun(id: string, onEvent: (event: RunEvent) => void): () =>
   let received = false;
   for (const type of EVENT_TYPES) {
     source.addEventListener(type, (raw) => {
+      // the native `error` Event shares a name with the server's `error` message; only messages carry data
+      if (!(raw instanceof MessageEvent) || typeof raw.data !== "string") return;
       received = true;
-      const event = { type, data: JSON.parse((raw as MessageEvent<string>).data) } as RunEvent;
+      const event = { type, data: JSON.parse(raw.data) } as RunEvent;
       onEvent(event);
       if (type === "done" || type === "error") source.close();
     });
