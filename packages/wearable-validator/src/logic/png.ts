@@ -91,8 +91,13 @@ export function boundedPng(bytes: Uint8Array, maxPixels: number): Uint8Array | u
     inflated += chunk instanceof ArrayBuffer ? chunk.byteLength : chunk.length;
     if (inflated > expected) throw new Error("PNG pixel data exceeds its declared dimensions.");
   };
-  for (let i = 0; i < data.length; i++) {
-    if (!inflater.push(data[i].data, i === data.length - 1)) return undefined;
+  // the throw is how an inflate is stopped mid-chunk; like every other bad stream it comes out as undefined
+  try {
+    for (let i = 0; i < data.length; i++) {
+      if (!inflater.push(data[i].data, i === data.length - 1)) return undefined;
+    }
+  } catch {
+    return undefined;
   }
   if (inflater.err || inflated !== expected) return undefined;
 

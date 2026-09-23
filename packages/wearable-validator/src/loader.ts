@@ -13,6 +13,11 @@ export interface LoadedInput {
   fatal?: Finding[];
 }
 
+/** A bound of the manifest's fileSize block was crossed: the caller shows these; any other failure is a damaged or foreign file. */
+export class InputLimitError extends Error {}
+
+export const inputTooLarge = (bytes: number, maxBytes = manifest.fileSize.maxInputBytes): string => `Input is ${mb(bytes)} MB — the maximum accepted input is ${mb(maxBytes)} MB.`;
+
 function fileFormatFinding(message: string, data?: Finding["data"]): Finding {
   return { check: "file-format", group: "files", severity: "error", message, data, rule: "S-01", docs: `${WEARABLES}#building-3d-models-for-wearables` };
 }
@@ -22,7 +27,7 @@ export async function loadInput(input: Input, options: Options): Promise<LoadedI
 
   if (input instanceof Uint8Array) {
     if (input.length > maxBytes) {
-      return { fatal: [fileFormatFinding(`Input is ${mb(input.length)} MB — the maximum accepted input is ${mb(maxBytes)} MB.`, { measuredBytes: input.length })] };
+      return { fatal: [fileFormatFinding(inputTooLarge(input.length, maxBytes), { measuredBytes: input.length })] };
     }
     if (input.length >= 4 && input[0] === 0x50 && input[1] === 0x4b && input[2] === 0x03 && input[3] === 0x04) {
       return loadZip(input, options);
@@ -41,7 +46,15 @@ export async function loadInput(input: Input, options: Options): Promise<LoadedI
 }
 
 async function loadZip(bytes: Uint8Array, options: Options): Promise<LoadedInput> {
-  const { files, emptyFiles } = await unpackZip(bytes, options.maxInputBytes);
+  let unpacked: UnpackedZip;
+  try {
+    unpacked = await unpackZip(bytes, options.maxInputBytes);
+  } catch (error) {
+    // a crossed limit is the caller's to refuse; a zip that will not open is a finding, like any other unreadable input
+    if (error instanceof InputLimitError || !(error instanceof Error)) throw error;
+    return { fatal: [fileFormatFinding(error.message)] };
+  }
+  const { files, emptyFiles } = unpacked;
   if (files.has("asset.json")) {
     return { fatal: [fileFormatFinding("Legacy asset.json zips are not supported — export the item from the Builder (wearable.json / emote.json) instead.")] };
   }
@@ -55,12 +68,18 @@ export interface UnpackedZip {
 
 /** Bounded extraction for validation, metadata display and previews; throws on unsafe or malformed archives. */
 export async function unpackZip(bytes: Uint8Array, maxInputBytes = manifest.fileSize.maxInputBytes): Promise<UnpackedZip> {
-  if (bytes.length > maxInputBytes) throw new Error(`Input is ${mb(bytes.length)} MB — the maximum accepted input is ${mb(maxInputBytes)} MB.`);
+  if (bytes.length > maxInputBytes) throw new InputLimitError(inputTooLarge(bytes.length, maxInputBytes));
   const { maxEntries } = manifest.fileSize;
   // the end-of-central-directory record says how many entries JSZip would parse: a zip that declares too many never gets parsed
   const declaredEntries = declaredEntryCount(bytes);
   if (declaredEntries !== undefined && declaredEntries > maxEntries) throw tooManyEntries(declaredEntries);
-  const zip = await JSZip.loadAsync(bytes);
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(bytes);
+  } catch {
+    // JSZip's own sentence ("Can't find end of central directory…") is for its users, not for creators
+    throw new Error("The zip cannot be opened — it is damaged or not really a zip. Export the item again from the Builder.");
+  }
   const all = Object.values(zip.files);
   if (all.length > maxEntries) throw tooManyEntries(all.length);
   const entries = all.filter((entry) => !entry.dir);
@@ -91,7 +110,7 @@ export async function unpackZip(bytes: Uint8Array, maxInputBytes = manifest.file
 }
 
 const tooManyEntries = (count: number): Error =>
-  new Error(`The zip holds ${count} entries — the maximum is ${manifest.fileSize.maxEntries}. Remove files and folders that are not part of the item.`);
+  new InputLimitError(`The zip holds ${count} entries — the maximum is ${manifest.fileSize.maxEntries}. Remove files and folders that are not part of the item.`);
 
 const EOCD = 0x06054b50;
 const ZIP64_EOCD_LOCATOR = 0x07064b50;
@@ -123,12 +142,12 @@ function checkDeclaredSizes(entries: JSZip.JSZipObject[]): void {
     const size = declaredSize(entry);
     if (size === undefined) continue;
     if (size > maxEntryUncompressedBytes) {
-      throw new Error(`"${normalizePath(entry.name)}" unpacks to ${mb(size)} MB — no file in the zip may unpack to more than ${mb(maxEntryUncompressedBytes)} MB.`);
+      throw new InputLimitError(`"${normalizePath(entry.name)}" unpacks to ${mb(size)} MB — no file in the zip may unpack to more than ${mb(maxEntryUncompressedBytes)} MB.`);
     }
     declared += size;
   }
   if (declared > maxUncompressedBytes) {
-    throw new Error(`The zip unpacks to ${mb(declared)} MB — the maximum is ${mb(maxUncompressedBytes)} MB. Remove files that are not part of the item.`);
+    throw new InputLimitError(`The zip unpacks to ${mb(declared)} MB — the maximum is ${mb(maxUncompressedBytes)} MB. Remove files that are not part of the item.`);
   }
 }
 
@@ -151,7 +170,7 @@ function isStreamingEntry(entry: unknown): entry is StreamingEntry {
 
 /** Inflates one entry chunk by chunk and stops the inflater the moment the running total passes `budget`, rejecting with `reason`. */
 export async function inflateEntry(entry: JSZip.JSZipObject, budget: number, reason: string): Promise<Uint8Array> {
-  const overBudget = () => new Error(reason);
+  const overBudget = () => new InputLimitError(reason);
   if (!isStreamingEntry(entry)) {
     const data = await entry.async("uint8array");
     if (data.length > budget) throw overBudget();

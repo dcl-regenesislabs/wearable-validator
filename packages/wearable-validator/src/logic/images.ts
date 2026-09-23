@@ -1,7 +1,7 @@
 /** Image dimensions and bounded pixel decoding shared by checks and adapters. */
 import { decode as decodePng } from "fast-png";
 import { manifest } from "../manifest/index.js";
-import { boundedPng, inspectPng } from "./png.js";
+import { boundedPng } from "./png.js";
 
 export function isPngBytes(bytes: Uint8Array): boolean {
   return bytes.length > 25 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
@@ -34,27 +34,45 @@ function jpegFrame(bytes: Uint8Array): { precision: number; width: number; heigh
   return undefined;
 }
 
-/**
- * Header dimensions of a PNG or JPEG, read the way the decoders read them; undefined for anything else and for a
- * header that cannot be read — which every decode path treats as "do not decode", never as "small enough".
- */
-export function imageDimensions(bytes: Uint8Array): ImageDimensions | undefined {
-  const dimensions = isPngBytes(bytes) ? inspectPng(bytes) : isJpegBytes(bytes) ? jpegFrame(bytes) : undefined;
-  return dimensions && dimensions.width > 0 && dimensions.height > 0 ? { width: dimensions.width, height: dimensions.height } : undefined;
+interface PngHeader {
+  width: number;
+  height: number;
+  colorType: number;
+}
+
+/** The IHDR fast-png reads: the first one, behind any ancillary chunks; nothing after it is looked at, so trailing bytes do not matter here. */
+function pngHeader(bytes: Uint8Array): PngHeader | undefined {
+  if (!isPngBytes(bytes)) return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 8;
+  while (offset + 8 <= bytes.length) {
+    const length = view.getUint32(offset);
+    const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+    if (type === "IHDR") {
+      if (length !== 13 || offset + 21 > bytes.length) return undefined;
+      const width = view.getUint32(offset + 8);
+      const height = view.getUint32(offset + 12);
+      return width > 0 && height > 0 ? { width, height, colorType: bytes[offset + 17] } : undefined;
+    }
+    // a critical chunk ahead of IHDR is not a PNG any decoder reads
+    if ((bytes[offset + 4] & 32) === 0) return undefined;
+    offset += 12 + length;
+  }
+  return undefined;
 }
 
 /**
- * Whether an image may be decoded to pixels: a readable header whose width × height is within the budget.
- * A decoded image costs at least 4 bytes per pixel, so a 12000×12000 PNG of a few hundred KB inflates past a gigabyte.
+ * Header dimensions of a PNG or JPEG, read the way the decoders read them; undefined for anything else and for a
+ * header that cannot be read. Only a header: whether the whole file decodes is decodePngSafe()'s question.
  */
-export function fitsDecodeBudget(bytes: Uint8Array, maxPixels = manifest.images.maxDecodePixels): boolean {
-  const dimensions = imageDimensions(bytes);
-  return dimensions !== undefined && dimensions.width * dimensions.height <= maxPixels;
+export function imageDimensions(bytes: Uint8Array): ImageDimensions | undefined {
+  const dimensions = isPngBytes(bytes) ? pngHeader(bytes) : isJpegBytes(bytes) ? jpegFrame(bytes) : undefined;
+  return dimensions && dimensions.width > 0 && dimensions.height > 0 ? { width: dimensions.width, height: dimensions.height } : undefined;
 }
 
 /** PNG alpha: IHDR color type 4 (gray+alpha) / 6 (RGBA), or palette (3) with a tRNS chunk. */
 export function pngHasAlpha(bytes: Uint8Array): boolean {
-  const colorType = bytes[25];
+  const colorType = pngHeader(bytes)?.colorType;
   if (colorType === 4 || colorType === 6) return true;
   if (colorType === 3) {
     for (let i = 8; i + 4 < bytes.length; i++) {

@@ -1,5 +1,5 @@
 /** M-03 Texture size — oversized or non-square textures blow the avatar's memory budget and mip poorly. */
-import { imageDimensions, isPngBytes, pngHasAlpha } from "../../../logic/images.js";
+import { imageDimensions, isJpegBytes, isPngBytes, pngHasAlpha } from "../../../logic/images.js";
 import { textureName } from "../../../logic/materials.js";
 import { wearableMaterialsOnly } from "../../../logic/wearable-only.js";
 import { finding, type CheckContext, type CheckDefinition, type CheckMeta, type Finding } from "../../../types.js";
@@ -34,6 +34,9 @@ function dimensionFindings(where: string, dims: { width: number; height: number 
   }
   return findings;
 }
+
+const unreadable = (where: string, path: string): Finding =>
+  finding(meta, "error", `${where} is a PNG or JPEG whose dimensions cannot be read — the file is damaged or truncated. Re-export the texture.`, { where: path });
 
 function textureSizes(ctx: CheckContext): [number, number][] {
   const sizes: [number, number][] = [];
@@ -71,7 +74,10 @@ export const textureSize: CheckDefinition = {
       for (const [path, bytes] of ctx.files) {
         if (skip.has(path) || !isPngBytes(bytes)) continue;
         const dims = imageDimensions(bytes);
-        if (!dims) continue;
+        if (!dims) {
+          findings.push(unreadable(`"${path}"`, path));
+          continue;
+        }
         findings.push(...dimensionFindings(`"${path}"`, dims, maxSize, true));
         if (!pngHasAlpha(bytes)) {
           findings.push(
@@ -87,9 +93,13 @@ export const textureSize: CheckDefinition = {
       model.doc.getRoot().listTextures().forEach((tex, i) => {
         const img = tex.getImage();
         if (!img) return;
-        const dims = imageDimensions(img);
-        if (!dims) return;
         const where = `"${model.mainFile}" › ${textureName(tex, i)}`;
+        const dims = imageDimensions(img);
+        // other formats are texture-format's finding; a PNG or JPEG whose header cannot be read is never "nothing to measure"
+        if (!dims) {
+          if (isPngBytes(img) || isJpegBytes(img)) findings.push(unreadable(where, model.mainFile));
+          return;
+        }
         findings.push(...dimensionFindings(where, dims, maxSize, facial));
       });
     }

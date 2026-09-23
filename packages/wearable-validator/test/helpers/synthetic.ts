@@ -65,7 +65,7 @@ export interface SyntheticOptions {
   prop?: SyntheticPropOptions;
   /** Add N extra materials/textures beyond the first. */
   extraMaterials?: number;
-  texture?: { size: number; nonSquare?: boolean };
+  texture?: { size: number; nonSquare?: boolean; bytes?: Uint8Array };
   /** Scale applied to the cube (bounding-box tests). */
   scale?: number;
   /** Name of the primary material (default "Wearable_MAT"). */
@@ -116,7 +116,7 @@ export async function syntheticGlb(options: SyntheticOptions = {}): Promise<Uint
   const material = doc.createMaterial(options.materialName ?? "Wearable_MAT");
   if (options.texture) {
     const size = options.texture.size;
-    const tex = doc.createTexture("tex0").setMimeType("image/png").setImage(pngBytes(size, options.texture.nonSquare ? size / 2 : size));
+    const tex = doc.createTexture("tex0").setMimeType("image/png").setImage(options.texture.bytes ?? pngBytes(size, options.texture.nonSquare ? size / 2 : size));
     material.setBaseColorTexture(tex);
   }
   let textureIndex = 1;

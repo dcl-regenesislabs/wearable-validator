@@ -14,6 +14,19 @@ describe("texture-size (M-03)", () => {
     assert.equal(findings[0].measured, "1024×1024");
   });
 
+  it("still measures a texture whose PNG carries trailing bytes, and errors on one whose header cannot be read", async () => {
+    const png = pngBytes(1024, 1024);
+    const trailing = new Uint8Array(png.length + 1);
+    trailing.set(png);
+    const result = await validate(await syntheticZip({ glb: await syntheticGlb({ texture: { size: 1024, bytes: trailing } }) }), { checks: ["texture-size"] });
+    assert.equal(found(result, "texture-size")[0]?.measured, "1024×1024");
+    const damaged = await validate(await syntheticZip({ glb: await syntheticGlb({ texture: { size: 8, bytes: png.subarray(0, 28) } }) }), { checks: ["texture-size"] });
+    const findings = found(damaged, "texture-size");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].severity, "error");
+    assert.match(findings[0].message, /cannot be read/);
+  });
+
   it("errors on non-square textures", async () => {
     const glb = await syntheticGlb({ texture: { size: 512, nonSquare: true } });
     const result = await validate(await syntheticZip({ glb }), { checks: ["texture-size"] });

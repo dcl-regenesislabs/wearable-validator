@@ -5,7 +5,7 @@ import { localIdentity } from "../src/adapters/identity.js";
 import { startTestServer } from "./components.js";
 
 it("does not expose the local operator API to another browser origin", async () => {
-  const server = await startTestServer({ env: { RENDERER_SELF_TEST: "0" }, identity: { kind: "local", identify: localIdentity() } });
+  const server = await startTestServer({ identity: { kind: "local", identify: localIdentity() } });
   try {
     const run = await server.components.runs.accept({ identity: { owner: "local", kind: "local", operator: true, readOnly: false }, name: "unreleased.zip", bytes: new Uint8Array([1]), model: false, standalone: false });
     for (const path of ["/api/health", "/api/runs", `/api/runs/${run.id}/input.json`, "/api/logs", "/api/stats"]) {

@@ -9,6 +9,7 @@ import { manifest } from "../src/manifest/index.js";
 import type { CaptureRequest } from "../src/types.js";
 import { validate } from "../src/validate.js";
 import { parseGlb } from "../src/logic/gltf.js";
+import { InputLimitError, inputTooLarge, unpackZip } from "../src/loader.js";
 import { decodePngSafe, imageDimensions } from "../src/logic/images.js";
 import { cyclicGlb, duplicatePngHeader, oversizedPngData, pngChunk, pngWithProfile } from "./helpers/hostile-inputs.js";
 import { pngBytes } from "./helpers/synthetic.js";
@@ -41,9 +42,16 @@ it("rejects PNG pixel streams that expand beyond the declared scanlines", () => 
   assert.equal(decodePngSafe(oversizedPngData()), undefined);
 });
 
-it("rejects duplicate PNG headers before trusting dimensions or decoding pixels", () => {
-  assert.equal(imageDimensions(duplicatePngHeader()), undefined);
+it("reads the first PNG header like the decoders, and refuses to decode a file with two", () => {
+  assert.deepEqual(imageDimensions(duplicatePngHeader()), { width: 1, height: 1 });
   assert.equal(decodePngSafe(duplicatePngHeader()), undefined);
+});
+
+it("names a damaged zip in the creator's words and keeps limit errors apart from it", async () => {
+  const damaged = new Uint8Array(64);
+  damaged.set([0x50, 0x4b, 0x03, 0x04]);
+  await assert.rejects(unpackZip(damaged), (error: unknown) => error instanceof Error && !(error instanceof InputLimitError) && /cannot be opened/.test(error.message));
+  await assert.rejects(unpackZip(new Uint8Array(8), 4), (error: unknown) => error instanceof InputLimitError && error.message === inputTooLarge(8, 4));
 });
 
 it("does not decompress color profiles when measuring PNG pixels", () => {
