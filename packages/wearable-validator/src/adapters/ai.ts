@@ -186,8 +186,11 @@ function failureText(response: AssistantMessage): string {
   if (/401|authentication_error|invalid.*token/i.test(message)) return "The OAuth session was rejected. Sign in again before retrying the review.";
   if (/429|rate_limit/i.test(message)) return "The OAuth account is rate limited. Wait before retrying the review.";
   if (/404|not_found|model.*not.*available/i.test(message)) return "The selected model is unavailable to this OAuth account. Configure an available image model.";
+  const stop = response.rawStopReason ?? response.stopReason;
+  // thinking counts against the same budget as the answer: twenty frames of findings need room for both
+  if (stop === "max_tokens") return `The model's answer was cut off at the ${manifest.ai.maxOutputTokens}-token budget. Retry the review; if it keeps happening, raise ai.maxOutputTokens in the manifest.`;
   const detail = redact(message);
-  return `The review did not finish (${response.rawStopReason ?? response.stopReason}). ${detail || "Retry the review with complete evidence."}`;
+  return `The review did not finish (${stop}). ${detail || "Retry the review with complete evidence."}`;
 }
 
 function redact(message: string): string {

@@ -139,7 +139,7 @@ describe("ai", () => {
   it("resolves ok:false for truncation and non-JSON after exactly one call, keeping usage", async () => {
     const credentials = await oauthCredentials();
     for (const [text, stop, pattern] of [
-      ["{}", "max_tokens", /did not finish/],
+      ["{}", "max_tokens", /cut off at the 12288-token budget/],
       ["I cannot review this.", "end_turn", /valid JSON/]
     ] as const) {
       let calls = 0;

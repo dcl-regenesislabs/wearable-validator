@@ -299,7 +299,7 @@
   },
   "ai": {
     "model": "claude-sonnet-5",
-    "maxOutputTokens": 4096,
+    "maxOutputTokens": 12288,
     "maxInputTokens": 40000,
     "maxImages": 21,
     "timeoutMs": 120000,
