@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { fetchCatalystItem, manifest, parseItemReference, validate, type ProgressEvent, type Result } from "@dcl-regenesislabs/wearable-validator";
+import { inputTooLarge, fetchCatalystItem, manifest, parseItemReference, validate, type ProgressEvent, type Result } from "@dcl-regenesislabs/wearable-validator";
 import { cancelRun, followRun, startRun, type RunInput } from "./api.js";
 import { formatBytes, inputKind, isGlb, isPng, itemBytes, zipRuleContext, type Loaded, type Sample } from "./item.js";
 import { Preview } from "./preview.js";
@@ -176,7 +176,7 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
       navigate({ tab: "validate", run: null, urn: null });
       setReading({ label: `Reading ${file.name}`, detail: formatBytes(file.size) });
       try {
-        if (file.size > manifest.fileSize.maxInputBytes) throw new Error(`The file exceeds the ${manifest.fileSize.maxInputBytes / 1048576} MB input limit.`);
+        if (file.size > manifest.fileSize.maxInputBytes) throw new Error(inputTooLarge(file.size));
         const bytes = new Uint8Array(await file.arrayBuffer());
         if (id !== loadSeq.current) return;
         if (isPng(bytes) || /\.png$/i.test(file.name)) {

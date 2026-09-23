@@ -1,4 +1,4 @@
-import { unpackZip } from "@dcl-regenesislabs/wearable-validator";
+import { InputLimitError, unpackZip } from "@dcl-regenesislabs/wearable-validator";
 
 /** The item on the Validate tab: a dropped file, a bundled sample or a catalyst entity. */
 export interface Loaded {
@@ -29,7 +29,14 @@ export interface Sample {
 export type ZipContext = Pick<Loaded, "zipCategory" | "zipHides" | "zipMetadata" | "zipMetadataSource" | "zipFiles">;
 
 export async function zipRuleContext(bytes: Uint8Array): Promise<ZipContext> {
-  const { files: zipFiles } = await unpackZip(bytes);
+  let zipFiles: Map<string, Uint8Array>;
+  try {
+    zipFiles = (await unpackZip(bytes)).files;
+  } catch (error) {
+    // a crossed limit stops the drop here; a zip that will not open is validation's finding, in its own words
+    if (error instanceof InputLimitError) throw error;
+    return {};
+  }
   try {
     const name = zipFiles.has("wearable.json") ? "wearable.json" : "emote.json";
     const bytes = zipFiles.get(name);
