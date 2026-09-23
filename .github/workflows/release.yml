@@ -1,8 +1,8 @@
 name: Publish the library
 
-# A merge to main that changes the package version publishes @dcl-regenesislabs/wearable-validator through
-# npm's trusted publishing (GitHub OIDC): no npm token anywhere, and nothing to tag. A merge that leaves the
-# version alone publishes nothing. Set the trusted publisher once on npmjs.com (package → Settings →
+# Every merge to main that touches the library publishes @dcl-regenesislabs/wearable-validator through
+# npm's trusted publishing (GitHub OIDC): no npm token anywhere, and nothing to tag. Bump the version in
+# the same PR; npm refuses a version it already has. Set the trusted publisher once on npmjs.com (package → Settings →
 # Trusted Publisher: this repository, workflow release.yml).
 on:
   push:
@@ -31,18 +31,8 @@ jobs:
       # trusted publishing needs npm 11.5 or newer
       - run: npm install -g npm@latest
       - run: npm ci
-      - name: Is this version already on npm?
-        id: version
-        run: |
-          version=$(node -p "require('./packages/wearable-validator/package.json').version")
-          published=$(npm view @dcl-regenesislabs/wearable-validator@"$version" version 2>/dev/null || true)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [ "$published" = "$version" ]; then echo "publish=no" >> "$GITHUB_OUTPUT"; echo "$version is already published"; else echo "publish=yes" >> "$GITHUB_OUTPUT"; fi
-      - if: steps.version.outputs.publish == 'yes'
-        run: npm run typecheck -w @dcl-regenesislabs/wearable-validator
-      - if: steps.version.outputs.publish == 'yes'
-        run: npm test -w @dcl-regenesislabs/wearable-validator
-      - if: steps.version.outputs.publish == 'yes'
-        run: npm run build -w @dcl-regenesislabs/wearable-validator
-      - if: steps.version.outputs.publish == 'yes'
-        run: npm publish --provenance --access public -w @dcl-regenesislabs/wearable-validator
+      - run: npm run typecheck -w @dcl-regenesislabs/wearable-validator
+      - run: npm test -w @dcl-regenesislabs/wearable-validator
+      - run: npm run build -w @dcl-regenesislabs/wearable-validator
+      # npm refuses a version it already has: a library change merged without a bump fails here, on purpose
+      - run: npm publish --provenance --access public -w @dcl-regenesislabs/wearable-validator
