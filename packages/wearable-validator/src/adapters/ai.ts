@@ -68,7 +68,8 @@ export function createPiReviewer(options: PiReviewerOptions): Reviewer {
       // output_config.format json_schema, no tools, maxRetries 0; cache "short" strips every cache_control and marks the LAST image so the prefix is the shared images and the suffix the rule text
       response = await models.complete(model, reviewMessages(request), {
         signal: controller.signal,
-        maxTokens: ai.maxOutputTokens,
+        // the model's own ceiling: the answer is never worth truncating, and the timeout is the only budget
+        maxTokens: model.maxTokens,
         thinkingEnabled: true,
         thinkingBudgetTokens: ai.thinkingBudgetTokens,
         maxRetries: ai.maxRetries,
@@ -188,7 +189,7 @@ function failureText(response: AssistantMessage): string {
   if (/404|not_found|model.*not.*available/i.test(message)) return "The selected model is unavailable to this OAuth account. Configure an available image model.";
   const stop = response.rawStopReason ?? response.stopReason;
   // thinking counts against the same budget as the answer: twenty frames of findings need room for both
-  if (stop === "max_tokens") return `The model's answer was cut off at the ${manifest.ai.maxOutputTokens}-token budget. Retry the review; if it keeps happening, raise ai.maxOutputTokens in the manifest.`;
+  if (stop === "max_tokens") return "The model's answer was longer than the model itself can produce. Retry the review with fewer frames.";
   const detail = redact(message);
   return `The review did not finish (${stop}). ${detail || "Retry the review with complete evidence."}`;
 }

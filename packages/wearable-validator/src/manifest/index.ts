@@ -76,7 +76,7 @@ export interface Manifest {
   };
   /** The one vision call, shared by every AI-backed rule — read by /ai (maxTextLength also by answer parsers). */
   ai: {
-    model: string; maxOutputTokens: number; maxInputTokens: number; maxImages: number; timeoutMs: number; maxRetries: number;
+    model: string; maxInputTokens: number; maxImages: number; timeoutMs: number; maxRetries: number;
     thinkingBudgetTokens: number; imagePixelsPerToken: number; textCharactersPerToken: number; maxTextLength: number;
   };
   /** V-01: how much of a capture must be something drawn. */
