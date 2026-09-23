@@ -213,7 +213,7 @@ How it is reviewed:
 },
 "ai": {                             // the one call, shared by every AI-backed rule — read only by ai.ts (+ maxTextLength by parsers)
   "model": "claude-sonnet-5",
-  "maxOutputTokens": 4096, "maxInputTokens": 40000, "maxImages": 21, "timeoutMs": 120000, "maxRetries": 0,
+  "maxInputTokens": 40000, "maxImages": 21, "timeoutMs": 120000, "maxRetries": 0,
   "thinkingBudgetTokens": 1024, "imagePixelsPerToken": 750, "textCharactersPerToken": 3, "maxTextLength": 1200
 },
 "thumbnailHonesty": {               // V-05 only — a flat per-topic block beside thumbnail / hands / emote, HEAD style
