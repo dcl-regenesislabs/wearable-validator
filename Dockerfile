@@ -1,11 +1,12 @@
 # Run server image: Playwright's Chromium (full headless, SwiftShader WebGPU) + the Unity build + the server.
 # Build from the repo root:  docker build -t wearable-validator-server .
 # Lives at the root so DigitalOcean App Platform detects it; the build context is the whole repo.
-# Run:  docker run --rm --shm-size=1g --memory=4g -p 4180:4180 -e ANTHROPIC_OAUTH_SETUP_TOKEN=... \
-#         -e CF_ACCESS_TEAM_DOMAIN=... -e CF_ACCESS_AUD=... wearable-validator-server
+# Run:  docker run --rm --shm-size=1g --memory=4g --security-opt seccomp=deploy/chromium-seccomp.json -p 4180:4180 \
+#         -e ANTHROPIC_OAUTH_SETUP_TOKEN=... -e CF_ACCESS_TEAM_DOMAIN=... -e CF_ACCESS_AUD=... wearable-validator-server
+# Chromium's sandbox needs that seccomp profile; without it set CHROMIUM_SANDBOX=0 (a renderer exploit then reaches the container).
 # stage 1: the commit this image was built from, read from the checkout's .git (HEAD, refs and packed-refs are the
 # only .git files in the build context); the server shows it in /api/health so operators know what is running
-FROM alpine:3.20 AS gitinfo
+FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS gitinfo
 WORKDIR /src
 COPY .git .git
 RUN ref=$(sed -n 's/^ref: //p' .git/HEAD); \
@@ -14,7 +15,7 @@ RUN ref=$(sed -n 's/^ref: //p' .git/HEAD); \
     else sha=$(cat .git/HEAD); fi; \
     printf '{"commit":"%s","builtAt":"%s"}' "${sha:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /build-info.json && cat /build-info.json
 
-FROM mcr.microsoft.com/playwright:v1.63.0-noble
+FROM mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
 ARG RENDERER_BUILD_URL=https://github.com/dcl-regenesislabs/wearable-validator/releases/download/renderer-build-2/renderer-build.tar.gz
 ARG RENDERER_BUILD_SHA256=41c129dd81e909797646353a9525df0245ac7a8213f2a8fa3896c377ece8f52b
 WORKDIR /app

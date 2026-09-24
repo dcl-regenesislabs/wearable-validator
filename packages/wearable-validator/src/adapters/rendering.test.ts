@@ -7,6 +7,7 @@ import { brotliCompressSync, gzipSync } from "node:zlib";
 import type { BrowserContext, Route, WebSocketRoute } from "playwright-core";
 import { manifest } from "../manifest/index.js";
 import {
+  browserEnv,
   browserRequestAllowed,
   captureAll, sessionOrder,
   createRenderer,
@@ -626,4 +627,9 @@ describe("captureAll", () => {
     assert.deepEqual(seen, sessionOrder(requests).map((request) => request.id));
     assert.equal(captures.length, seen.length);
   });
+});
+
+it("hands Chromium only the variables a browser needs, never the host's tokens", () => {
+  const env = browserEnv({ PATH: "/usr/bin", HOME: "/home/pwuser", ANTHROPIC_OAUTH_SETUP_TOKEN: "sk-ant-oat01-secret", SLACK_BOT_TOKEN: "xoxb-secret", OPERATOR_TOKEN: "secret" });
+  assert.deepEqual(env, { PATH: "/usr/bin", HOME: "/home/pwuser" });
 });

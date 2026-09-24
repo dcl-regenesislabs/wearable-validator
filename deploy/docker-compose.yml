@@ -9,6 +9,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      # .env serves both services: the tunnel's credential never reaches the container that renders creator files
+      CLOUDFLARE_TUNNEL_TOKEN: ""
       HTTP_SERVER_HOST: "0.0.0.0"
       HTTP_SERVER_PORT: "4180"
       LOG_FORMAT: json
@@ -19,6 +21,10 @@ services:
       - chromium:/data/chromium
     # Chromium's shared memory; the image also passes --disable-dev-shm-usage
     shm_size: 1gb
+    # Chromium's sandbox needs user namespaces, which Docker's default profile refuses: Playwright's profile
+    # (utils/docker/seccomp_profile.json at v1.63.0) allows them
+    security_opt:
+      - seccomp=./chromium-seccomp.json
     # only the tunnel reaches it; nothing is published on the droplet's public address
     expose:
       - "4180"
@@ -30,9 +36,12 @@ services:
       start_period: 60s
 
   tunnel:
-    image: cloudflare/cloudflared:2026.9.1
+    image: cloudflare/cloudflared:2026.9.1@sha256:b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    # the token as TUNNEL_TOKEN, not an argument: arguments show in `ps` on the droplet
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       - validator
 
