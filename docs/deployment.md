@@ -6,7 +6,8 @@
 - **Identity** — the server verifies the Access JWT the Worker forwards (`packages/server/src/adapters/access.ts`); every run belongs to the email that started it. Access itself is the allow-list, so everyone it lets in is a curator: an operator who sees every run, the stats and the log. Service tokens (the Slack bot) see everything too but change nothing (`POST`/`DELETE` answer 403).
 - **Which build is running** — the Docker build reads the commit from the checkout's `.git/HEAD` into `packages/server/build-info.json`; `/api/health` and `/api/stats` answer `build: { version, commit, builtAt, startedAt }`, the startup log line carries the same, and the Slack bot's `stats` question reports it.
 - **Self-test** — at startup the server checks the two things a render depends on and says so in the log: the hosts it must reach (`cdn.decentraland.org` for the pinned wrapper, `peer.decentraland.org` for the avatar the previewer loads) and whether Chromium gets a WebGPU device in this container. A render that hangs with an idle CPU is one of those two; `RENDERER_SELF_TEST=0` skips it.
-- **Logs** — one JSON line per event on stdout: every API request (caller, status, ms), each run's gate, queue, captures, model calls and result, and the browser's own story (launch, previewer load or failure with the last wrapper messages, page crashes, console errors, retried views). Operators can read the recent lines through `GET /api/logs`. Refused requests (bad Host, no sign-in, 403) are counted in the `refused_requests_total` metric and printed at debug level with the Host hashed; they never enter that log. `GET /metrics` serves the Prometheus registry (HTTP defaults, `runs_accepted_total`, `runs_finished_total{status}`, `render_duration_seconds`, `refused_requests_total{reason}`) on the server itself, outside the Host and sign-in checks: set `WKC_METRICS_BEARER_TOKEN` before exposing the port.
+- **Isolation** — creator files are hostile input. The code checks run in a worker thread with a 60 s deadline, so a file that stalls them never blocks the server. Chromium runs inside its own sandbox (`docker-compose.yml` applies Playwright's seccomp profile, `deploy/chromium-seccomp.json`, which allows the user namespaces the sandbox needs) and gets only `PATH`/`HOME`-style variables, never the server's tokens; the tunnel token stays in the `tunnel` service. If the droplet's kernel refuses the sandbox, the startup self-test fails: set `CHROMIUM_SANDBOX=0` in `deploy/.env` to render without it while that is fixed.
+- **Logs** — one JSON line per event on stdout: every API request (caller, status, ms), each run's gate, queue, captures, model calls and result, and the browser's own story (launch, previewer load or failure with the last wrapper messages, page crashes, console errors, retried views). Operators can read the recent lines through `GET /api/logs`. Refused requests (bad Host, no sign-in, 403) are counted in the `refused_requests_total` metric and printed at debug level with the Host hashed; they never enter that log. `GET /metrics` serves the Prometheus registry (HTTP defaults, `runs_accepted_total`, `runs_finished_total{status}`, `render_duration_seconds`, `refused_requests_total{reason}`) on the server itself, outside the Host and sign-in checks, behind `WKC_METRICS_BEARER_TOKEN`; without the token it is served on loopback only.
 
 ## One-time setup
 
@@ -93,7 +94,7 @@ The token is read-only: it never starts or cancels a run (403), and `/api/health
 
 ### 5b. Slack notifications
 
-Every finished run posts one message to the curators' channel: who sent it, the item's thumbnail, the verdict, whether a curator is needed (ready to approve / needs a curator / blocked, with the reasons), the first findings, an **Open run** button to `/?run=<id>` on the site (Cloudflare Access still gates it by email) and, in a thread, the two worn front views. Cancelled runs post nothing; a failed post is one `slack notification failed` warning in the log, the run itself is never affected.
+Every finished run posts one message to the curators' channel: who sent it, the item's thumbnail, the verdict, what the curator should do (nothing found, look at the views / needs a curator / blocked, with the reasons), the first findings, an **Open run** button to `/?run=<id>` on the site (Cloudflare Access still gates it by email) and, in a thread, the two worn front views. Cancelled runs post nothing; a failed post is one `slack notification failed` warning in the log, the run itself is never affected.
 
 1. [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → From scratch, in the workspace.
 2. **OAuth & Permissions** → Bot Token Scopes: add `chat:write` and `files:write`.
@@ -127,7 +128,7 @@ ANTHROPIC_OAUTH_SETUP_TOKEN=<claude setup-token> npm run serve
 # the image itself (defaults: the pinned release asset; to test another build pass BOTH args, the sha256 check has no bypass)
 docker build -t wearable-validator-server .
 docker build --build-arg RENDERER_BUILD_URL=<url> --build-arg RENDERER_BUILD_SHA256=<sha256 of that tarball> -t wearable-validator-server .
-docker run --rm --shm-size=1g --memory=4g -p 4180:4180 -e INSECURE_ANONYMOUS=1 wearable-validator-server
+docker run --rm --shm-size=1g --memory=4g --security-opt seccomp=deploy/chromium-seccomp.json -p 4180:4180 -e INSECURE_ANONYMOUS=1 wearable-validator-server
 ```
 
 Leave the token out and the server renders and writes the prompt without calling the model.
