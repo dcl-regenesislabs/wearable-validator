@@ -891,11 +891,17 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     controller: AbortController,
     signal?: AbortSignal
   ): Promise<CaptureRecord[]> {
-    const abort = () => controller.abort();
+    let running = false;
+    const abort = () => {
+      controller.abort();
+      // captureAll reads the signal only between views: closing the browser ends the call in flight, if the browser is ours
+      if (running) void dropSession();
+    };
     const timeout = setTimeout(abort, timeouts.timeoutMs);
     signal?.addEventListener("abort", abort, { once: true });
     try {
       return await serialize(async () => {
+        running = true;
         const preview = await untilAborted(currentSession(), controller.signal);
         controller.signal.throwIfAborted();
         // the site URL selects Babylon and a WebGPU fallback is not Unity evidence — a non-unity load closes the browser
