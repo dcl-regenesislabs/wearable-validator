@@ -10,6 +10,7 @@ import type { IReviewerComponent } from "../adapters/reviewer.js";
 import type { ISlackComponent } from "../adapters/slack.js";
 import type { metricDeclarations } from "../metrics.js";
 import type { Identity, QueueState, RunEvent, RunEventType, RunItem, RunNotice, RunOutcome, RunSink, RunSummary } from "../types.js";
+import { runCodeChecks } from "./code-checks.js";
 import { curatorDecision } from "./decision.js";
 import { QueueFullError, TooManyListenersError, TooManyRunsError } from "./errors.js";
 import type { IQueueComponent } from "./queue.js";
@@ -23,6 +24,8 @@ const MAX_RUNS_IN_MEMORY = 50;
 // the upload's name becomes part of the run folder name; filesystems cap a folder name at 255 bytes
 const MAX_NAME_CHARS = 80;
 const DAY_MS = 24 * 60 * 60 * 1000;
+// the whole code gate of one item runs in a worker; a real item needs seconds
+const CODE_CHECKS_TIMEOUT_MS = 60_000;
 // a listener whose socket stops draining for this long is dropped rather than buffered for
 const DRAIN_TIMEOUT_MS = 5000;
 // model text reaches the operator's terminal before any parser sees it: never let it carry escape sequences
@@ -356,7 +359,7 @@ export async function createRunsComponent(components: RunsComponents): Promise<I
       } else {
         input = await fetchItem(run, source);
       }
-      const code = await validate(input, { signal: run.controller.signal, onProgress: (event) => emit(run, "check", event) });
+      const code = await runCodeChecks(input, { signal: run.controller.signal, onProgress: (event) => emit(run, "check", event), timeoutMs: CODE_CHECKS_TIMEOUT_MS });
       run.gate = code;
       // on disk before the event: History reads gate.json for every run, live or long finished
       await runStore.writeGate(run.dir, code);
