@@ -4,7 +4,7 @@ import JSZip from "jszip";
 import { inputTooLarge, manifest, validate } from "@dcl-regenesislabs/wearable-validator";
 import { oversizedManifestZip } from "../../wearable-validator/test/helpers/hostile-inputs.js";
 import { syntheticZip } from "../../wearable-validator/test/helpers/synthetic.js";
-import { zipRuleContext } from "../src/item.js";
+import { reviewsOnArrival, zipRuleContext } from "../src/item.js";
 import { buildItemWithBlobs } from "../src/preview.js";
 
 it("rejects oversized ZIP manifests before extracting display metadata", async () => {
@@ -43,4 +43,11 @@ it("keeps normal ZIP metadata and reuses extracted files for preview", async () 
   const reused = await buildItemWithBlobs({ name: "item.zip", bytes: new Uint8Array(), isBareGlb: false, ...context }, "wearable");
   const extracted = await buildItemWithBlobs({ name: "item.zip", bytes, isBareGlb: false }, "wearable");
   assert.deepEqual(reused, extracted);
+});
+
+it("waits for the curator's press before reviewing an item opened from a link", () => {
+  const item = { name: "Red Shirt", isBareGlb: false, urn: "urn:decentraland:matic:collections-v2:0x0000000000000000000000000000000000000001:0" };
+  assert.equal(reviewsOnArrival({ ...item, fromLink: true }, true), false);
+  assert.equal(reviewsOnArrival(item, true), true);
+  assert.equal(reviewsOnArrival(item, false), false);
 });

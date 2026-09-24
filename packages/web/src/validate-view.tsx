@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { inputTooLarge, fetchCatalystItem, manifest, parseItemReference, validate, type ProgressEvent, type Result } from "@dcl-regenesislabs/wearable-validator";
 import { cancelRun, followRun, startRun, type RunInput } from "./api.js";
-import { formatBytes, inputKind, isGlb, isPng, itemBytes, zipRuleContext, type Loaded, type Sample } from "./item.js";
+import { formatBytes, inputKind, isGlb, isPng, itemBytes, reviewsOnArrival, zipRuleContext, type Loaded, type Sample } from "./item.js";
 import { Preview } from "./preview.js";
 import { EMPTY_VISUAL, codeSteps, isRunning, reduceVisual, type Step, type VisualEvent, type VisualState } from "./progress.js";
 import { CODE_CHECK_COUNT, Results } from "./results.js";
@@ -135,7 +135,7 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
         });
         if (id !== loadSeq.current) return;
         if (updateHistory) navigate({ tab: "validate", run: null, urn: item.urn });
-        await show({ name: item.name, isBareGlb: false, urn: item.urn, files: item.files, metadata: item.metadata, content: item.content });
+        await show({ name: item.name, isBareGlb: false, urn: item.urn, files: item.files, metadata: item.metadata, content: item.content, fromLink: !updateHistory });
       } catch (err) {
         if (id === loadSeq.current) fail(err);
       }
@@ -274,7 +274,7 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
     stopRef.current?.();
     stopRef.current = null;
     setVisual(EMPTY_VISUAL);
-    if (server.known && reviewable && result?.passed === true) void startVisual();
+    if (server.known && reviewable && loaded && reviewsOnArrival(loaded, result?.passed)) void startVisual();
   }, [server.known, reviewable, loaded, result, startVisual]);
   useEffect(() => () => stopRef.current?.(), []);
 
