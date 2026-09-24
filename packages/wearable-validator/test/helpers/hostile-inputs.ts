@@ -2,14 +2,54 @@ import { deflateSync } from "node:zlib";
 import JSZip from "jszip";
 import { pngBytes } from "./synthetic.js";
 
-export function cyclicGlb(children: number[][] = [[0]]): Uint8Array {
-  const json = JSON.stringify({ asset: { version: "2.0" }, nodes: children.map((children) => ({ mesh: 0, children })), meshes: [{ primitives: [] }] });
-  const text = new TextEncoder().encode(json);
-  const bytes = new Uint8Array(20 + Math.ceil(text.length / 4) * 4).fill(32);
+/** A GLB container around any JSON, with an optional BIN chunk: the hostile shapes live in the JSON. */
+export function glbBytes(json: unknown, bin?: Uint8Array): Uint8Array {
+  const text = new TextEncoder().encode(JSON.stringify(json));
+  const jsonLength = Math.ceil(text.length / 4) * 4;
+  const binLength = bin ? Math.ceil(bin.length / 4) * 4 : 0;
+  const bytes = new Uint8Array(20 + jsonLength + (bin ? 8 + binLength : 0));
   const view = new DataView(bytes.buffer);
-  for (const [offset, value] of [[0, 0x46546c67], [4, 2], [8, bytes.length], [12, bytes.length - 20], [16, 0x4e4f534a]]) view.setUint32(offset, value, true);
+  for (const [offset, value] of [[0, 0x46546c67], [4, 2], [8, bytes.length], [12, jsonLength], [16, 0x4e4f534a]]) view.setUint32(offset, value, true);
+  bytes.fill(32, 20, 20 + jsonLength);
   bytes.set(text, 20);
+  if (bin) {
+    view.setUint32(20 + jsonLength, binLength, true);
+    view.setUint32(24 + jsonLength, 0x004e4942, true);
+    bytes.set(bin, 28 + jsonLength);
+  }
   return bytes;
+}
+
+export function cyclicGlb(children: number[][] = [[0]]): Uint8Array {
+  return glbBytes({ asset: { version: "2.0" }, nodes: children.map((children) => ({ mesh: 0, children })), meshes: [{ primitives: [] }] });
+}
+
+/** A few hundred bytes whose accessors ask the parser for gigabytes: a zero stride over 64 real bytes, or no buffer view at all. */
+export function amplifyingGlb(shape: "zero-stride" | "no-buffer-view"): Uint8Array {
+  const accessor = shape === "zero-stride" ? { bufferView: 0, componentType: 5126, type: "MAT4", count: 20_000_000 } : { componentType: 5126, type: "MAT4", count: 20_000_000 };
+  const bufferView = shape === "zero-stride" ? { buffer: 0, byteLength: 64, byteStride: 0 } : { buffer: 0, byteLength: 64 };
+  return glbBytes({ asset: { version: "2.0" }, buffers: [{ byteLength: 64 }], bufferViews: [bufferView], accessors: [accessor, accessor, accessor, accessor] }, new Uint8Array(64));
+}
+
+/** One embedded image listed `copies` times: every entry is a separate copy once parsed. */
+export function repeatedImageGlb(png: Uint8Array, copies: number): Uint8Array {
+  return glbBytes({
+    asset: { version: "2.0" },
+    buffers: [{ byteLength: Math.ceil(png.length / 4) * 4 }],
+    bufferViews: [{ buffer: 0, byteLength: png.length }],
+    images: Array.from({ length: copies }, (_, i) => ({ bufferView: 0, mimeType: "image/png", name: `copy ${i}` }))
+  }, png);
+}
+
+/** `length` nodes each holding the same triangle, every one the child of the one before. */
+export function nodeChainGlb(length: number): Uint8Array {
+  const nodes = Array.from({ length }, (_, i) => (i < length - 1 ? { mesh: 0, children: [i + 1] } : { mesh: 0 }));
+  return glbBytes({
+    asset: { version: "2.0" }, scene: 0, scenes: [{ nodes: [0] }], nodes,
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+    buffers: [{ byteLength: 36 }], bufferViews: [{ buffer: 0, byteLength: 36 }],
+    accessors: [{ bufferView: 0, componentType: 5126, type: "VEC3", count: 3, min: [0, 0, 0], max: [0, 0, 0] }]
+  }, new Uint8Array(36));
 }
 
 export function pngChunk(type: string, data: Uint8Array): Uint8Array {

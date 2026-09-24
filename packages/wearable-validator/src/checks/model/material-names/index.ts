@@ -1,6 +1,6 @@
 /** M-07 Material & mesh names — AvatarSkin_MAT is the engine's tint target and facial tokens drive face masking. */
 import type { Document } from "@gltf-transform/core";
-import { isColliderNode } from "../../../logic/gltf.js";
+import { colliderNodes } from "../../../logic/gltf.js";
 import { countedMaterials } from "../../../logic/materials.js";
 import { wearableMaterialsOnly } from "../../../logic/wearable-only.js";
 import { finding, type CheckDefinition, type CheckMeta, type Finding } from "../../../types.js";
@@ -11,9 +11,10 @@ const meta: CheckMeta = { name: "material-names", group: "model", rule: "M-07", 
 /** Mesh names on non-collider nodes (unique). */
 function countedMeshNames(doc: Document): string[] {
   const names = new Set<string>();
+  const colliders = colliderNodes(doc);
   for (const node of doc.getRoot().listNodes()) {
     const mesh = node.getMesh();
-    if (!mesh || isColliderNode(node)) continue;
+    if (!mesh || colliders.has(node)) continue;
     names.add(mesh.getName());
   }
   return [...names];

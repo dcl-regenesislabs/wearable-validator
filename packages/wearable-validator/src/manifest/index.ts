@@ -14,7 +14,11 @@ export interface Manifest {
     maxEntries: number; maxUncompressedBytes: number; maxEntryUncompressedBytes: number;
   };
   /** Header width × height above which no check decodes an image to pixels (a decoded image costs at least 4 bytes per pixel). */
-  images: { maxDecodePixels: number; inflateChunkBytes: number };
+  images: {
+    maxDecodePixels: number; inflateChunkBytes: number;
+    /** Pixels the QR scan decodes across all of an item's textures: many texture entries can point at the same bytes. */
+    maxScanPixels: number;
+  };
   boundingBox: { width: number; height: number; depth: number };
   /** ADR-60 auto-hide set — the categories a skin is expected to hide. */
   skinAutoHideSet: string[];
@@ -33,7 +37,11 @@ export interface Manifest {
     maxSocialOutcomes: number;
   };
   epsilons: { loopSeamTranslation: number; loopSeamQuaternionDot: number; loopSeamScale: number; zUpRotationToleranceDegrees: number };
-  gltf: { extensionAllowlist: string[]; unknownCodeSeverity: string; severityOverrides: Record<string, string> };
+  gltf: {
+    extensionAllowlist: string[]; unknownCodeSeverity: string; severityOverrides: Record<string, string>;
+    /** Accessors (count × element size) plus embedded images (their buffer view): what parsing a model allocates, checked before it does. */
+    maxUnpackedBytes: number;
+  };
   hands: { minHandWeightRatio: number };
   thumbnail: { minTransparentPixelRatio: number; alphaThreshold: number };
   /** The headless renderer, shared by every visual rule — read by /rendering and captures.ts. */
