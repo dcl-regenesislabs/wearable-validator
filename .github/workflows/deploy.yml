@@ -6,6 +6,8 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions: {}
+
 concurrency:
   group: deploy-run-server
   cancel-in-progress: false

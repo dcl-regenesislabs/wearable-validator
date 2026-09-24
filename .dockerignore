@@ -10,3 +10,8 @@ packages/server/renderer-build
 !.git/HEAD
 !.git/refs/heads/**
 !.git/packed-refs
+
+# a local secret must never reach an image layer
+**/.env
+**/.env.*
+!**/.env.default
