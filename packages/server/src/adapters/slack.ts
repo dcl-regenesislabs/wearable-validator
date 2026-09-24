@@ -36,6 +36,9 @@ type Block = Record<string, unknown>;
 
 export const escapeMrkdwn = (text: string): string => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+// Slack links bare URLs and domains on its own: in creator- or model-written text a zero-width space keeps them plain
+export const inertMrkdwn = (text: string): string => escapeMrkdwn(text).replace(/:\/\//g, ":\u200b//").replace(/\.(?=[a-z])/gi, ".\u200b");
+
 /** Cuts on code points, so an emoji at the edge is dropped whole rather than left as half a surrogate pair. */
 const cut = (text: string, max: number): string => {
   if (text.length <= max) return text;
@@ -63,7 +66,8 @@ function verdictLine(notice: RunNotice): string {
 function approvalLine(notice: RunNotice): string {
   const reasons = notice.decision.reasons.join(", ");
   switch (notice.decision.state) {
-    case "ready": return "✅ Ready to approve — no curator needed";
+    // text painted on a texture can talk the model into "ok": a clean review never stands in for a curator's look
+    case "ready": return "✅ Nothing found — look at the views before approving";
     case "review": return `👀 Needs a curator: ${reasons}`;
     case "blocked": return `⛔ Blocked: ${reasons}`;
   }
@@ -77,7 +81,7 @@ export function marketplaceUrl(urn: string): string | undefined {
 
 function itemLine(notice: RunNotice): string {
   const parts = notice.item ? [notice.item.category, notice.item.itemType, notice.item.rarity].filter((part): part is string => Boolean(part)) : [];
-  const line = `${escapeMrkdwn(displayName(notice))}${parts.length ? ` (${escapeMrkdwn(parts.join(" · "))})` : ""}`;
+  const line = `${inertMrkdwn(displayName(notice))}${parts.length ? ` (${escapeMrkdwn(parts.join(" · "))})` : ""}`;
   if (!notice.reference) return line;
   const url = marketplaceUrl(notice.reference);
   return `${line} · from the marketplace ${url ? `<${url}|${escapeMrkdwn(notice.reference)}>` : `\`${escapeMrkdwn(notice.reference)}\``}`;
@@ -91,13 +95,13 @@ function findingsSection(notice: RunNotice): Block | undefined {
   const lines: string[] = [];
   let shown = 0;
   for (const finding of ordered.slice(0, MAX_FINDINGS)) {
-    const line = `• *${escapeMrkdwn(finding.check)}* — ${escapeMrkdwn(finding.message)}`;
+    const line = `• *${escapeMrkdwn(finding.check)}* — ${inertMrkdwn(finding.message)}`;
     // leave room for the "+N more" line whatever gets cut
     if ([...lines, line].join("\n").length > SECTION_MAX - 20) break;
     lines.push(line);
     shown++;
   }
-  if (shown === 0) lines.push(cut(`• *${escapeMrkdwn(ordered[0].check)}* — ${escapeMrkdwn(ordered[0].message)}`, SECTION_MAX - 20));
+  if (shown === 0) lines.push(cut(`• *${escapeMrkdwn(ordered[0].check)}* — ${inertMrkdwn(ordered[0].message)}`, SECTION_MAX - 20));
   const rest = all.length - Math.max(shown, 1);
   if (rest > 0) lines.push(`_+${rest} more_`);
   return { type: "section", text: { type: "mrkdwn", text: lines.join("\n") } };
@@ -128,7 +132,7 @@ export function runMessage(notice: RunNotice, siteUrl: string, fileId?: string):
       type: "section",
       text: {
         type: "mrkdwn",
-        text: cut([`*Sent by* ${escapeMrkdwn(notice.owner)}`, `*Item* ${itemLine(notice)}`, `*Verdict* ${verdict}`, `*Approval* ${escapeMrkdwn(approval)}`].join("\n"), SECTION_MAX)
+        text: cut([`*Sent by* ${escapeMrkdwn(notice.owner)}`, `*Item* ${itemLine(notice)}`, `*Verdict* ${verdict}`, `*Approval* ${inertMrkdwn(approval)}`].join("\n"), SECTION_MAX)
       }
     }
   ];
@@ -140,7 +144,7 @@ export function runMessage(notice: RunNotice, siteUrl: string, fileId?: string):
     elements: [{ type: "button", style: "primary", text: { type: "plain_text", text: cut("Open run", BUTTON_MAX) }, url: `${siteUrl}/?run=${notice.id}`, action_id: "open-run" }]
   });
   blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: cut(contextLine(notice), SECTION_MAX) }] });
-  return { text: escapeMrkdwn(`${name} — ${verdict} — ${approval} (sent by ${notice.owner})`), blocks };
+  return { text: `${inertMrkdwn(name)} — ${escapeMrkdwn(verdict)} — ${inertMrkdwn(approval)} (sent by ${escapeMrkdwn(notice.owner)})`, blocks };
 }
 
 /** One worn front view per body shape: the plain pose for a wearable, the middle of the clip for an emote; never a green-skin stress frame. */

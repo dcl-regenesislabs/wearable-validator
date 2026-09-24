@@ -116,7 +116,7 @@ export type RunOutcome = "passed" | "failed" | "no-verdict" | "gate" | "error";
 
 /** What a curator must do next, computed from the code gate and the visual review (logic/decision.ts). */
 export interface CuratorDecision {
-  /** ready: approve without looking; review: a curator's eyes are needed; blocked: the creator must fix errors first. */
+  /** ready: nothing found, a curator glances at the views; review: something needs a curator's judgement; blocked: the creator must fix errors first. */
   state: "ready" | "review" | "blocked";
   /** Short phrases in the order they were found: "2 warnings", "thumbnail-honesty: mismatch", "3 code errors". */
   reasons: string[];
