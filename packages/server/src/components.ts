@@ -14,6 +14,7 @@ import { createBuildInfoComponent } from "./adapters/build-info.js";
 import { createCatalystComponent } from "./adapters/catalyst.js";
 import { createSiteComponent } from "./adapters/site.js";
 import { createSlackComponent } from "./adapters/slack.js";
+import { isLoopback } from "./logic/hosts.js";
 import { createQueueComponent } from "./logic/queue.js";
 import { createRunStoreComponent } from "./logic/run-store.js";
 import { createRunsComponent } from "./logic/runs.js";
@@ -52,8 +53,13 @@ export type ComponentOverrides = Partial<Pick<BaseComponents, "server" | "identi
 
 export async function createBaseComponents(config: IConfigComponent, logs: ILoggerComponent, metrics: AppComponents["metrics"], overrides: ComponentOverrides = {}): Promise<Omit<AppComponents, "statusChecks">> {
   const server = overrides.server ?? (await createAppServer(config, logs));
-  // /metrics lives on the server itself, ahead of the app router: WKC_METRICS_BEARER_TOKEN gates it
-  await instrumentHttpServerWithPromClientRegistry({ server, config, metrics, registry: metrics.registry });
+  // /metrics lives on the server itself, ahead of the app router and its sign-in: without WKC_METRICS_BEARER_TOKEN it answers anyone
+  const metricsOpen = !(await config.getString("WKC_METRICS_BEARER_TOKEN"));
+  if (metricsOpen && !isLoopback(await config.requireString("HTTP_SERVER_HOST"))) {
+    appLogger(logs, "server").warn("/metrics is off: set WKC_METRICS_BEARER_TOKEN to serve it on a non-loopback host");
+  } else {
+    await instrumentHttpServerWithPromClientRegistry({ server, config, metrics, registry: metrics.registry });
+  }
   const logBuffer = createLogBufferComponent({ logs });
   const identity = overrides.identity ?? (await createIdentityComponent({ config, logs: logBuffer }));
   const renderer = overrides.renderer ?? (await createRendererComponent({ config, logs: logBuffer }));

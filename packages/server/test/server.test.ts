@@ -317,6 +317,13 @@ describe("run server", () => {
     } finally {
       await stopAndClean(gated);
     }
+    const exposed = await startTestServer({ env: { HTTP_SERVER_HOST: "0.0.0.0" } });
+    try {
+      const res = await fetch(`${exposed.base}/metrics`);
+      assert.doesNotMatch(await res.text(), /runs_accepted_total/, "a public bind without a token serves no metrics");
+    } finally {
+      await stopAndClean(exposed);
+    }
   });
 
   it("logs what a check measured without the control characters a model name can carry", async () => {
