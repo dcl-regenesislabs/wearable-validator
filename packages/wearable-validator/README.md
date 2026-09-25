@@ -25,3 +25,9 @@ Optional Node entries:
 - `/ai`: `createPiReviewer({ credentials })` — needs `@earendil-works/pi-ai@0.84.1` and a host-owned Pi `CredentialStore` holding an Anthropic OAuth session. One schema-constrained image request, no tools, no agent loop.
 
 Both peers are exact pins on purpose (the browser build and the provider API are what the captures and answers were verified against); a host that already carries another patch of either must install with `--legacy-peer-deps` or match the pin. Root imports need neither. See the repository's [docs/visual-validation.md](https://github.com/dcl-regenesislabs/wearable-validator/blob/main/docs/visual-validation.md) for the run folder every review writes.
+
+## Publishing
+
+The package version is the rules version (`manifest.version`); bump both together in the PR that changes the rules. When that PR merges to `main`, `.github/workflows/release.yml` publishes it with `npm publish --provenance` through npm's trusted publishing (GitHub OIDC). No npm token lives anywhere and nothing is tagged. npm refuses a version it already has, so a library change merged without a bump fails that run: bump the version.
+
+The very first version of a new package has to be published once by hand (`npm publish -w @dcl-regenesislabs/wearable-validator` from a logged-in machine); after that, set the trusted publisher on npmjs.com (package → Settings → Trusted Publisher: this repository, workflow `release.yml`) and every version bump publishes itself.
