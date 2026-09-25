@@ -317,6 +317,13 @@ describe("run server", () => {
     } finally {
       await stopAndClean(gated);
     }
+    const exposed = await startTestServer({ env: { HTTP_SERVER_HOST: "0.0.0.0" } });
+    try {
+      const res = await fetch(`${exposed.base}/metrics`);
+      assert.doesNotMatch(await res.text(), /runs_accepted_total/, "a public bind without a token serves no metrics");
+    } finally {
+      await stopAndClean(exposed);
+    }
   });
 
   it("logs what a check measured without the control characters a model name can carry", async () => {
@@ -436,8 +443,12 @@ describe("the waiting line", () => {
     const { base } = server;
     try {
       const zip = await syntheticZip();
+      // each code gate runs in its own worker thread: a run joins the line when its gate finishes, so start them one by one
+      const queued = (count: number) => until(() => queueAs(base, alice), (q) => q.running.length + q.waiting.length === count);
       const a = await startRun(base, zip, "?model=0", alice);
+      await queued(1);
       const b = await startRun(base, zip, "?model=0", bob);
+      await queued(2);
       const c = await startRun(base, zip, "?model=0", alice);
       const view = await until(() => queueAs(base, alice), (q) => q.running.length === 1 && q.waiting.length === 2);
       assert.deepEqual(view.running.map((entry) => [entry.mine, entry.id]), [[true, a]]);

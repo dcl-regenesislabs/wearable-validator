@@ -58,7 +58,8 @@
   },
   "images": {
     "maxDecodePixels": 16777216,
-    "inflateChunkBytes": 16384
+    "inflateChunkBytes": 16384,
+    "maxScanPixels": 67108864
   },
   "boundingBox": {
     "width": 2.42,
@@ -151,7 +152,8 @@
     ],
     "unknownCodeSeverity": "warning",
     "severityOverrides": {},
-    "zUpHeuristic": false
+    "zUpHeuristic": false,
+    "maxUnpackedBytes": 268435456
   },
   "hands": {
     "minHandWeightRatio": 0.5

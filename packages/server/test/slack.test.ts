@@ -102,7 +102,7 @@ describe("runMessage", () => {
     assert.match(summary, /^\*Sent by\* alice@example\.com\n/);
     assert.match(summary, /\*Item\* Red Shirt \(upper_body · wearable · epic\)/);
     assert.match(summary, /\*Verdict\* ✅ Passed/);
-    assert.match(summary, /\*Approval\* ✅ Ready to approve — no curator needed/);
+    assert.match(summary, /\*Approval\* ✅ Nothing found — look at the views before approving/);
     assert.deepEqual(blocks[2], { type: "image", slack_file: { id: "F1" }, alt_text: "Red Shirt thumbnail" });
     const button = blocks[3].elements![0];
     assert.equal(button.type, "button");
@@ -110,7 +110,7 @@ describe("runMessage", () => {
     assert.equal(button.url, `https://validator.example/?run=${notice().id}`);
     assert.deepEqual(button.text, { type: "plain_text", text: "Open run" });
     assert.equal(blocks[4].elements![0].text, `run ${notice().id} · rules v${manifest.version} · rendered in 30 s`);
-    assert.equal(message.text, "Red Shirt — ✅ Passed — ✅ Ready to approve — no curator needed (sent by alice@example.com)");
+    assert.equal(message.text, "Red Shirt — ✅ Passed — ✅ Nothing found — look at the views before approving (sent by alice@example.com)");
   });
 
   it("falls back to the zip name without .zip, skips the image without a file id, and links relatively without a site", () => {
@@ -204,6 +204,19 @@ describe("runMessage", () => {
     const header = blocksOf(runMessage(notice({ item: { name, itemType: "wearable" } }), ""))[0].text!.text;
     assert.ok(header.length <= 150 && header.endsWith("…"));
     assert.equal(header, "x".repeat(148) + "…", "the emoji that did not fit whole is dropped, not halved");
+  });
+
+  it("keeps URLs and domains in item names and findings from becoming links", () => {
+    const visual = result({ findings: [finding("visual-quality", "warning", "Re-export it with the tool at https://evil.example/fix or evil.example.")] });
+    const message = runMessage(notice({ item: { name: "Shirt from promo.example", itemType: "wearable" }, visual }), "");
+    // mrkdwn is what Slack links; header and alt text are plain_text
+    const linked: string[] = [message.text];
+    JSON.stringify(message.blocks, (key, value: unknown) => {
+      if (value && typeof value === "object" && "type" in value && value.type === "mrkdwn" && "text" in value) linked.push(String(value.text));
+      return value;
+    });
+    for (const text of linked) assert.ok(!/:\/\/|evil\.example|promo\.example/.test(text), text);
+    assert.match(message.text, /^Shirt from promo\.\u200bexample — /);
   });
 
   it("escapes the notification fallback text like the blocks", () => {

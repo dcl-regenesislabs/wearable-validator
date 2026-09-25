@@ -11,7 +11,7 @@ import { validate } from "../src/validate.js";
 import { parseGlb } from "../src/logic/gltf.js";
 import { InputLimitError, inputTooLarge, unpackZip } from "../src/loader.js";
 import { decodePngSafe, imageDimensions } from "../src/logic/images.js";
-import { cyclicGlb, duplicatePngHeader, oversizedPngData, pngChunk, pngWithProfile } from "./helpers/hostile-inputs.js";
+import { amplifyingGlb, cyclicGlb, duplicatePngHeader, nodeChainGlb, oversizedPngData, pngChunk, pngWithProfile, repeatedImageGlb } from "./helpers/hostile-inputs.js";
 import { pngBytes } from "./helpers/synthetic.js";
 
 it("rejects self-cycles and disconnected multi-node cycles before loading a GLB", async () => {
@@ -26,14 +26,15 @@ it("finishes validation and parent traversal of cyclic models without blocking t
   const fixtures = new URL("./helpers/hostile-inputs.ts", import.meta.url).href;
   const script = `import assert from "node:assert/strict";
 import { Document } from "@gltf-transform/core";
-import { isColliderNode } from ${JSON.stringify(gltf)};
+import { colliderNodes } from ${JSON.stringify(gltf)};
 import { validate } from ${JSON.stringify(validation)};
 import { cyclicGlb } from ${JSON.stringify(fixtures)};
 const result = await validate(cyclicGlb(), { category: "hat" });
 assert.ok(result.findings.some(f => f.check === "gltf-valid" && f.severity === "error"));
-const node = new Document().createNode();
+const doc = new Document();
+const node = doc.createNode();
 node.addChild(node);
-assert.throws(() => isColliderNode(node), /cycle/i);`;
+assert.throws(() => colliderNodes(doc), /cycle/i);`;
   const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { timeout: 5000, encoding: "utf8" });
   assert.equal(result.status, 0, result.error?.message ?? result.stderr);
 });
@@ -111,4 +112,38 @@ it("applies PNG limits to thumbnail, QR, capture and screenshot decoding", async
     request: async () => `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`
   };
   await assert.rejects(screenshot(session, 1));
+});
+
+it("refuses accessors that would unpack past the file's data before allocating them", async () => {
+  for (const shape of ["zero-stride", "no-buffer-view"] as const) {
+    const bytes = amplifyingGlb(shape);
+    assert.ok(bytes.length < 1024);
+    await assert.rejects(parseGlb(bytes), /reads past the data|unpack to/, shape);
+  }
+});
+
+it("counts every copy of a repeated embedded image toward the unpack limit", async () => {
+  const png = pngBytes(64, 64);
+  await parseGlb(repeatedImageGlb(png, 4));
+  await assert.rejects(parseGlb(repeatedImageGlb(png, 4), png.length * 3), /unpack to/);
+});
+
+it("measures a deep node chain in linear time", async () => {
+  const started = Date.now();
+  const result = await validate(nodeChainGlb(8000), { category: "upper_body", checks: ["triangle-count", "bounding-box"] });
+  assert.ok(Date.now() - started < 5000, `took ${Date.now() - started} ms`);
+  assert.ok(result.findings.some((finding) => finding.check === "triangle-count" && finding.severity === "error"));
+});
+
+it("stops decoding textures for QR codes once the item's scan budget is spent", async () => {
+  const pixels = manifest.images.maxScanPixels;
+  manifest.images.maxScanPixels = 64 * 64 * 2;
+  try {
+    const result = await validate(repeatedImageGlb(pngBytes(64, 64), 5), { checks: ["qr-code"] });
+    const skipped = result.findings.filter((finding) => finding.check === "qr-code");
+    assert.equal(skipped.length, 1);
+    assert.match(skipped[0].message, /^3 textures were not scanned/);
+  } finally {
+    manifest.images.maxScanPixels = pixels;
+  }
 });

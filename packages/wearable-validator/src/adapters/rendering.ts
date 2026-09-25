@@ -377,15 +377,32 @@ export function chromiumArgs(gpu: Gpu): string[] {
   return [...GPU_ARGS[gpu], ...extra];
 }
 
+// a renderer exploit reads its own environment first: the host's tokens stay out of it
+const BROWSER_ENV = ["PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TZ", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "FONTCONFIG_PATH", "SYSTEMROOT", "WINDIR", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMFILES"];
+
+/** Chromium's own sandbox stays on unless the operator sets CHROMIUM_SANDBOX=0: in a container it needs a seccomp profile that allows user namespaces (deploy/chromium-seccomp.json). */
+export function chromiumSandbox(): boolean {
+  return process.env.CHROMIUM_SANDBOX !== "0";
+}
+
+// channel "chromium" full headless: the headless shell gives WebGPU errors and screenshot timeouts (install with --no-shell)
+// CHROMIUM_ARGS is an operator knob for platform-specific flags (Linux containers need Vulkan-backed SwiftShader); it never changes the pixels' provenance, which is why it is not part of buildId
+/** What Chromium inherits from `source`: the few variables a browser needs, never the host's tokens. */
+export function browserEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of BROWSER_ENV) {
+    const value = source[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
+function launchOptions(gpu: Gpu) {
+  return { channel: "chromium", args: chromiumArgs(gpu), env: browserEnv(), chromiumSandbox: chromiumSandbox() };
+}
+
 export function launchChromium(options: { gpu: Gpu; headed?: boolean; executablePath?: string }): Promise<Browser> {
-  // channel "chromium" full headless: the headless shell gives WebGPU errors and screenshot timeouts (install with --no-shell)
-  // CHROMIUM_ARGS is an operator knob for platform-specific flags (Linux containers need Vulkan-backed SwiftShader); it never changes the pixels' provenance, which is why it is not part of buildId
-  return chromium.launch({
-    channel: "chromium",
-    headless: !options.headed,
-    executablePath: options.executablePath,
-    args: chromiumArgs(options.gpu)
-  });
+  return chromium.launch({ ...launchOptions(options.gpu), headless: !options.headed, executablePath: options.executablePath });
 }
 
 /** What a host can actually do: an engine that never draws looks exactly like a slow one in the run log. */
@@ -522,9 +539,8 @@ export async function openBrowserSeat(options: { assets?: LocalBuild; gpu: Gpu; 
   const viewport = { width: options.size, height: options.size };
   if (options.profileDirectory) {
     const context = await chromium.launchPersistentContext(options.profileDirectory, {
-      channel: "chromium",
+      ...launchOptions(options.gpu),
       headless: !options.headed,
-      args: chromiumArgs(options.gpu),
       viewport,
       serviceWorkers: "block"
     });
@@ -543,7 +559,7 @@ export function openPreview(options: { assets?: LocalBuild; gpu: Gpu; headed?: b
     signal.throwIfAborted();
     const started = Date.now();
     const seat = await openBrowserSeat({ ...options, size: settings.imageSizePx });
-    log("browser launched", { version: seat.version, gpu: options.gpu, extraArgs: process.env.CHROMIUM_ARGS ?? "", profile: options.profileDirectory ? "persistent" : "fresh", ms: Date.now() - started });
+    log("browser launched", { version: seat.version, gpu: options.gpu, extraArgs: process.env.CHROMIUM_ARGS ?? "", sandbox: chromiumSandbox(), profile: options.profileDirectory ? "persistent" : "fresh", ms: Date.now() - started });
     let closing: Promise<void> | undefined;
     // the log shows launched/closed pairs: an unclosed browser keeps a Unity engine spinning on the host
     const close = () => (closing ??= seat.close().then(() => log("browser closed", { ms: Date.now() - started })));
@@ -875,11 +891,17 @@ export async function createRenderer(options: RendererOptions): Promise<Renderer
     controller: AbortController,
     signal?: AbortSignal
   ): Promise<CaptureRecord[]> {
-    const abort = () => controller.abort();
+    let running = false;
+    const abort = () => {
+      controller.abort();
+      // captureAll reads the signal only between views: closing the browser ends the call in flight, if the browser is ours
+      if (running) void dropSession();
+    };
     const timeout = setTimeout(abort, timeouts.timeoutMs);
     signal?.addEventListener("abort", abort, { once: true });
     try {
       return await serialize(async () => {
+        running = true;
         const preview = await untilAborted(currentSession(), controller.signal);
         controller.signal.throwIfAborted();
         // the site URL selects Babylon and a WebGPU fallback is not Unity evidence — a non-unity load closes the browser

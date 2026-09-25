@@ -101,7 +101,7 @@ describe("run notifications", () => {
       assert.equal(message.channel, "C123");
       assert.equal(message.thread_ts, undefined);
       // the synthetic zip passes every code check without a warning and the fake reviewer passes every visual row
-      const approval = "✅ Ready to approve — no curator needed";
+      const approval = "✅ Nothing found — look at the views before approving";
       assert.equal(message.text, `Test Wearable — ✅ Passed — ${approval} (sent by alice@example.com)`, "the item's own name, not the zip's");
       assert.match(message.blocks[1].text!.text, /\*Item\* Test Wearable \(.*wearable.*\)/);
       const summary = message.blocks[1].text!.text;

@@ -1,7 +1,7 @@
 /** E-07 Props — prop geometry ships with every emote, so it carries its own triangle, material, texture and bone budget. */
 import type { Document, Material, Node, Texture } from "@gltf-transform/core";
 import { emoteOnly } from "../../../logic/animation.js";
-import { isColliderNode } from "../../../logic/gltf.js";
+import { colliderNodes } from "../../../logic/gltf.js";
 import { finding, type CheckDefinition, type CheckMeta, type Finding } from "../../../types.js";
 import { PROPS } from "../../docs.js";
 
@@ -41,12 +41,13 @@ export const props: CheckDefinition = {
       if (roots.length === 0) continue;
       const nodes = new Set<Node>();
       for (const root of roots) collectSubtree(root, nodes);
+      const colliders = colliderNodes(model.doc);
       let triangles = 0;
       const materials = new Set<Material>();
       const textures = new Set<Texture>();
       for (const node of nodes) {
         const mesh = node.getMesh();
-        if (!mesh || isColliderNode(node)) continue;
+        if (!mesh || colliders.has(node)) continue;
         for (const prim of mesh.listPrimitives()) {
           const mode = prim.getMode();
           const indices = prim.getIndices();

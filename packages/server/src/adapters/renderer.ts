@@ -57,9 +57,11 @@ export async function createRendererComponent(components: { config: IConfigCompo
   const { config, logs } = components;
   const log = appLogger(logs, "renderer");
   const buildDirectory = await resolveBuildDirectory(await config.getString("RENDERER_BUILD"));
-  // the library reads CHROMIUM_ARGS from the process environment at launch; a value that only the config knows (a test map) is handed over here
-  const chromiumArgs = await config.getString("CHROMIUM_ARGS");
-  if (chromiumArgs !== undefined && process.env.CHROMIUM_ARGS === undefined) process.env.CHROMIUM_ARGS = chromiumArgs;
+  // the library reads CHROMIUM_ARGS and CHROMIUM_SANDBOX from the process environment at launch; a value that only the config knows (a test map) is handed over here
+  for (const key of ["CHROMIUM_ARGS", "CHROMIUM_SANDBOX"]) {
+    const value = await config.getString(key);
+    if (value !== undefined && process.env[key] === undefined) process.env[key] = value;
+  }
   if (!buildDirectory) log.warn("no Unity build found: visual runs will skip rendering (put the PR #10053 build in packages/server/renderer-build or set RENDERER_BUILD)");
   // a slow host (few vCPUs, software rendering) needs longer per previewer command than the manifest assumes
   const timeouts = {

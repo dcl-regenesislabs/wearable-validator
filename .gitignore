@@ -12,3 +12,4 @@ packages/server/renderer-build/
 !.env.default
 packages/server/build-info.json
 deploy/.env
+.auth.json

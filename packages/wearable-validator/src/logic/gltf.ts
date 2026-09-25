@@ -1,14 +1,67 @@
 import { Document, WebIO, type Node, type Primitive } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
+import { manifest } from "../manifest/index.js";
 
 const io = new WebIO().registerExtensions(ALL_EXTENSIONS);
 
 /** Parse a self-contained GLB. Returns the gltf-transform Document plus the raw JSON chunk. */
-export async function parseGlb(bytes: Uint8Array): Promise<{ doc: Document; json: Record<string, unknown> }> {
+export async function parseGlb(bytes: Uint8Array, maxUnpackedBytes = manifest.gltf.maxUnpackedBytes): Promise<{ doc: Document; json: Record<string, unknown> }> {
   const json = readGlbJsonChunk(bytes);
   assertAcyclicNodes(json);
+  assertBoundedUnpacking(json, maxUnpackedBytes);
   const doc = await io.readBinary(bytes);
   return { doc, json };
+}
+
+const COMPONENT_BYTES: Record<number, number> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
+const TYPE_COMPONENTS: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 };
+
+// gltf-transform allocates count × element size per accessor and copies a buffer view per image, straight from the JSON:
+// a few hundred bytes could otherwise ask for gigabytes
+function assertBoundedUnpacking(json: Record<string, unknown>, maxUnpackedBytes: number): void {
+  const views: unknown[] = Array.isArray(json.bufferViews) ? json.bufferViews : [];
+  const damaged = (index: number) => new Error(`Accessor #${index} reads past the data the file holds. Re-export the model as GLB.`);
+  const fits = (index: number, viewIndex: unknown, offset: unknown, count: number, elementBytes: number, stride?: unknown): void => {
+    const view = typeof viewIndex === "number" ? views[viewIndex] : undefined;
+    if (!view || typeof view !== "object" || !("byteLength" in view) || typeof view.byteLength !== "number") throw damaged(index);
+    const step = stride ?? elementBytes;
+    if (typeof step !== "number" || !Number.isInteger(step) || step < elementBytes || step > 252) throw damaged(index);
+    const start = offset ?? 0;
+    if (typeof start !== "number" || !Number.isInteger(start) || start < 0) throw damaged(index);
+    if (count > 0 && start + step * (count - 1) + elementBytes > view.byteLength) throw damaged(index);
+  };
+  let total = 0;
+  const accessors: unknown[] = Array.isArray(json.accessors) ? json.accessors : [];
+  accessors.forEach((accessor: unknown, index) => {
+    if (!accessor || typeof accessor !== "object") throw damaged(index);
+    const { count, componentType, type, bufferView, byteOffset, sparse } = accessor as Record<string, unknown>;
+    const componentBytes = COMPONENT_BYTES[componentType as number];
+    const components = TYPE_COMPONENTS[type as string];
+    if (typeof count !== "number" || !Number.isInteger(count) || count < 0 || !componentBytes || !components) throw damaged(index);
+    const elementBytes = componentBytes * components;
+    if (bufferView !== undefined) {
+      const view = views[bufferView as number];
+      fits(index, bufferView, byteOffset, count, elementBytes, view && typeof view === "object" && "byteStride" in view ? view.byteStride : undefined);
+    }
+    if (sparse !== undefined) {
+      const { count: sparseCount, indices, values } = (sparse ?? {}) as Record<string, unknown>;
+      if (typeof sparseCount !== "number" || !Number.isInteger(sparseCount) || sparseCount < 1 || sparseCount > count) throw damaged(index);
+      const { bufferView: indexView, byteOffset: indexOffset, componentType: indexType } = (indices ?? {}) as Record<string, unknown>;
+      const { bufferView: valueView, byteOffset: valueOffset } = (values ?? {}) as Record<string, unknown>;
+      fits(index, indexView, indexOffset, sparseCount, COMPONENT_BYTES[indexType as number] ?? 0);
+      fits(index, valueView, valueOffset, sparseCount, elementBytes);
+    }
+    total += count * elementBytes;
+  });
+  const images: unknown[] = Array.isArray(json.images) ? json.images : [];
+  for (const image of images) {
+    const view = image && typeof image === "object" && "bufferView" in image ? views[image.bufferView as number] : undefined;
+    if (view && typeof view === "object" && "byteLength" in view && typeof view.byteLength === "number") total += view.byteLength;
+  }
+  if (total > maxUnpackedBytes) {
+    const mb = (bytes: number) => Math.round(bytes / 1048576);
+    throw new Error(`The model's geometry, animation and image data unpack to ${mb(total)} MB — the maximum is ${mb(maxUnpackedBytes)} MB. Reduce the mesh, animation or texture detail and re-export it as GLB.`);
+  }
 }
 
 function assertAcyclicNodes(json: Record<string, unknown>): void {
@@ -47,18 +100,48 @@ export function isGlb(bytes: Uint8Array): boolean {
   return bytes.length >= 4 && bytes[0] === 0x67 && bytes[1] === 0x6c && bytes[2] === 0x54 && bytes[3] === 0x46;
 }
 
-/** Collider rule (pinned): a mesh is a collider when its node — or any ancestor — matches /collider/i. */
-export function isColliderNode(node: Node): boolean {
+/** Collider rule (pinned): a mesh is a collider when its node — or any ancestor — matches /collider/i. One top-down pass: per-node ancestor walks are quadratic on deep chains. */
+export function colliderNodes(doc: Document): Set<Node> {
+  const colliders = new Set<Node>();
+  walkDown(doc, (node, parent) => {
+    if (/collider/i.test(node.getName()) || (parent && colliders.has(parent))) colliders.add(node);
+  });
+  return colliders;
+}
+
+/** Every node's world matrix, parents before children, instead of gltf-transform's per-node ancestor walk. */
+export function worldMatrices(doc: Document): Map<Node, number[]> {
+  const worlds = new Map<Node, number[]>();
+  walkDown(doc, (node, parent) => {
+    const local = node.getMatrix();
+    worlds.set(node, parent ? multiply(worlds.get(parent)!, local) : local);
+  });
+  return worlds;
+}
+
+function walkDown(doc: Document, visit: (node: Node, parent: Node | null) => void): void {
+  const nodes = doc.getRoot().listNodes();
+  const pending: [Node, Node | null][] = nodes.filter((node) => !node.getParentNode()).map((node) => [node, null]);
   const seen = new Set<Node>();
-  let current: Node | null = node;
-  while (current) {
-    if (seen.has(current)) throw new Error("The model contains a cycle in its node hierarchy. Re-export it as GLB.");
-    seen.add(current);
-    if (/collider/i.test(current.getName())) return true;
-    const parent = current.listParents().find((p) => p.propertyType === "Node") as Node | undefined;
-    current = parent ?? null;
+  for (let entry = pending.pop(); entry; entry = pending.pop()) {
+    const [node, parent] = entry;
+    if (seen.has(node)) continue;
+    seen.add(node);
+    visit(node, parent);
+    for (const child of node.listChildren()) pending.push([child, node]);
   }
-  return false;
+  if (seen.size !== nodes.length) throw new Error("The model contains a cycle in its node hierarchy. Re-export it as GLB.");
+}
+
+/** Column-major a × b. */
+function multiply(a: number[], b: number[]): number[] {
+  const out = new Array<number>(16);
+  for (let col = 0; col < 4; col++) {
+    for (let row = 0; row < 4; row++) {
+      out[col * 4 + row] = a[row] * b[col * 4] + a[4 + row] * b[col * 4 + 1] + a[8 + row] * b[col * 4 + 2] + a[12 + row] * b[col * 4 + 3];
+    }
+  }
+  return out;
 }
 
 export interface TriangleCount {
@@ -71,9 +154,10 @@ export interface TriangleCount {
 export function countTriangles(doc: Document): TriangleCount {
   let total = 0;
   let hasStripOrFan = false;
+  const colliders = colliderNodes(doc);
   for (const node of doc.getRoot().listNodes()) {
     const mesh = node.getMesh();
-    if (!mesh || isColliderNode(node)) continue;
+    if (!mesh || colliders.has(node)) continue;
     for (const prim of mesh.listPrimitives()) {
       total += primitiveTriangles(prim, (m) => (m ? (hasStripOrFan = true) : undefined));
     }
@@ -100,10 +184,12 @@ export function computeAabb(doc: Document): { width: number; height: number; dep
   let min = [Infinity, Infinity, Infinity];
   let max = [-Infinity, -Infinity, -Infinity];
   let any = false;
+  const colliders = colliderNodes(doc);
+  const worlds = worldMatrices(doc);
   for (const node of doc.getRoot().listNodes()) {
     const mesh = node.getMesh();
-    if (!mesh || isColliderNode(node)) continue;
-    const world = node.getWorldMatrix();
+    if (!mesh || colliders.has(node)) continue;
+    const world = worlds.get(node)!;
     for (const prim of mesh.listPrimitives()) {
       const pos = prim.getAttribute("POSITION");
       if (!pos) continue;

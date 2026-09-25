@@ -7,6 +7,7 @@ import { brotliCompressSync, gzipSync } from "node:zlib";
 import type { BrowserContext, Route, WebSocketRoute } from "playwright-core";
 import { manifest } from "../manifest/index.js";
 import {
+  browserEnv,
   browserRequestAllowed,
   captureAll, sessionOrder,
   createRenderer,
@@ -527,6 +528,24 @@ describe("createRenderer timeouts", () => {
       await slow.stop();
     });
   });
+
+  it("closes the browser when the deadline passes, so the previewer call in flight ends with it", async () => {
+    await withBuildDir(async (directory) => {
+      const wire = scripted();
+      let closeBrowser = () => {};
+      wire.session.request = () => new Promise((_, reject) => { closeBrowser = () => reject(new Error("Target closed")); });
+      wire.session.close = async () => {
+        wire.closed++;
+        closeBrowser();
+      };
+      const engine = await createRenderer({ buildDirectory: directory, open: async () => wire.session, timeouts: { timeoutMs: 50 } });
+      const started = Date.now();
+      await assert.rejects(engine.capture(input, recipe(engine.buildId).slice(0, 1)), /did not finish within 50 ms/);
+      assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+      assert.equal(wire.closed, 1);
+      await engine.stop();
+    });
+  });
 });
 
 describe("captureAll", () => {
@@ -626,4 +645,9 @@ describe("captureAll", () => {
     assert.deepEqual(seen, sessionOrder(requests).map((request) => request.id));
     assert.equal(captures.length, seen.length);
   });
+});
+
+it("hands Chromium only the variables a browser needs, never the host's tokens", () => {
+  const env = browserEnv({ PATH: "/usr/bin", HOME: "/home/pwuser", ANTHROPIC_OAUTH_SETUP_TOKEN: "sk-ant-oat01-secret", SLACK_BOT_TOKEN: "xoxb-secret", OPERATOR_TOKEN: "secret" });
+  assert.deepEqual(env, { PATH: "/usr/bin", HOME: "/home/pwuser" });
 });

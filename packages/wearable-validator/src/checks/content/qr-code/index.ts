@@ -66,11 +66,17 @@ interface Scan {
   unreadable?: boolean;
 }
 
-function scan(bytes: Uint8Array, maxPixels: number): Scan {
+/** `budget` is what is left of the item's scan pixels: an image past it is left out, never decoded. */
+function scan(bytes: Uint8Array, maxPixels: number, budget = { left: Infinity, skipped: 0 }): Scan {
   if (!isPngBytes(bytes) && !isJpegBytes(bytes)) return {};
   const header = imageDimensions(bytes);
   if (!header) return { unreadable: true };
   if (header.width * header.height > maxPixels) return { unscanned: header };
+  if (header.width * header.height > budget.left) {
+    budget.skipped++;
+    return {};
+  }
+  budget.left -= header.width * header.height;
   const rgba = toRgba(bytes, maxPixels);
   if (!rgba) return { unreadable: true };
   const qr = jsQR(rgba.data, rgba.width, rgba.height);
@@ -85,7 +91,7 @@ export const qrCode: CheckDefinition = {
   describe: "no decodable QR codes in textures or the thumbnail",
   explanation: "Scannable QR codes are rejected — their target can change after review.",
   fix: "Remove the QR code from the texture or thumbnail — QR targets can change after review, so they're rejected outright.",
-  details: "Decodes every texture and the thumbnail to pixels and runs a QR detector over them — any readable code fails. Images above the decode budget (images.maxDecodePixels) are reported as unscanned instead of decoded.",
+  details: "Decodes every texture and the thumbnail to pixels and runs a QR detector over them — any readable code fails. Images above the decode budget (images.maxDecodePixels) are reported as unscanned instead of decoded, and so are textures past the item's total (images.maxScanPixels).",
   measure: (ctx) => {
     let images = 0;
     for (const model of ctx.models) images += model.doc.getRoot().listTextures().length;
@@ -108,13 +114,14 @@ export const qrCode: CheckDefinition = {
       findings.push(finding(meta, "warning", `${label} has an image header that could not be read, so it was not scanned for QR codes. Re-export it as a standard PNG or JPEG so it can be checked.`, { where }));
     };
 
+    const budget = { left: ctx.manifest.images.maxScanPixels, skipped: 0 };
     for (const model of ctx.models) {
       model.doc.getRoot().listTextures().forEach((tex, i) => {
         const img = tex.getImage();
         if (!img) return;
         const name = tex.getName() || tex.getURI() || `texture #${i}`;
         const where = `"${model.mainFile}" › ${name}`;
-        const result = scan(img, maxPixels);
+        const result = scan(img, maxPixels, budget);
         if (result.unscanned) return unscanned(`Texture "${name}" in "${model.mainFile}"`, where, result.unscanned);
         if (result.unreadable) return unreadable(`Texture "${name}" in "${model.mainFile}"`, where);
         if (result.decoded === undefined) return;
@@ -124,6 +131,13 @@ export const qrCode: CheckDefinition = {
           result.decoded
         );
       });
+    }
+
+    if (budget.skipped > 0) {
+      const scanMegapixels = Math.round(ctx.manifest.images.maxScanPixels / 100000) / 10;
+      findings.push(finding(meta, "warning", `${budget.skipped} texture${budget.skipped === 1 ? " was" : "s were"} not scanned for QR codes — the item's textures add up to more than the ${scanMegapixels} megapixels the scanner reads per item. Remove unused or duplicate textures so every one can be checked.`, {
+        measured: `${budget.skipped} unscanned`, limit: `${scanMegapixels} megapixels`
+      }));
     }
 
     const thumbnailPath = ctx.item.thumbnailPath ?? "thumbnail.png";
