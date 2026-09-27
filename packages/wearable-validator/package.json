@@ -29,6 +29,13 @@
     "dist",
     "README.md"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/decentraland/wearable-validator.git",
+    "directory": "packages/wearable-validator"
+  },
+  "homepage": "https://github.com/decentraland/wearable-validator/tree/main/packages/wearable-validator#readme",
+  "bugs": "https://github.com/decentraland/wearable-validator/issues",
   "publishConfig": {
     "access": "public"
   },
@@ -39,7 +46,6 @@
     "gen:sources": "tsx generate-source-links.ts"
   },
   "dependencies": {
-    "@dcl/hashing": "3.0.4",
     "@dcl/schemas": "^16.11.1",
     "@gltf-transform/core": "^4.2.1",
     "@gltf-transform/extensions": "^4.2.1",
@@ -53,6 +59,7 @@
     "pako": "2.2.0"
   },
   "devDependencies": {
+    "@dcl/hashing": "3.0.4",
     "@types/node": "^22.0.0",
     "@types/pako": "2.0.4",
     "tsx": "^4.20.0",

@@ -58,7 +58,7 @@ Leave out the token and the server renders and writes the prompt without calling
 
 ## Deploy
 
-Push to `main` deploys the website to wearable-validator.dclregenesislabs.xyz through Cloudflare Workers Builds, behind Cloudflare Access (curators sign in with their email). The Worker forwards `/api/*` to the run server, one container on DigitalOcean App Platform at api.wearable-validator.dclregenesislabs.xyz. Steps in [docs/deployment.md](docs/deployment.md).
+Push to `main` deploys the website to wearable-validator.dclregenesislabs.xyz through Cloudflare Workers Builds, behind Cloudflare Access (curators sign in with their email). The Worker forwards `/api/*` to the run server, one container built from the root `Dockerfile`: a merge to `main` deploys it to dev and a GitHub release to prd, through the shared Decentraland pipeline. Steps in [docs/deployment.md](docs/deployment.md).
 
 ```ts
 import { validate } from "@dcl-regenesislabs/wearable-validator";
@@ -92,12 +92,11 @@ content hash matches, and altered bytes produce a mismatch instead of a crashed
 check. This scene reproduced the browser hashing failure before the fix.
 
 Content hashes support both legacy Decentraland `Qm…` whole-file hashes and
-UnixFS CIDv1 hashes, using `@dcl/hashing` and the format declared for each file.
-`@dcl/hashing` is pinned to keep the verified hash outputs and module format stable.
-The website supplies Node crypto and its supporting browser polyfills through
-Vite. Other browser integrations must provide equivalent polyfills; Node needs
-no extra configuration. Regression fixtures cover empty files, chunk boundaries,
-and multi-chunk files in Node and the production browser bundle.
+UnixFS CIDv1 hashes, in the format declared for each file. They are computed with
+Web Crypto (`crypto.subtle`), built into browsers and Node, so no bundler needs
+polyfills. Tests compare them with `@dcl/hashing` (a dev dependency only) across
+empty files, chunk boundaries and a two-level tree, in Node and the production
+browser bundle.
 
 ## Emote playback regression
 

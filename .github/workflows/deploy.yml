@@ -36,7 +36,10 @@ jobs:
             cd /root/wearable-validator
             git fetch --quiet origin main
             git reset --hard --quiet origin/main
-            docker compose -f deploy/docker-compose.yml up -d --build
+            docker compose -f deploy/docker-compose.yml build validator
+            # the image runs the server as `validator`; folders an older image wrote belong to another user
+            docker compose -f deploy/docker-compose.yml run --rm --no-deps -u 0 validator sh -c "chown -R validator:validator /data/artifacts"
+            docker compose -f deploy/docker-compose.yml up -d
             docker image prune -f >/dev/null
           '
 
@@ -48,7 +51,7 @@ jobs:
           for i in $(seq 1 30); do
             state=$(ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "root@$HOST" 'cd /root/wearable-validator && docker inspect --format "{{.State.Health.Status}}" "$(docker compose -f deploy/docker-compose.yml ps -q validator)"' || true)
             if [ "$state" = healthy ]; then
-              ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "root@$HOST" 'cd /root/wearable-validator && docker compose -f deploy/docker-compose.yml exec -T validator wget -qO- http://127.0.0.1:4180/api/health'
+              ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "root@$HOST" 'cd /root/wearable-validator && docker compose -f deploy/docker-compose.yml exec -T validator node -e "fetch(\\"http://127.0.0.1:4180/api/health\\").then(r => r.text()).then(console.log)"'
               exit 0
             fi
             sleep 10
