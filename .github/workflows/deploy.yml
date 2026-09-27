@@ -51,7 +51,7 @@ jobs:
           for i in $(seq 1 30); do
             state=$(ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "root@$HOST" 'cd /root/wearable-validator && docker inspect --format "{{.State.Health.Status}}" "$(docker compose -f deploy/docker-compose.yml ps -q validator)"' || true)
             if [ "$state" = healthy ]; then
-              ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "root@$HOST" 'cd /root/wearable-validator && docker compose -f deploy/docker-compose.yml exec -T validator node -e "fetch(\\"http://127.0.0.1:4180/api/health\\").then(r => r.text()).then(console.log)"'
+              ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "root@$HOST" 'cd /root/wearable-validator && docker compose -f deploy/docker-compose.yml exec -T validator node -e "fetch(process.argv[1]).then(r => r.text()).then(console.log)" http://127.0.0.1:4180/api/health'
               exit 0
             fi
             sleep 10
