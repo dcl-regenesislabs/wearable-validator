@@ -1,12 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { fetchCatalystItem, parseItemReference } from "./catalyst.js";
+import { catalystFor, DEFAULT_CATALYST, fetchCatalystItem, parseItemReference, TESTNET_CATALYST } from "./catalyst.js";
 import { catalystFetch, syntheticEntity } from "#test/helpers/entity.js";
 import { syntheticZip } from "#test/helpers/synthetic.js";
 
 const CONTRACT = "0x" + "ab".repeat(20);
 const MATIC = `urn:decentraland:matic:collections-v2:${CONTRACT}:12`;
 const ETHEREUM = `urn:decentraland:ethereum:collections-v2:${CONTRACT}:12`;
+const AMOY = `urn:decentraland:amoy:collections-v2:${CONTRACT}:12`;
 
 describe("parseItemReference", () => {
   it("takes a URN as it is, lower-cased and trimmed", () => {
@@ -19,6 +20,12 @@ describe("parseItemReference", () => {
     assert.deepEqual(parseItemReference(`https://decentraland.org/shop/item/${CONTRACT}/12`), expected);
     assert.deepEqual(parseItemReference(`https://decentraland.org/shop/item/${CONTRACT.toUpperCase().replace("0X", "0x")}/12?utm=x`), expected);
     assert.deepEqual(parseItemReference(`https://market.decentraland.org/marketplace/contracts/${CONTRACT}/items/12`), expected);
+  });
+
+  it("turns a decentraland.zone shop URL into the amoy candidate", () => {
+    assert.deepEqual(parseItemReference(`https://decentraland.zone/shop/item/${CONTRACT}/12`), [AMOY]);
+    assert.deepEqual(parseItemReference(`https://market.decentraland.zone/marketplace/contracts/${CONTRACT}/items/12`), [AMOY]);
+    assert.deepEqual(parseItemReference(AMOY), [AMOY]);
   });
 
   it("refuses a token page with a hint, and answers null for anything else", () => {
@@ -130,6 +137,20 @@ describe("fetchCatalystItem", () => {
     assert.ok(seen.every((signal) => signal instanceof AbortSignal && !signal.aborted));
     controller.abort();
     assert.ok(seen.every((signal) => signal?.aborted), "the internal signal trips with the caller's");
+  });
+
+  it("asks the .zone catalyst for amoy items and the .org one for mainnet, unless a peer is named", async () => {
+    assert.equal(catalystFor(AMOY), TESTNET_CATALYST);
+    assert.equal(catalystFor(MATIC), DEFAULT_CATALYST);
+    assert.equal(catalystFor(ETHEREUM), DEFAULT_CATALYST);
+    const entity = await syntheticEntity(await syntheticZip(), AMOY);
+    const fetch = catalystFetch([entity]);
+    const item = await fetchCatalystItem([AMOY], { fetch });
+    assert.equal(item.urn, AMOY);
+    assert.ok(fetch.calls.every((call) => call.url.startsWith(`${TESTNET_CATALYST}/content/`)), "lookups and downloads go to the .zone catalyst");
+    const named = catalystFetch([entity]);
+    await fetchCatalystItem([AMOY], { peer: "https://peer.example", fetch: named });
+    assert.ok(named.calls.every((call) => call.url.startsWith("https://peer.example/content/")), "a named peer wins");
   });
 
   it("rejects an entity without a content list", async () => {

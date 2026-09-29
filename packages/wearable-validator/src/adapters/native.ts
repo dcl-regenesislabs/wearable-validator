@@ -8,7 +8,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { digest, digestJson } from "../logic/captures.js";
@@ -163,7 +163,7 @@ async function writeItem(input: RenderInput, directory: string): Promise<object>
   for (const key of drawn) {
     const bytes = input.files.get(key);
     if (!bytes) continue;
-    assertSelfContained(key, bytes);
+    assertInsideItem(key, bytes);
     const path = resolve(directory, key);
     const inside = relative(resolve(directory), path);
     if (!inside || inside.startsWith("..") || isAbsolute(inside)) throw new Error(`"${key}" is not a file inside the item. Rename it and export the item again.`);
@@ -189,16 +189,32 @@ async function writeItem(input: RenderInput, directory: string): Promise<object>
     : { id, data: { category: input.category, hides: input.item.hides ?? [], replaces: input.item.replaces ?? [], representations } };
 }
 
-// the player would fetch any URI a model names, from inside the server's network: only data inside the file is drawn
-function assertSelfContained(key: string, bytes: Uint8Array): void {
+// the player fetches whatever URI a model names, from inside the server's network: only embedded data, or a
+// relative path that stays in the item's folder (smart wearables keep textures next to their models), is drawn
+function assertInsideItem(key: string, bytes: Uint8Array): void {
   if (!isGlb(bytes)) return;
   const json = readGlbJsonChunk(bytes);
   for (const list of [json.buffers, json.images]) {
     for (const entry of Array.isArray(list) ? list : []) {
       const uri = entry && typeof entry === "object" && "uri" in entry ? entry.uri : undefined;
-      if (typeof uri === "string" && !uri.startsWith("data:")) throw new Error(`"${key}" points at a file outside the GLB (${uri.slice(0, 80)}). Export a self-contained .glb.`);
+      if (typeof uri === "string" && pointsOutside(key, uri)) throw new Error(`"${key}" points at a file outside the item (${uri.slice(0, 80)}). Embed it in the .glb, or ship it in the item and name it by a relative path.`);
     }
   }
+}
+
+// the player unescapes a uri once more and its URL parser then treats %2e%2e as "..": after one decode, nothing
+// that could still be an escape, scheme, query or Windows path is allowed, and the path must land inside the item
+function pointsOutside(key: string, uri: string): boolean {
+  if (uri.startsWith("data:")) return false;
+  let path: string;
+  try {
+    path = decodeURIComponent(uri);
+  } catch {
+    return true;
+  }
+  if (/[%?#:\\]/.test(path) || path.startsWith("/")) return true;
+  const target = posix.normalize(posix.join(posix.dirname(key), path));
+  return target === ".." || target.startsWith("../");
 }
 
 // the server writes under umask 077; the render server may run as another user that shares the folder's group
