@@ -2,21 +2,18 @@
 
 The Decentraland wearable/emote rule book as code (DAO proposal e2a13c58). npm monorepo:
 `packages/wearable-validator` (published package: 35 deterministic checks + 4 visual checks, manifest, CLI) ·
-`packages/server` (the run server: renders, calls the model, streams SSE, owner-scoped runs; Docker image) ·
-`packages/web` (the website — code checks run fully in-browser; the Visual review panel talks to the server; `worker.ts` is the Cloudflare Worker) ·
+`packages/web` (the website, static: every check runs in the browser; the visual checks are not run here) ·
 `tools` (catalyst runner, sample generator; `tools/corpus/` holds downloaded catalyst data, blobs gitignored).
-Boundary: server and web import the library only by package name (`@dcl-regenesislabs/wearable-validator`, `/native`, `/ai`) — never a relative path into its `src/`. Their tests may import the library's fixtures relatively (`../../wearable-validator/test/helpers/...`): those are not a published surface.
+Boundary: the web imports the library only by package name (`@dcl-regenesislabs/wearable-validator`) — never a relative path into its `src/`. Its tests may import the library's fixtures relatively (`../../wearable-validator/test/helpers/...`): those are not a published surface.
 
 ## Commands
 
 - `npm test` / `npm run typecheck` — full suite (node:test) + tsc, every workspace
-- `npm run dev` — the website (Vite); with `ANTHROPIC_OAUTH_SETUP_TOKEN=… npm start -w wearable-validator-server` running, the site streams visual reviews live over SSE
-- `npm run serve` — build the site and serve it with the run server at http://127.0.0.1:4180 (single local owner, no sign-in)
-- `npm run review -- <item.zip> [--no-ai] [--from <run dir>]` — visual review from the terminal (the render server runs in Docker); run folders in `packages/server/artifacts/`
+- `npm run dev` — the website (Vite)
 - `npx tsx src/cli.ts validate <file> [--checks triangle-count] [--groups model]` (from packages/wearable-validator)
 - `npm run catalyst -- --wearables 15 --emotes 10` — validate real published items
 - `npm run samples` — regenerate the website's example zips
-- Deploy: push to main → Cloudflare Workers Builds → wearable-validator.dclregenesislabs.xyz (`wrangler.jsonc` at root); curators site + run server: `docs/deployment.md`
+- Deploy: push to main → Cloudflare Workers Builds → wearable-validator.dclregenesislabs.xyz (`wrangler.jsonc` at root, static assets): `docs/deployment.md`
 
 ## Hard rules
 
