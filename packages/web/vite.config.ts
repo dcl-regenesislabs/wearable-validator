@@ -12,8 +12,6 @@ export default defineConfig({
     }
   },
   server: {
-    fs: { allow: [resolve(import.meta.dirname, "../..")] },
-    // the local run server (npm run serve at the repo root) — same origin for SSE and capture images
-    proxy: { "/api": "http://127.0.0.1:4180" }
+    fs: { allow: [resolve(import.meta.dirname, "../..")] }
   }
 });

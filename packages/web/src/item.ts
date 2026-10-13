@@ -1,14 +1,12 @@
 import { InputLimitError, unpackZip } from "@dcl-regenesislabs/wearable-validator";
 
-/** The item on the Validate tab: a dropped file, a bundled sample or a catalyst entity. */
+/** The item on the page: a dropped file, a bundled sample or a catalyst entity. */
 export interface Loaded {
   name: string;
   bytes?: Uint8Array;
   isBareGlb: boolean;
   /** Published-item analysis: entity files + metadata fetched from catalyst, under this URN. */
   urn?: string;
-  /** Opened from a `?urn=` link rather than by the curator's own hand: its visual review waits for a press. */
-  fromLink?: boolean;
   files?: Map<string, Uint8Array>;
   metadata?: unknown;
   content?: { file: string; hash: string }[];
@@ -64,11 +62,6 @@ export function formatBytes(bytes: number): string {
   if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(bytes >= 10 * 1048576 ? 0 : 1)} MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} B`;
-}
-
-/** Clean code checks start the visual review at once, unless the item arrived by link: any page can send a curator one. */
-export function reviewsOnArrival(item: Loaded, passed: boolean | null | undefined): boolean {
-  return passed === true && !item.fromLink;
 }
 
 export function inputKind(item: Loaded): string {
