@@ -30,34 +30,20 @@ npm run catalyst -- --wearables 15 --emotes 10
 | | |
 |---|---|
 | `packages/wearable-validator` | the published package: 35 deterministic checks (files · model · emote · content) plus four visual checks (render-valid, thumbnail-honesty, visual-quality, emote-quality), rules manifest, CLI. One folder per check under `src/checks/<group>/<name>/` (algorithm, creator-facing text and tests together); shared algorithms in `src/logic/`; Node-only adapters in `src/adapters/` (`/native`, `/ai`). The root entry is isomorphic — the website runs it fully in the browser |
-| `packages/server` | the run server (`wearable-validator-server`): renders the item with the native render server (the Unity avatar scene drawn on the CPU, no browser), calls the vision model, streams every step over SSE and keeps one folder per run (owner-scoped); the terminal runner `npm run review`; the Docker image (`Dockerfile`). Run folders land in gitignored `packages/server/artifacts/` |
-| `packages/web` | the website (`wearable-validator-web`): upload → filterable per-rule results with separate values, requirements, and colored status labels (including on mobile), inspectable metadata fields, plain explanations, concrete how-to-fix steps, exact-section docs links, a live 3D preview, and the Visual review panel when a run server answers `/api`; `worker.ts` is the Cloudflare Worker that serves it and forwards `/api/*` |
+| `packages/web` | the website (`wearable-validator-web`): upload → filterable per-rule results with separate values, requirements, and colored status labels (including on mobile), inspectable metadata fields, plain explanations, concrete how-to-fix steps, exact-section docs links, and a live 3D preview. Every check runs in the browser |
 | `tools` | catalyst runner (validate published items), sample generator |
 
-Server and web import the library only by package name (`@dcl-regenesislabs/wearable-validator`, `/native`, `/ai`). Requirement labels are formatted in the website; the package owns the manifest values and category-dependent limit calculations.
+The web imports the library only by package name (`@dcl-regenesislabs/wearable-validator`). Requirement labels are formatted in the website; the package owns the manifest values and category-dependent limit calculations.
 
 Every check carries a rule-book ID (`M-01`…), a plain-language explanation, fix guidance, and a docs link — all exported from the package (`checks`, `explanations`, `fixes`) so no surface can drift from the code.
 
 To add or change a rule, follow [docs/adding-a-check.md](docs/adding-a-check.md): one folder per check, numbers in the manifest, tests beside the code.
 
-Visual validation (Phase 4): the item is rendered headlessly on both body shapes once, then pinned vision calls judge the thumbnail, clipping, skinning, textures and scale (wearables) or pose, grounding, ending and motion (emotes). Every run writes a folder you can open — screenshots, the prompt, the exact context sent to the model, the raw answer and the finding. See [docs/visual-validation.md](docs/visual-validation.md).
-
-```sh
-# renders run the render server in Docker (a Linux x86_64 player): have Docker running; the first render builds its image
-# the website with live visual review: builds the site and serves it with the run server at http://127.0.0.1:4180
-ANTHROPIC_OAUTH_SETUP_TOKEN=<claude setup-token> npm run serve   # drop a zip → when the code checks pass, screenshots and the two model answers stream in on their own; with errors, press "Render and review anyway"
-# or from the terminal
-npm run review -- packages/web/public/samples/upper_body.zip --no-ai   # renders + writes the prompt, no spend
-npm run review -- packages/web/public/samples/upper_body.zip \
-  --from packages/server/artifacts/visual-upper_body-XXXXXX            # with the token set: reuses the renders, two model calls
-npm run review -- https://decentraland.org/shop/item/0x…/12 --no-ai     # a published item: a shop item URL or a URN, fetched from the catalyst
-```
-
-Leave out the token and the server renders and writes the prompt without calling the model. The terminal shows one line per event (run accepted, code gate, each capture, the model request, the answer with tokens and cost); when hosted, the same process is configured with `PORT`, `HOST`, `ANTHROPIC_OAUTH_SETUP_TOKEN` (a year-long `claude setup-token`, no session file needed), `RENDER_SERVER`, `ARTIFACTS_DIR`, `CATALYST_URL` (the peer marketplace items are fetched from), the Cloudflare Access variables, `SLACK_BOT_TOKEN` + `SLACK_CHANNEL` + `SITE_URL` (one Slack message per finished run) and logs JSON lines — see [docs/visual-validation.md](docs/visual-validation.md).
+The four visual checks (renders reviewed by a vision model) are not run on this site. They run in the validation job of decentraland/wearable-validator. See [docs/visual-validation.md](docs/visual-validation.md).
 
 ## Deploy
 
-Push to `main` deploys the website to wearable-validator.dclregenesislabs.xyz through Cloudflare Workers Builds, behind Cloudflare Access (curators sign in with their email). The Worker forwards `/api/*` to the run server, one container built from the root `Dockerfile`: a merge to `main` deploys it to dev and a GitHub release to prd, through the shared Decentraland pipeline. Steps in [docs/deployment.md](docs/deployment.md).
+Push to `main` deploys the website to wearable-validator.dclregenesislabs.xyz through Cloudflare Workers Builds, as static assets behind Cloudflare Access (curators sign in with their email). Steps in [docs/deployment.md](docs/deployment.md).
 
 ```ts
 import { validate } from "@dcl-regenesislabs/wearable-validator";
@@ -70,18 +56,15 @@ result.findings;  // every problem at once: message, where, measured vs limit, f
 ## Security regressions
 
 Run `npm run build -w @dcl-regenesislabs/wearable-validator`, then
-`node --import tsx --test packages/wearable-validator/test/security.test.ts packages/server/test/security.test.ts packages/web/test/security.test.ts`.
+`node --import tsx --test packages/wearable-validator/test/security.test.ts packages/web/test/security.test.ts`.
 The tests reproduce cyclic GLB hierarchies, PNG inflation beyond the declared
-scanlines, duplicate PNG headers, cross-origin reads of the local API, and ZIP
-extraction before validation. The cycle test runs in a subprocess with a deadline;
-the API test uses a temporary loopback server and fake rendering/review services.
+scanlines, duplicate PNG headers, and ZIP extraction before validation. The cycle
+test runs in a subprocess with a deadline.
 
 PNG pixel measurements ignore embedded color profiles and text and bound inflation
 by the image's scanline layout, including Adam7. `pako` is pinned to 2.2.0 so the
 streaming inflation and truncated-input behavior used by this guard stay stable.
-ZIP metadata and previews use the package's `unpackZip()` bounds. The API is
-same-origin: the website's Worker or Vite proxy forwards `/api`; direct browser
-requests from other origins are unsupported. Terminal clients remain supported.
+ZIP metadata and previews use the package's `unpackZip()` bounds.
 
 ## Browser content-integrity regression
 

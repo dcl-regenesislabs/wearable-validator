@@ -1,9 +1,9 @@
 import type { MouseEvent, ReactNode } from "react";
 import { details, docsUrl, explanations, sourceLinks, type CheckStatus, type Finding } from "@dcl-regenesislabs/wearable-validator";
 
-/** The words and small pieces every rule row shares — the code groups on Validate and the rendering rows of a run. */
+/** The words and small pieces every rule row shares. */
 
-export const STATUS_LABELS: Record<CheckStatus, string> = {
+const STATUS_LABELS: Record<CheckStatus, string> = {
   passed: "Passed",
   failed: "Needs fixing",
   warning: "Review",
@@ -23,7 +23,7 @@ export const RESULT_FILTERS: { key: string; label: string; statuses: CheckStatus
   { key: "unchecked", label: "Not checked", statuses: ["skipped"] }
 ];
 
-export const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
+const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /** A failing rule says how many problems it holds, so the list adds up to the verdict's totals. */
 export function statusLabel(status: CheckStatus, findings: Finding[]): string {
@@ -34,10 +34,10 @@ export function statusLabel(status: CheckStatus, findings: Finding[]): string {
 
 export const filterStatuses = (key: string): CheckStatus[] => (RESULT_FILTERS.find((option) => option.key === key) ?? RESULT_FILTERS[0]).statuses;
 
-export function StatusChip({ status, label, busy }: { status: CheckStatus; label?: string; busy?: boolean }) {
+export function StatusChip({ status, label }: { status: CheckStatus; label?: string }) {
   return (
     <span className={`eui-ds-chip ${CHIP_TONES[status]} status-chip`}>
-      {busy ? <Spinner size="xs" decorative /> : <span className="ico" aria-hidden="true">{GLYPHS[status]}</span>}
+      <span className="ico" aria-hidden="true">{GLYPHS[status]}</span>
       <span className="txt">{label ?? STATUS_LABELS[status]}</span>
     </span>
   );
@@ -135,18 +135,6 @@ export function Notice({ tone = "info", role, children }: { tone?: "info" | "att
   return (
     <div className={`eui-ds-notice${tone === "attention" ? " attention" : ""}`} role={role}>
       <div className="body">{children}</div>
-    </div>
-  );
-}
-
-/** dcl-editor StateBlock: a whole-surface state (empty history, a missing run). */
-export function StateBlock({ tone = "neutral", icon, headline, note, children }: { tone?: "neutral" | "success" | "error"; icon?: ReactNode; headline: string; note?: ReactNode; children?: ReactNode }) {
-  return (
-    <div className="eui-ds-state">
-      {icon !== undefined && <div className={`eui-ds-state-icon${tone === "neutral" ? "" : ` ${tone}`}`}>{icon}</div>}
-      <p className="eui-ds-state-t">{headline}</p>
-      {note !== undefined && <p className="eui-ds-state-note">{note}</p>}
-      {children}
     </div>
   );
 }

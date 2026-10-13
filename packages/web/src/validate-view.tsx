@@ -1,19 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { inputTooLarge, fetchCatalystItem, manifest, parseItemReference, validate, type ProgressEvent, type Result } from "@dcl-regenesislabs/wearable-validator";
-import { cancelRun, followRun, startRun, type RunInput } from "./api.js";
-import { formatBytes, inputKind, isGlb, isPng, itemBytes, reviewsOnArrival, zipRuleContext, type Loaded, type Sample } from "./item.js";
+import { formatBytes, inputKind, isGlb, isPng, itemBytes, zipRuleContext, type Loaded, type Sample } from "./item.js";
 import { Preview } from "./preview.js";
-import { EMPTY_VISUAL, codeSteps, isRunning, reduceVisual, type Step, type VisualEvent, type VisualState } from "./progress.js";
+import { codeSteps, type Step } from "./progress.js";
 import { CODE_CHECK_COUNT, Results } from "./results.js";
 import { Notice } from "./rules.js";
-import { isModifiedClick, type Route } from "./run-list.js";
-import type { Server } from "./server.js";
 import { Stepper } from "./stepper.js";
 
 /**
- * The Validate tab: the landing drop zone, the progress view while a file is read and its checks run, then the
- * results — rail (item, preview) and main (the shared Results: verdict, rule groups, the visual review of this
- * item). History lives on its own tab; nothing about other runs is shown here.
+ * The page: the landing drop zone, the progress view while a file is read and its checks run, then the results —
+ * rail (item, preview) and main (verdict, rule groups). Everything runs in the browser.
  */
 
 const CATEGORIES = Object.keys(manifest.triangles.perCategory).concat(manifest.facialCategories);
@@ -24,15 +20,15 @@ interface Reading {
 }
 
 export interface ValidateViewProps {
-  server: Server;
   /** `?urn=` of the URL: the catalyst item to show; null clears a shown one on back/forward. */
   urn: string | null;
   /** A file dropped anywhere on the page. */
   incoming: { file: File; seq: number } | null;
-  navigate: (patch: Partial<Route>) => void;
+  /** Puts the shown catalyst item in the URL, or clears it with null. */
+  navigate: (urn: string | null) => void;
 }
 
-export function ValidateView({ server, urn, incoming, navigate }: ValidateViewProps) {
+export function ValidateView({ urn, incoming, navigate }: ValidateViewProps) {
   const [filter, setFilter] = useState("all");
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [result, setResult] = useState<Result | null>(null);
@@ -50,8 +46,6 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
   const urnLoad = useRef(0);
   const loadedRef = useRef<Loaded | null>(null);
   loadedRef.current = loaded;
-  const resultRef = useRef<Result | null>(null);
-  resultRef.current = result;
 
   useEffect(() => {
     fetch("samples/index.json")
@@ -134,8 +128,8 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
           }
         });
         if (id !== loadSeq.current) return;
-        if (updateHistory) navigate({ tab: "validate", run: null, urn: item.urn });
-        await show({ name: item.name, isBareGlb: false, urn: item.urn, files: item.files, metadata: item.metadata, content: item.content, fromLink: !updateHistory });
+        if (updateHistory) navigate(item.urn);
+        await show({ name: item.name, isBareGlb: false, urn: item.urn, files: item.files, metadata: item.metadata, content: item.content });
       } catch (err) {
         if (id === loadSeq.current) fail(err);
       }
@@ -149,7 +143,7 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
       setNotice(null);
       setLoaded(null);
       setResult(null);
-      navigate({ tab: "validate", run: null, urn: null });
+      navigate(null);
       setReading({ label: `Downloading ${sample.name}`, detail: `${sample.label} sample` });
       try {
         const res = await fetch(`samples/${sample.file}`);
@@ -173,7 +167,7 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
       setNotice(null);
       setLoaded(null);
       setResult(null);
-      navigate({ tab: "validate", run: null, urn: null });
+      navigate(null);
       setReading({ label: `Reading ${file.name}`, detail: formatBytes(file.size) });
       try {
         if (file.size > manifest.fileSize.maxInputBytes) throw new Error(inputTooLarge(file.size));
@@ -203,7 +197,7 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
     setResult(null);
     setNotice(null);
     setReading(null);
-    navigate({ urn: null });
+    navigate(null);
   }, [navigate]);
 
   // the URL's catalyst item: load it on arrival and on back/forward; backing out of it clears the page
@@ -224,65 +218,6 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
     if (incoming) void onFile(incoming.file);
   }, [incoming]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── the visual review of this item ──────────────────────────────────────────
-  const [visual, setVisual] = useState<VisualState>(EMPTY_VISUAL);
-  const stopRef = useRef<(() => void) | null>(null);
-  // stopRef is null while an upload is in flight, so a newer item supersedes by sequence: the stale run is cancelled, not followed
-  const visualSeq = useRef(0);
-  const emit = useCallback((event: VisualEvent) => setVisual((state) => reduceVisual(state, event)), []);
-  const { refreshHealth, refreshRuns } = server;
-
-  const startVisual = useCallback(async () => {
-    const item = loadedRef.current;
-    if (!item || item.isBareGlb) return;
-    // a published item is sent as its URN: the server fetches it from the catalyst itself
-    const input: RunInput | null = item.urn ? { reference: item.urn } : item.bytes ? item.bytes : null;
-    if (!input) return;
-    const seq = ++visualSeq.current;
-    stopRef.current?.();
-    setVisual(reduceVisual(EMPTY_VISUAL, { type: "upload-started", reference: Boolean(item.urn) }));
-    try {
-      // the server may have been restarted with other flags since the page loaded
-      const health = await refreshHealth();
-      if (seq !== visualSeq.current) return;
-      if (!health) throw new Error("The run server is not reachable. Start it with npm run serve at the repo root.");
-      const { id } = await startRun(input, item.name, { model: true, standalone: resultRef.current?.passed !== true });
-      if (seq !== visualSeq.current) {
-        void cancelRun(id);
-        return;
-      }
-      emit({ type: "upload-finished", id });
-      stopRef.current = followRun(id, emit);
-      refreshRuns();
-    } catch (error) {
-      if (seq !== visualSeq.current) return;
-      emit({ type: "error", data: { message: error instanceof Error ? error.message : "Could not start the run." } });
-    }
-  }, [emit, refreshHealth, refreshRuns]);
-
-  const cancelVisual = useCallback(() => {
-    if (!visual.id) return;
-    emit({ type: "cancel-requested" });
-    void cancelRun(visual.id);
-  }, [emit, visual.id]);
-
-  const reviewable = Boolean(loaded && !loaded.isBareGlb && (loaded.bytes || loaded.urn));
-  // clean code checks: render and ask right away. Code errors: the creator has things to fix first, so nothing
-  // runs (no minute of screenshots nobody will use) until they press the button.
-  useEffect(() => {
-    visualSeq.current++;
-    stopRef.current?.();
-    stopRef.current = null;
-    setVisual(EMPTY_VISUAL);
-    if (server.known && reviewable && loaded && reviewsOnArrival(loaded, result?.passed)) void startVisual();
-  }, [server.known, reviewable, loaded, result, startVisual]);
-  useEffect(() => () => stopRef.current?.(), []);
-
-  // History mirrors the server: re-read it whenever this item's run changes state
-  useEffect(() => {
-    if (visual.phase !== "idle") refreshRuns();
-  }, [visual.phase, refreshRuns]);
-
   // ── derived ─────────────────────────────────────────────────────────────────
   const resolvedCategory = useMemo(() => {
     const meta = loaded?.metadata as { data?: { category?: string } } | undefined;
@@ -301,8 +236,6 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
       : { key: "read", label: `Reading ${loaded?.name ?? ""}`, state: "done", detail: loaded ? formatBytes(itemBytes(loaded)) : undefined };
     return [first, ...codeSteps(events, !running && result !== null)];
   }, [reading, loaded, events, running, result]);
-
-  const modelKnown = server.capabilities?.reviewer === "pi";
 
   const progressCard = (
     <section className="eui-panel progress-card">
@@ -337,8 +270,6 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
           samples={samples}
           onSample={onSample}
           onReference={onReference}
-          earlierRuns={server.runs.length}
-          onHistory={() => navigate({ tab: "history", run: null })}
           notice={noticeBlock}
         />
       )}
@@ -416,9 +347,6 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
               key={loaded.name + (loaded.bytes?.length ?? loaded.files?.size ?? 0)}
               scope="validate"
               result={result}
-              visual={visual}
-              aiChecks={server.aiChecks}
-              modelKnown={modelKnown}
               filter={filter}
               onFilter={setFilter}
               item={{
@@ -428,15 +356,10 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
                 hides
               }}
               bare={loaded.isBareGlb}
-              visualShown={reviewable && server.known}
-              onCancel={visual.id && isRunning(visual.phase) ? cancelVisual : undefined}
-              onRunAgain={() => void startVisual()}
-              gate={<GateRow passed={result.passed === true} onStart={() => void startVisual()} />}
               footer={
                 <footer className="foot">
                   Checks that don't apply to this item (wrong item type, or metadata a bare .glb can't carry) aren't shown — that's
-                  why fewer than {CODE_CHECK_COUNT} appear. Code checks never leave this page. The visual review, when a run server is
-                  connected, sends the zip (or the published item's URN) to it and streams the screenshots back.
+                  why fewer than {CODE_CHECK_COUNT} appear. Every check runs in your browser: your file never leaves this page.
                 </footer>
               }
             />
@@ -447,32 +370,16 @@ export function ValidateView({ server, urn, incoming, navigate }: ValidateViewPr
   );
 }
 
-/** The gate before a render: automatic after clean code checks, a deliberate button after failed ones. */
-function GateRow({ passed, onStart }: { passed: boolean; onStart: () => void }) {
-  return (
-    <div className="gate-row">
-      <button type="button" className="eui-ds-btn primary md" onClick={onStart}>{passed ? "Render and review" : "Render and review anyway"}</button>
-      <p className="gate-note">
-        {passed
-          ? "Renders the item on the run server and asks the model about the photos."
-          : "The code checks did not pass. Fix those first, or render the item and ask the model anyway (about a minute)."}
-      </p>
-    </div>
-  );
-}
-
 interface LandingProps {
   onFile: (file: File) => void;
   samples: Sample[];
   onSample: (sample: Sample) => void;
   onReference: (raw: string) => void;
-  earlierRuns: number;
-  onHistory: () => void;
   /** The last load's error, shown right under the drop zone the creator just used. */
   notice?: ReactNode;
 }
 
-function Landing({ onFile, samples, onSample, onReference, earlierRuns, onHistory, notice }: LandingProps) {
+function Landing({ onFile, samples, onSample, onReference, notice }: LandingProps) {
   const [reference, setReference] = useState("");
   return (
     <div className="landing">
@@ -492,7 +399,7 @@ function Landing({ onFile, samples, onSample, onReference, earlierRuns, onHistor
         <span className="pack">.glb model · .zip Builder export · or click to choose a file</span>
       </label>
       {notice}
-      <p className="landing-note">Code checks run in your browser and never leave this page. Only the visual review uploads the zip to the run server.</p>
+      <p className="landing-note">Every check runs in your browser: your file never leaves this page.</p>
       {samples.length > 0 && (
         <div className="samples">
           <span className="eui-home-flabel">Try a sample</span>
@@ -518,21 +425,6 @@ function Landing({ onFile, samples, onSample, onReference, earlierRuns, onHistor
           <button type="submit" className="eui-ds-btn secondary md">Load item</button>
         </div>
       </form>
-      {earlierRuns > 0 && (
-        <p className="landing-history">
-          {earlierRuns} earlier {earlierRuns === 1 ? "run" : "runs"} in{" "}
-          <a
-            href="/?tab=history"
-            onClick={(e) => {
-              if (isModifiedClick(e)) return;
-              e.preventDefault();
-              onHistory();
-            }}
-          >
-            History
-          </a>
-        </p>
-      )}
     </div>
   );
 }
